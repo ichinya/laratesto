@@ -1,0 +1,40 @@
+{
+    "name": "testo/bridge-laravel",
+    "description": "Laravel bridge for the Testo testing framework.",
+    "license": "BSD-3-Clause",
+    "type": "library",
+    "keywords": [
+        "testo",
+        "laravel",
+        "testing",
+        "test"
+    ],
+    "authors": [
+        {
+            "name": "Ichi",
+            "homepage": "https://github.com/ichinya"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "laravel/framework": "^11.0 || ^12.0 || ^13.0",
+        "testo/testo": "^0.10.2 || ^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Testo\\Bridge\\Laravel\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Testo\\Bridge\\Laravel\\Tests\\": "tests/",
+            "App\\": "tests/Fixture/laravel/app/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "scripts": {
+        "test": "testo run"
+    }
+}
