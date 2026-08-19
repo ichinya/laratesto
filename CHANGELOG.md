@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-08-19
+
+### Changed
+
+- Dependency constraints narrowed to the versions the bridge is actually
+  tested against: `php ^8.3`, `laravel/framework ^13.0`,
+  `testo/testo ^0.10.42` (1.x has no stable release yet).
+
 ## [0.1.0] - 2026-08-19
 
 First public release.
@@ -23,8 +31,5 @@ First public release.
   `#[DatabaseTransactions]` (transaction wrap with rollback) attributes.
 - Self-hosted test suite on a fixture Laravel application.
 
-### Requirements
-
-- PHP 8.3+, Laravel 13, Testo `^0.10.42`.
-
+[0.1.1]: https://github.com/ichinya/laratesto/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ichinya/laratesto/releases/tag/v0.1.0
