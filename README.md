@@ -17,9 +17,9 @@ The bridge is a standalone Composer package. It does not require any changes to 
 
 ## Requirements
 
-- PHP 8.2+
-- Laravel 11 / 12 / 13
-- Testo `^0.10.2 || ^1.0`
+- PHP 8.3+
+- Laravel 13
+- Testo `^0.10.42`
 
 ## Installation
 

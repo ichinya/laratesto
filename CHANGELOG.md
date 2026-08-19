@@ -23,4 +23,8 @@ First public release.
   `#[DatabaseTransactions]` (transaction wrap with rollback) attributes.
 - Self-hosted test suite on a fixture Laravel application.
 
+### Requirements
+
+- PHP 8.3+, Laravel 13, Testo `^0.10.42`.
+
 [0.1.0]: https://github.com/ichinya/laratesto/releases/tag/v0.1.0
