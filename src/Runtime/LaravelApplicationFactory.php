@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel\Runtime;
+namespace Laratesto\Runtime;
 
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Contracts\Foundation\Application;
-use Testo\Bridge\Laravel\Config\LaravelConfig;
+use Laratesto\Config\LaravelConfig;
 
 /**
  * Boots a Laravel application for every test.
@@ -68,7 +68,7 @@ final class LaravelApplicationFactory
      * The application booted for the currently running test.
      *
      * @throws \RuntimeException If no application is booted, e.g. a Laravel attribute
-     *         interceptor is used in a suite without the {@see \Testo\Bridge\Laravel\LaravelPlugin}.
+     *         interceptor is used in a suite without the {@see \Laratesto\LaravelPlugin}.
      */
     public function current(): Application
     {

@@ -4,6 +4,8 @@ Native [Testo](https://github.com/php-testo/testo) plugin that boots [Laravel](h
 
 The bridge is a standalone Composer package. It does not require any changes to Testo or to your application: it registers a `TestRunInterceptor` through the standard plugin API (the same mechanism `testo/bridge-mockery` uses).
 
+> The `testo` vendor namespace on Packagist belongs to the framework author, so this package is published as `ichinya/laratesto`. If the bridge is ever adopted upstream, it can move to `testo/bridge-laravel` following the ecosystem convention.
+
 ## Features
 
 - Boots the framework the same way `artisan` does: `bootstrap/app.php` + Console kernel bootstrap.
@@ -22,7 +24,7 @@ The bridge is a standalone Composer package. It does not require any changes to 
 ## Installation
 
 ```bash
-composer require --dev testo/bridge-laravel
+composer require --dev ichinya/laratesto
 ```
 
 Register the plugin for a suite in `testo.php`:
@@ -34,8 +36,8 @@ declare(strict_types=1);
 
 use Testo\Application\Config\ApplicationConfig;
 use Testo\Application\Config\SuiteConfig;
-use Testo\Bridge\Laravel\Config\LaravelConfig;
-use Testo\Bridge\Laravel\LaravelPlugin;
+use Laratesto\Config\LaravelConfig;
+use Laratesto\LaravelPlugin;
 use Testo\Convention\NamingConventionPlugin;
 
 return new ApplicationConfig(
@@ -73,7 +75,7 @@ vendor/bin/testo run --suite=Laravel
 ### Base class
 
 ```php
-use Testo\Bridge\Laravel\Testing\LaravelTestCase;
+use Laratesto\Testing\LaravelTestCase;
 
 final class UserControllerTest extends LaravelTestCase
 {
@@ -89,7 +91,7 @@ final class UserControllerTest extends LaravelTestCase
 ### Trait (no inheritance)
 
 ```php
-use Testo\Bridge\Laravel\Testing\InteractsWithLaravel;
+use Laratesto\Testing\InteractsWithLaravel;
 
 final class UserServiceTest
 {
@@ -132,8 +134,8 @@ function testResolvesUserService(): void
 ## Database attributes
 
 ```php
-use Testo\Bridge\Laravel\Attribute\DatabaseTransactions;
-use Testo\Bridge\Laravel\Attribute\RefreshDatabase;
+use Laratesto\Attribute\DatabaseTransactions;
+use Laratesto\Attribute\RefreshDatabase;
 
 final class BillingTest
 {

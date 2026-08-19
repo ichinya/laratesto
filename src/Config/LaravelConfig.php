@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel\Config;
+namespace Laratesto\Config;
 
 /**
  * Configuration for the Laravel bridge.

@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel\Tests\Unit;
+namespace Laratesto\Tests\Unit;
 
 use Symfony\Component\HttpFoundation\Response;
 use Testo\Assert;
-use Testo\Bridge\Laravel\Testing\LaravelResponse;
+use Laratesto\Testing\LaravelResponse;
 use Testo\Test;
 
 final class LaravelResponseTest

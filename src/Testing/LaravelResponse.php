@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel\Testing;
+namespace Laratesto\Testing;
 
 use Symfony\Component\HttpFoundation\Response;
 use Testo\Assert;

@@ -1,5 +1,5 @@
 {
-    "name": "testo/bridge-laravel",
+    "name": "ichinya/laratesto",
     "description": "Laravel bridge for the Testo testing framework.",
     "license": "BSD-3-Clause",
     "type": "library",
@@ -22,12 +22,12 @@
     },
     "autoload": {
         "psr-4": {
-            "Testo\\Bridge\\Laravel\\": "src/"
+            "Laratesto\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "Testo\\Bridge\\Laravel\\Tests\\": "tests/",
+            "Laratesto\\Tests\\": "tests/",
             "App\\": "tests/Fixture/laravel/app/"
         }
     },

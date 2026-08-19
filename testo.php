@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 use Testo\Application\Config\ApplicationConfig;
 use Testo\Application\Config\SuiteConfig;
-use Testo\Bridge\Laravel\Config\LaravelConfig;
-use Testo\Bridge\Laravel\LaravelPlugin;
+use Laratesto\Config\LaravelConfig;
+use Laratesto\LaravelPlugin;
 use Testo\Convention\NamingConventionPlugin;
 
 return new ApplicationConfig(

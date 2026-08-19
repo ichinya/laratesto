@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel;
+namespace Laratesto;
 
 use Internal\Container\Container;
-use Testo\Bridge\Laravel\Config\LaravelConfig;
-use Testo\Bridge\Laravel\Pipeline\LaravelTestInterceptor;
-use Testo\Bridge\Laravel\Runtime\LaravelApplicationFactory;
-use Testo\Bridge\Laravel\Runtime\LaravelStateCleaner;
+use Laratesto\Config\LaravelConfig;
+use Laratesto\Pipeline\LaravelTestInterceptor;
+use Laratesto\Runtime\LaravelApplicationFactory;
+use Laratesto\Runtime\LaravelStateCleaner;
 use Testo\Common\PluginConfigurator;
 use Testo\Pipeline\InterceptorCollector;
 

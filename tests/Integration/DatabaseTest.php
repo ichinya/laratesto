@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel\Tests\Integration;
+namespace Laratesto\Tests\Integration;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Testo\Assert;
-use Testo\Bridge\Laravel\Attribute\DatabaseTransactions;
-use Testo\Bridge\Laravel\Attribute\RefreshDatabase;
-use Testo\Bridge\Laravel\Testing\InteractsWithLaravel;
+use Laratesto\Attribute\DatabaseTransactions;
+use Laratesto\Attribute\RefreshDatabase;
+use Laratesto\Testing\InteractsWithLaravel;
 
 final class DatabaseTest
 {

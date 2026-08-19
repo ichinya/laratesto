@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel\Testing;
+namespace Laratesto\Testing;
 
 /**
  * Base class for Laravel tests running under Testo.

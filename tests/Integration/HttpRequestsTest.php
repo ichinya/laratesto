@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel\Tests\Integration;
+namespace Laratesto\Tests\Integration;
 
 use Testo\Assert;
-use Testo\Bridge\Laravel\Testing\LaravelTestCase;
+use Laratesto\Testing\LaravelTestCase;
 
 final class HttpRequestsTest extends LaravelTestCase
 {

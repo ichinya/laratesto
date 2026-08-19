@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel\Tests\Integration;
+namespace Laratesto\Tests\Integration;
 
 use Illuminate\Foundation\Application as FoundationApplication;
 use Testo\Assert;
-use Testo\Bridge\Laravel\Testing\InteractsWithLaravel;
+use Laratesto\Testing\InteractsWithLaravel;
 
 final class ApplicationBootsTest
 {

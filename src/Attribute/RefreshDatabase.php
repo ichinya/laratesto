@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel\Attribute;
+namespace Laratesto\Attribute;
 
-use Testo\Bridge\Laravel\Pipeline\RefreshDatabaseInterceptor;
+use Laratesto\Pipeline\RefreshDatabaseInterceptor;
 use Testo\Pipeline\Attribute\FallbackInterceptor;
 use Testo\Pipeline\Attribute\Interceptable;
 

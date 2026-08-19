@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel\Pipeline;
+namespace Laratesto\Pipeline;
 
-use Testo\Bridge\Laravel\Runtime\LaravelApplicationFactory;
-use Testo\Bridge\Laravel\Runtime\LaravelStateCleaner;
-use Testo\Bridge\Laravel\Testing\LaravelApplicationAware;
+use Laratesto\Runtime\LaravelApplicationFactory;
+use Laratesto\Runtime\LaravelStateCleaner;
+use Laratesto\Testing\LaravelApplicationAware;
 use Testo\Core\Context\TestInfo;
 use Testo\Core\Context\TestResult;
 use Testo\Pipeline\Attribute\InterceptorOptions;

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel\Testing;
+namespace Laratesto\Testing;
 
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Contracts\Foundation\Application;

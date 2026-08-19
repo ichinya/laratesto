@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel\Runtime;
+namespace Laratesto\Runtime;
 
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;

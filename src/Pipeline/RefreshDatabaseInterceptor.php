@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel\Pipeline;
+namespace Laratesto\Pipeline;
 
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
-use Testo\Bridge\Laravel\Attribute\RefreshDatabase;
-use Testo\Bridge\Laravel\Runtime\LaravelApplicationFactory;
+use Laratesto\Attribute\RefreshDatabase;
+use Laratesto\Runtime\LaravelApplicationFactory;
 use Testo\Core\Context\TestInfo;
 use Testo\Core\Context\TestResult;
 use Testo\Pipeline\Attribute\InterceptorOptions;

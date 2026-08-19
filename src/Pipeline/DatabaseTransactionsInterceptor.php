@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Testo\Bridge\Laravel\Pipeline;
+namespace Laratesto\Pipeline;
 
-use Testo\Bridge\Laravel\Attribute\DatabaseTransactions;
-use Testo\Bridge\Laravel\Runtime\LaravelApplicationFactory;
+use Laratesto\Attribute\DatabaseTransactions;
+use Laratesto\Runtime\LaravelApplicationFactory;
 use Testo\Core\Context\TestInfo;
 use Testo\Core\Context\TestResult;
 use Testo\Pipeline\Attribute\InterceptorOptions;
