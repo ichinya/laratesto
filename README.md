@@ -53,7 +53,7 @@ return new ApplicationConfig(
                 new NamingConventionPlugin(),
                 new LaravelPlugin(
                     new LaravelConfig(
-                        basePath: dirname(__DIR__),
+                        basePath: __DIR__,
                     ),
                 ),
             ],

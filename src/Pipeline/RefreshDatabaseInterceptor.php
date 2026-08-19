@@ -6,6 +6,7 @@ namespace Laratesto\Pipeline;
 
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Laratesto\Attribute\RefreshDatabase;
+use Laratesto\Pipeline\Internal\FailureResult;
 use Laratesto\Runtime\LaravelApplicationFactory;
 use Testo\Core\Context\TestInfo;
 use Testo\Core\Context\TestResult;
@@ -17,6 +18,9 @@ use Testo\Pipeline\Middleware\TestRunInterceptor;
  *
  * Ordered before {@see DatabaseTransactionsInterceptor}, so a test may combine
  * both attributes: fresh migrations first, then the wrapping transaction.
+ *
+ * Migration failures are returned as aborted test results carrying the original
+ * exception instead of being thrown (see {@see FailureResult} for why).
  *
  * @see RefreshDatabase
  *
@@ -32,6 +36,17 @@ final readonly class RefreshDatabaseInterceptor implements TestRunInterceptor
 
     #[\Override]
     public function runTest(TestInfo $info, callable $next): TestResult
+    {
+        try {
+            $this->migrateFresh();
+        } catch (\Throwable $failure) {
+            return FailureResult::aborted($info, $failure);
+        }
+
+        return $next($info);
+    }
+
+    private function migrateFresh(): void
     {
         $kernel = $this->factory->current()->make(ConsoleKernel::class);
 
@@ -50,7 +65,5 @@ final readonly class RefreshDatabaseInterceptor implements TestRunInterceptor
                 $kernel->output(),
             ));
         }
-
-        return $next($info);
     }
 }
