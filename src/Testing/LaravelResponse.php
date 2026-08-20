@@ -244,12 +244,22 @@ final readonly class LaravelResponse
 
         Assert::notNull($errors, 'Session is missing expected errors bag.');
 
+        // The errors bag may be a ViewErrorBag (validation redirect) or a flat
+        // array (inline flash). Normalise to a common interface.
         $bag = $errors instanceof \Illuminate\Support\ViewErrorBag
             ? $errors->getBag('default')
             : $errors;
 
+        $has = static function (string $field) use ($bag): bool {
+            if ($bag instanceof \Illuminate\Support\MessageBag || \method_exists($bag, 'has')) {
+                return $bag->has($field);
+            }
+
+            return \array_key_exists($field, $bag);
+        };
+
         foreach ((array) $keys as $key) {
-            Assert::true($bag->has($key), \sprintf('Session is missing error for field [%s].', $key));
+            Assert::true($has($key), \sprintf('Session is missing error for field [%s].', $key));
         }
 
         return $this;
