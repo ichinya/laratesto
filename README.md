@@ -17,6 +17,7 @@ The bridge is a standalone Composer package. It does not require any changes to 
 - `assertDatabaseHas`, `assertDatabaseMissing`, `assertDatabaseCount`.
 - `assertSessionHas`, `assertSessionMissing`, `assertSessionHasErrors`.
 - `assertExitCode` for Artisan commands.
+- `withoutMiddleware` (all or specific middleware classes).
 - Session cookies are automatically bridged across requests within the same test.
 - `#[RefreshDatabase]` and `#[DatabaseTransactions]` attributes.
 
@@ -195,6 +196,44 @@ Available via `LaravelTestCase` or the `InteractsWithLaravel` trait:
 `assertJson()`, `assertJsonPath()` (dot-path, closure support), `assertJsonStructure()` (`'*'` wildcard),
 `assertRedirect(?string $uri)`, `response()`.
 
+## Mockery
+
+For suites that need [Mockery](https://github.com/mockery/mockery), use the
+[`testo/bridge-mockery`](https://packagist.org/packages/testo/bridge-mockery)
+plugin: it calls `Mockery::close()` automatically after every test (verifying
+expectations and preventing state leaks), so no teardown boilerplate is needed.
+
+```bash
+composer require --dev mockery/mockery testo/bridge-mockery
+```
+
+```php
+use Testo\Bridge\Mockery\MockeryPlugin;
+
+new SuiteConfig(
+    name: 'Laravel',
+    location: ['tests/Feature'],
+    plugins: [
+        new NamingConventionPlugin(),
+        new MockeryPlugin(),
+        new LaravelPlugin(new LaravelConfig(basePath: __DIR__)),
+    ],
+);
+```
+
+This works with Laravel facade mocking too:
+
+```php
+use Illuminate\Support\Facades\Log;
+
+public function testLogsWarningOnFailure(): void
+{
+    Log::shouldReceive('warning')->once()->with('something went wrong');
+
+    // ... run the code under test ...
+}
+```
+
 ## How it works
 
 1. `LaravelTestInterceptor` runs before attribute interceptors for every test:
@@ -217,6 +256,21 @@ Available via `LaravelTestCase` or the `InteractsWithLaravel` trait:
   `TestCase` extends PHPUnit, and Laravel assertions (`Queue::assertPushed`, etc.)
   call PHPUnit under the hood. Tests must be written against Testo assertions
   (`Testo\Assert`) — hence the PHPUnit-free `LaravelResponse` wrapper.
+- **Facade fakes (`Queue::fake()`, `Event::fake()`, …) require `phpunit/phpunit`
+  as a library** if you need their `assert*` methods. The fake setup itself works
+  without PHPUnit — the facades resolve on the booted application with no bridge
+  involvement — but every official Laravel fake uses `PHPUnit\Framework\Assert`
+  internally. If your project already has `phpunit/phpunit` in `require-dev` (as
+  most do), the fakes work transparently. In a pure Testo project without PHPUnit,
+  the `assert*` methods on fakes will throw class-not-found errors.
+- **The following Laravel TestCase conveniences are not (yet) ported** and have
+  simple workarounds:
+  - `withoutExceptionHandling()` — set `APP_DEBUG=true` in `.env.testing` or
+    configure the exception handler directly.
+  - `withoutVite()` / `withoutMix()` — set `VITE_BYPASS=true` / `MIX_BYPASS=true`
+    in your environment, or configure the entry point resolution in the config.
+  - `$this->seed()` — call `Artisan::call('db:seed', ['--force' => true])`
+    or `DB::table(...)->insert(...)` directly.
 - Laravel keeps a lot of state in process-global statics, so a Laravel suite must
   run tests **sequentially**. Do not enable fiber-based concurrency for it.
 - `PluginConfigurator::configure()` currently receives Testo's internal container

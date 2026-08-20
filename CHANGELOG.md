@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-08-19
+
+### Added
+
+- `withoutMiddleware()` on `InteractsWithLaravel` / `LaravelTestCase` — disables
+  all middleware or specific classes, matching Laravel's helper.
+- Mockery integration: `testo/bridge-mockery` is now exercised by the test suite
+  (facade mocking + container reset between tests) and documented in the README.
+- README documents the honest picture of facade fakes: setup works without
+  PHPUnit, but their `assert*` methods require `phpunit/phpunit` as a library,
+  plus workarounds for `withoutExceptionHandling`, `withoutVite`/`withoutMix`
+  and `$this->seed()`.
+
 ## [0.3.0] - 2026-08-19
 
 ### Added
@@ -83,6 +96,7 @@ First public release.
   `#[DatabaseTransactions]` (transaction wrap with rollback) attributes.
 - Self-hosted test suite on a fixture Laravel application.
 
+[0.4.0]: https://github.com/ichinya/laratesto/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ichinya/laratesto/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ichinya/laratesto/releases/tag/v0.2.0
 [0.1.2]: https://github.com/ichinya/laratesto/releases/tag/v0.1.2

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Middleware\SmokeGuard;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -23,4 +24,8 @@ Route::post('/session/flash', static function (Request $request) {
 
 Route::middleware('auth')->get('/auth/me', static function () {
     return response()->json(['id' => auth()->id()]);
+});
+
+Route::middleware(SmokeGuard::class)->get('/guarded', static function () {
+    return response()->json(['passed' => true]);
 });

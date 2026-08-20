@@ -20,6 +20,9 @@
         "laravel/framework": "^13.0",
         "testo/testo": "^0.10.42"
     },
+    "require-dev": {
+        "testo/bridge-mockery": "^0.1.0"
+    },
     "autoload": {
         "psr-4": {
             "Laratesto\\": "src/"

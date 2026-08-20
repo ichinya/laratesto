@@ -136,6 +136,36 @@ trait InteractsWithLaravel
         return $this->app()->make(ConsoleKernel::class)->call($command, $parameters);
     }
 
+    /**
+     * Disable middleware for subsequent HTTP requests.
+     *
+     * With no arguments, all middleware is disabled. With class names, those
+     * middleware are replaced by a pass-through handler, matching Laravel's
+     * `withoutMiddleware`.
+     *
+     * @param non-empty-string|list<non-empty-string>|null $middleware
+     */
+    protected function withoutMiddleware(string|array|null $middleware = null): static
+    {
+        if ($middleware === null) {
+            $this->app()->instance('middleware.disable', true);
+
+            return $this;
+        }
+
+        foreach ((array) $middleware as $abstract) {
+            $this->app()->instance($abstract, new class
+            {
+                public function handle($request, $next)
+                {
+                    return $next($request);
+                }
+            });
+        }
+
+        return $this;
+    }
+
     // ---- Authentication helpers ----
 
     /**

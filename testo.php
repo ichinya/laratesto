@@ -2,10 +2,11 @@
 
 declare(strict_types=1);
 
-use Testo\Application\Config\ApplicationConfig;
-use Testo\Application\Config\SuiteConfig;
 use Laratesto\Config\LaravelConfig;
 use Laratesto\LaravelPlugin;
+use Testo\Application\Config\ApplicationConfig;
+use Testo\Application\Config\SuiteConfig;
+use Testo\Bridge\Mockery\MockeryPlugin;
 use Testo\Convention\NamingConventionPlugin;
 
 return new ApplicationConfig(
@@ -19,6 +20,7 @@ return new ApplicationConfig(
             location: ['tests/Integration'],
             plugins: [
                 new NamingConventionPlugin(),
+                new MockeryPlugin(),
                 new LaravelPlugin(
                     new LaravelConfig(
                         basePath: __DIR__ . \DIRECTORY_SEPARATOR . 'tests' . \DIRECTORY_SEPARATOR . 'Fixture' . \DIRECTORY_SEPARATOR . 'laravel',
