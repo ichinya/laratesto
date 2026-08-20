@@ -276,6 +276,26 @@ final readonly class LaravelResponse
         return $this->assertStatus(422);
     }
 
+    public function assertTooManyRequests(): static
+    {
+        return $this->assertStatus(429);
+    }
+
+    public function assertServiceUnavailable(): static
+    {
+        return $this->assertStatus(503);
+    }
+
+    /**
+     * Assert that the response body exactly matches the given content.
+     */
+    public function assertContent(string $content): static
+    {
+        Assert::same($this->body(), $content, 'The response body does not match the expected content.');
+
+        return $this;
+    }
+
     /**
      * Recursive key-structure check, ported from
      * `Illuminate\Testing\AssertableJsonString::assertStructure()`.

@@ -28,12 +28,30 @@ trait InteractsWithLaravel
     /** @var array<non-empty-string, string> Cookies collected from previous responses, keyed by name. */
     private array $cookies = [];
 
+    /** @var array<non-empty-string, string> Default headers applied to every request. */
+    private array $defaultHeaders = [];
+
     /**
      * @internal Called by the bridge, not by user code.
      */
     public function setLaravelApplication(Application $application): void
     {
         $this->laravelApplication = $application;
+        $this->cookies = [];
+        $this->defaultHeaders = [];
+
+        $this->setUpLaravel();
+    }
+
+    /**
+     * Hook for subclasses: runs after the Laravel application is booted and
+     * injected, before the test method. Mirrors the setup phase of Laravel's
+     * PHPUnit TestCase — per-test state should be initialized here (the test
+     * case instance is reused across test methods by Testo).
+     */
+    protected function setUpLaravel(): void
+    {
+        // No-op by default.
     }
 
     /**
@@ -59,11 +77,47 @@ trait InteractsWithLaravel
     // ---- HTTP request helpers (with automatic cookie bridge) ----
 
     /**
+     * Merge headers into the defaults applied to every request.
+     *
+     * @param array<non-empty-string, string> $headers
+     */
+    protected function withHeaders(array $headers): static
+    {
+        $this->defaultHeaders = \array_merge($this->defaultHeaders, $headers);
+
+        return $this;
+    }
+
+    /**
+     * Set the bearer token for subsequent requests.
+     */
+    protected function withToken(string $token, string $type = 'Bearer'): static
+    {
+        $this->defaultHeaders['Authorization'] = $type . ' ' . $token;
+
+        return $this;
+    }
+
+    /**
      * Send a GET request through the HTTP kernel.
      */
     protected function get(string $uri, array $headers = []): LaravelResponse
     {
         return $this->sendRequest(Request::METHOD_GET, $uri, headers: $headers);
+    }
+
+    /**
+     * Send a GET request expecting a JSON response.
+     */
+    protected function getJson(string $uri, array $headers = []): LaravelResponse
+    {
+        return $this->sendRequest(
+            method: Request::METHOD_GET,
+            uri: $uri,
+            headers: $headers + [
+                'ACCEPT' => 'application/json',
+            ],
+        );
     }
 
     /**
@@ -74,6 +128,36 @@ trait InteractsWithLaravel
     protected function post(string $uri, array $parameters = [], array $headers = []): LaravelResponse
     {
         return $this->sendRequest(Request::METHOD_POST, $uri, $parameters, $headers);
+    }
+
+    /**
+     * Send a PUT request with form parameters.
+     *
+     * @param array<array-key, mixed> $parameters
+     */
+    protected function put(string $uri, array $parameters = [], array $headers = []): LaravelResponse
+    {
+        return $this->sendRequest(Request::METHOD_PUT, $uri, $parameters, $headers);
+    }
+
+    /**
+     * Send a PATCH request with form parameters.
+     *
+     * @param array<array-key, mixed> $parameters
+     */
+    protected function patch(string $uri, array $parameters = [], array $headers = []): LaravelResponse
+    {
+        return $this->sendRequest(Request::METHOD_PATCH, $uri, $parameters, $headers);
+    }
+
+    /**
+     * Send a DELETE request.
+     *
+     * @param array<array-key, mixed> $parameters
+     */
+    protected function delete(string $uri, array $parameters = [], array $headers = []): LaravelResponse
+    {
+        return $this->sendRequest(Request::METHOD_DELETE, $uri, $parameters, $headers);
     }
 
     /**
@@ -107,6 +191,8 @@ trait InteractsWithLaravel
         ?string $content = null,
     ): LaravelResponse {
         $kernel = $this->app()->make(HttpKernel::class);
+
+        $headers = \array_merge($this->defaultHeaders, $headers);
 
         $request = Request::create(
             uri: $uri,
