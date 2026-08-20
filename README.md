@@ -13,6 +13,11 @@ The bridge is a standalone Composer package. It does not require any changes to 
 - `.env.testing` support via the standard `APP_ENV` mechanism.
 - Service container, facades, global `app()` helper, Artisan.
 - HTTP requests through the HTTP kernel (`get`, `post`, `postJson`, …) with a Testo-native `LaravelResponse` wrapper (`assertOk`, `assertStatus`, `assertJson`, … — no PHPUnit).
+- `actingAs`, `actingAsGuest`, `assertAuthenticated`, `assertGuest`, `assertAuthenticatedAs`.
+- `assertDatabaseHas`, `assertDatabaseMissing`, `assertDatabaseCount`.
+- `assertSessionHas`, `assertSessionMissing`, `assertSessionHasErrors`.
+- `assertExitCode` for Artisan commands.
+- Session cookies are automatically bridged across requests within the same test.
 - `#[RefreshDatabase]` and `#[DatabaseTransactions]` attributes.
 
 ## Requirements
@@ -164,6 +169,23 @@ Available via `LaravelTestCase` or the `InteractsWithLaravel` trait:
 | `$this->postJson($uri, $payload, $headers)`         | POST with a JSON body.                   |
 | `$this->sendRequest($method, $uri, ...)`            | Arbitrary method.                        |
 | `$this->artisan($command, $parameters)`             | Run an Artisan command, returns exit code. |
+| **Authentication**                                  |                                          |
+| `$this->actingAs($user, $guard)`                    | Set the authenticated user on the guard. |
+| `$this->actingAsGuest($guard)`                      | Clear the authenticated user.            |
+| `$this->assertAuthenticated($guard)`                | Assert the user is authenticated.        |
+| `$this->assertGuest($guard)`                        | Assert the user is not authenticated.    |
+| `$this->assertAuthenticatedAs($user, $guard)`       | Assert the current user is the given one.|
+| **Database**                                        |                                          |
+| `$this->assertDatabaseHas($table, $data, $conn)`    | Assert a row exists.                     |
+| `$this->assertDatabaseMissing($table, $data, $conn)`| Assert a row does not exist.             |
+| `$this->assertDatabaseCount($table, $count, $conn)` | Assert the row count.                    |
+| **Session**                                         |                                          |
+| `$this->assertSessionHas($key, $value)`             | Assert a session key exists (and value). |
+| `$this->assertSessionMissing($key)`                 | Assert a session key is absent.          |
+| `$this->assertSessionHasErrors(array $fields)`      | Assert validation errors.                |
+| `$this->session()`                                  | The session store.                       |
+| **Artisan**                                         |                                          |
+| `$this->assertExitCode($code, $command, $params)`   | Assert an Artisan command exit code.     |
 
 `LaravelResponse` methods: `status()`, `header()`, `headers()`, `body()`, `json()`, `assertOk()`, `assertStatus()`, `assertHeader()`, `assertJson()`, `assertSee()`, `response()`.
 
@@ -176,9 +198,12 @@ Available via `LaravelTestCase` or the `InteractsWithLaravel` trait:
    or the `InteractsWithLaravel` trait.
 3. After the test — in a `finally` block — database connections are closed, the
    container is flushed, facades are cleared and the static-state resets from the
-   framework's own test teardown (`tearDownTheTestEnvironment`) are applied.
+   framework's own test teardown are applied.
 4. A new application instance is created for every test, which is what makes the
    cleanup sufficient: container-level state dies with the old application.
+5. Session cookies collected from each response are automatically bridged to the
+   next request inside the same test, so multi-step flows (login → redirect →
+   follow-up) work out of the box.
 
 ## Limitations
 

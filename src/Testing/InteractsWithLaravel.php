@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace Laratesto\Testing;
 
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Auth\Guard;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\Request;
+use Testo\Assert;
 
 /**
  * Interaction helpers for tests that run inside a booted Laravel application.
@@ -21,6 +24,9 @@ use Illuminate\Http\Request;
 trait InteractsWithLaravel
 {
     private ?Application $laravelApplication = null;
+
+    /** @var array<non-empty-string, string> Cookies collected from previous responses, keyed by name. */
+    private array $cookies = [];
 
     /**
      * @internal Called by the bridge, not by user code.
@@ -49,6 +55,8 @@ trait InteractsWithLaravel
     {
         return $this->app()->make($abstract);
     }
+
+    // ---- HTTP request helpers (with automatic cookie bridge) ----
 
     /**
      * Send a GET request through the HTTP kernel.
@@ -104,7 +112,7 @@ trait InteractsWithLaravel
             uri: $uri,
             method: $method,
             parameters: $parameters,
-            cookies: [],
+            cookies: $this->cookies,
             files: [],
             server: self::prepareServer($headers),
             content: $content,
@@ -112,6 +120,8 @@ trait InteractsWithLaravel
 
         $response = $kernel->handle($request);
         $kernel->terminate($request, $response);
+
+        $this->captureCookies($response);
 
         return new LaravelResponse($response);
     }
@@ -124,6 +134,233 @@ trait InteractsWithLaravel
     protected function artisan(string $command, array $parameters = []): int
     {
         return $this->app()->make(ConsoleKernel::class)->call($command, $parameters);
+    }
+
+    // ---- Authentication helpers ----
+
+    /**
+     * Set the currently logged-in user without a session.
+     *
+     * The user is set on the guard directly, so it persists across all
+     * subsequent HTTP requests in the same test, regardless of session cookies.
+     */
+    protected function actingAs(Authenticatable $user, ?string $guard = null): static
+    {
+        $this->guard($guard)->setUser($user);
+        $this->app()['auth']->shouldUse($guard ?? 'web');
+
+        return $this;
+    }
+
+    /**
+     * Clear the authenticated user on the given guard.
+     */
+    protected function actingAsGuest(?string $guard = null): static
+    {
+        $this->guard($guard)->forgetUser();
+
+        return $this;
+    }
+
+    /**
+     * Assert that the user is authenticated.
+     */
+    protected function assertAuthenticated(?string $guard = null): static
+    {
+        Assert::true($this->guard($guard)->check(), 'The user is not authenticated.');
+
+        return $this;
+    }
+
+    /**
+     * Assert that the user is not authenticated.
+     */
+    protected function assertGuest(?string $guard = null): static
+    {
+        Assert::false($this->guard($guard)->check(), 'The user is authenticated.');
+
+        return $this;
+    }
+
+    /**
+     * Assert that the user is authenticated as the given user.
+     */
+    protected function assertAuthenticatedAs(Authenticatable $user, ?string $guard = null): static
+    {
+        $expected = $this->guard($guard)->user();
+
+        Assert::notNull($expected, 'The current user is not authenticated.');
+        Assert::same($expected->getAuthIdentifier(), $user->getAuthIdentifier(), 'The currently authenticated user is not who was expected.');
+
+        return $this;
+    }
+
+    // ---- Database assertions ----
+
+    /**
+     * Assert that a table contains a row matching the given data.
+     *
+     * @param array<string, mixed> $data
+     */
+    protected function assertDatabaseHas(string $table, array $data, ?string $connection = null): static
+    {
+        Assert::true($this->table($table, $connection)->where($data)->exists(), \sprintf(
+            'Failed asserting that the table [%s] contains a row matching %s.',
+            $table,
+            \json_encode($data, \JSON_THROW_ON_ERROR),
+        ));
+
+        return $this;
+    }
+
+    /**
+     * Assert that a table does not contain a row matching the given data.
+     *
+     * @param array<string, mixed> $data
+     */
+    protected function assertDatabaseMissing(string $table, array $data, ?string $connection = null): static
+    {
+        Assert::false($this->table($table, $connection)->where($data)->exists(), \sprintf(
+            'Failed asserting that the table [%s] does not contain a row matching %s.',
+            $table,
+            \json_encode($data, \JSON_THROW_ON_ERROR),
+        ));
+
+        return $this;
+    }
+
+    /**
+     * Assert the count of rows in a table.
+     */
+    protected function assertDatabaseCount(string $table, int $count, ?string $connection = null): static
+    {
+        $actual = $this->table($table, $connection)->count();
+        Assert::same($actual, $count, \sprintf(
+            'Failed asserting that the table [%s] has %d rows. Found %d.',
+            $table,
+            $count,
+            $actual,
+        ));
+
+        return $this;
+    }
+
+    // ---- Session assertions ----
+
+    /**
+     * Assert that the session has a given value.
+     */
+    protected function assertSessionHas(string $key, mixed $value = null): static
+    {
+        $session = $this->session();
+
+        Assert::true($session->has($key), \sprintf('Session is missing expected key [%s].', $key));
+
+        if ($value !== null) {
+            Assert::same($session->get($key), $value, \sprintf(
+                'Session key [%s] has value [%s] instead of expected [%s].',
+                $key,
+                \is_scalar($session->get($key)) ? (string) $session->get($key) : \json_encode($session->get($key)),
+                \is_scalar($value) ? (string) $value : \json_encode($value),
+            ));
+        }
+
+        return $this;
+    }
+
+    /**
+     * Assert that the session is missing a given key.
+     */
+    protected function assertSessionMissing(string $key): static
+    {
+        Assert::false($this->session()->has($key), \sprintf('Session has unexpected key [%s].', $key));
+
+        return $this;
+    }
+
+    /**
+     * Assert that the session has validation errors for the given keys.
+     *
+     * @param array<non-empty-string>|list<non-empty-string> $keys Field names.
+     *        String keys are treated as field => format; integer keys as field => any.
+     */
+    protected function assertSessionHasErrors(array $keys = []): static
+    {
+        $errors = $this->session()->get('errors');
+
+        Assert::notNull($errors, 'Session is missing expected errors bag.');
+
+        $bag = $errors instanceof \Illuminate\Support\ViewErrorBag
+            ? $errors->getBag('default')
+            : $errors;
+
+        foreach ($keys as $key => $field) {
+            if (\is_int($key)) {
+                Assert::true($bag->has($field), \sprintf('Session is missing error for field [%s].', $field));
+            } else {
+                Assert::true($bag->has($key), \sprintf('Session is missing error for field [%s].', $key));
+            }
+        }
+
+        return $this;
+    }
+
+    // ---- Artisan assertion ----
+
+    /**
+     * Assert that an Artisan command exits with the given code.
+     *
+     * @param array<array-key, string|bool|int> $parameters
+     */
+    protected function assertExitCode(int $code, string $command, array $parameters = []): static
+    {
+        $actual = $this->artisan($command, $parameters);
+
+        Assert::same($actual, $code, \sprintf(
+            'Expected exit code %d from [artisan %s], got %d.',
+            $code,
+            $command,
+            $actual,
+        ));
+
+        return $this;
+    }
+
+    // ---- Internal helpers ----
+
+    /**
+     * Get the current session store from the booted application.
+     */
+    protected function session(): \Illuminate\Contracts\Session\Session
+    {
+        $session = $this->app()->make('session.store');
+
+        if (!$session->isStarted()) {
+            $session->start();
+        }
+
+        return $session;
+    }
+
+    private function guard(?string $name = null): Guard
+    {
+        return $this->app()->make('auth')->guard($name);
+    }
+
+    private function table(string $table, ?string $connection = null): \Illuminate\Database\Query\Builder
+    {
+        return $this->app()->make('db')->connection($connection)->table($table);
+    }
+
+    /**
+     * Collect Set-Cookie header values from the response so subsequent
+     * requests in the same test preserve the session.
+     */
+    private function captureCookies(\Symfony\Component\HttpFoundation\Response $response): void
+    {
+        foreach ($response->headers->getCookies() as $cookie) {
+            $this->cookies[$cookie->getName()] = $cookie->getValue();
+        }
     }
 
     /**

@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-08-19
+
+### Added
+
+- Authentication helpers on `InteractsWithLaravel` / `LaravelTestCase`:
+  `actingAs`, `actingAsGuest`, `assertAuthenticated`, `assertGuest`,
+  `assertAuthenticatedAs`.
+- Database assertions: `assertDatabaseHas`, `assertDatabaseMissing`,
+  `assertDatabaseCount` (optionally per-connection).
+- Session assertions: `assertSessionHas`, `assertSessionMissing`,
+  `assertSessionHasErrors`, plus a `session()` accessor.
+- `assertExitCode` for Artisan commands.
+- Automatic cookie bridging between requests within one test: `Set-Cookie`
+  headers from each response are carried into the next request, so session-based
+  flows (login → redirect → follow-up) work out of the box.
+- Fixture application now ships session/auth configuration, web routes and an
+  in-memory `UserProvider`, exercised by the new integration tests.
+
 ## [0.1.2] - 2026-08-19
 
 ### Fixed
@@ -47,6 +65,7 @@ First public release.
   `#[DatabaseTransactions]` (transaction wrap with rollback) attributes.
 - Self-hosted test suite on a fixture Laravel application.
 
+[0.2.0]: https://github.com/ichinya/laratesto/releases/tag/v0.2.0
 [0.1.2]: https://github.com/ichinya/laratesto/releases/tag/v0.1.2
 [0.1.1]: https://github.com/ichinya/laratesto/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ichinya/laratesto/releases/tag/v0.1.0
