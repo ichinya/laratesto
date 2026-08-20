@@ -251,11 +251,11 @@ final readonly class LaravelResponse
             : $errors;
 
         $has = static function (string $field) use ($bag): bool {
-            if ($bag instanceof \Illuminate\Support\MessageBag || \method_exists($bag, 'has')) {
+            if (\is_object($bag) && \method_exists($bag, 'has')) {
                 return $bag->has($field);
             }
 
-            return \array_key_exists($field, $bag);
+            return \is_array($bag) && \array_key_exists($field, $bag);
         };
 
         foreach ((array) $keys as $key) {
