@@ -231,13 +231,17 @@ trait InteractsWithLaravel
     }
 
     /**
-     * Run an Artisan command and return its exit code.
+     * Run an Artisan command and return a testable result.
      *
      * @param array<array-key, string|bool|int> $parameters
      */
-    protected function artisan(string $command, array $parameters = []): int
+    protected function artisan(string $command, array $parameters = []): PendingArtisanCommand
     {
-        return $this->app()->make(ConsoleKernel::class)->call($command, $parameters);
+        return new PendingArtisanCommand(
+            kernel: $this->app()->make(ConsoleKernel::class),
+            command: $command,
+            parameters: $parameters,
+        );
     }
 
     /**
@@ -448,14 +452,7 @@ trait InteractsWithLaravel
      */
     protected function assertExitCode(int $code, string $command, array $parameters = []): static
     {
-        $actual = $this->artisan($command, $parameters);
-
-        Assert::same($actual, $code, \sprintf(
-            'Expected exit code %d from [artisan %s], got %d.',
-            $code,
-            $command,
-            $actual,
-        ));
+        $this->artisan($command, $parameters)->assertExitCode($code);
 
         return $this;
     }

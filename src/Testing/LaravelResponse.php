@@ -227,6 +227,24 @@ final readonly class LaravelResponse
     }
 
     /**
+     * Assert that the JSON at the given dot-path does not exist.
+     *
+     * @param non-empty-string $path
+     */
+    public function assertJsonMissingPath(string $path): static
+    {
+        $value = \data_get($this->json(), $path);
+        $exists = \count(\array_filter(\explode('.', $path))) > 0 && $value !== null && $value !== '__laravel_missing__';
+
+        Assert::false(
+            $exists,
+            \sprintf('The JSON at path "%s" exists: %s.', $path, self::describe($value)),
+        );
+
+        return $this;
+    }
+
+    /**
      * Assert that the response JSON has the expected key structure.
      *
      * Supports the `'*'` wildcard to assert the structure of every element in a list:

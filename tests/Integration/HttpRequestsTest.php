@@ -44,6 +44,6 @@ final class HttpRequestsTest extends LaravelTestCase
 
     public function testArtisanCommandsAreExecutable(): void
     {
-        Assert::same($this->artisan('route:list'), 0);
+        $this->artisan('route:list')->assertExitCode(0);
     }
 }
