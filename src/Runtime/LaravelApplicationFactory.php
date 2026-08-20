@@ -61,6 +61,15 @@ final class LaravelApplicationFactory
             $application['config']->set($key, $value);
         }
 
+        // Bind a default request derived from the configured app URL so that
+        // URL generation before any HTTP request (e.g. `route()` in a test
+        // body) is consistent with URLs generated during requests. Mirrors
+        // how Laravel's own test environment behaves.
+        $application->instance(
+            'request',
+            \Illuminate\Http\Request::create($application['config']->get('app.url', 'http://localhost')),
+        );
+
         return $this->application = $application;
     }
 
