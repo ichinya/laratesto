@@ -240,7 +240,13 @@ final readonly class LaravelResponse
      */
     public function assertSessionHasErrors(string|array $keys = []): static
     {
-        $errors = app('session.store')->get('errors');
+        $store = app('session.store');
+
+        if (!$store->isStarted()) {
+            $store->start();
+        }
+
+        $errors = $store->get('errors');
 
         Assert::notNull($errors, 'Session is missing expected errors bag.');
 
