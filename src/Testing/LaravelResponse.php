@@ -232,6 +232,30 @@ final readonly class LaravelResponse
     }
 
     /**
+     * Assert that the response has validation errors for the given field names.
+     *
+     * Mirrors `TestResponse::assertSessionHasErrors` (reads the session store).
+     *
+     * @param non-empty-string|list<non-empty-string> $keys
+     */
+    public function assertSessionHasErrors(string|array $keys = []): static
+    {
+        $errors = app('session.store')->get('errors');
+
+        Assert::notNull($errors, 'Session is missing expected errors bag.');
+
+        $bag = $errors instanceof \Illuminate\Support\ViewErrorBag
+            ? $errors->getBag('default')
+            : $errors;
+
+        foreach ((array) $keys as $key) {
+            Assert::true($bag->has($key), \sprintf('Session is missing error for field [%s].', $key));
+        }
+
+        return $this;
+    }
+
+    /**
      * Assert that the JSON at the given dot-path does not exist.
      *
      * @param non-empty-string $path
