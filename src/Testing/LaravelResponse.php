@@ -54,12 +54,15 @@ final readonly class LaravelResponse
     /**
      * Decode a JSON response body into an array.
      *
+     * Optionally extract a nested value by dot-path, matching Laravel's
+     * `TestResponse::json($key)`.
+     *
      * @throws \RuntimeException If the body is not valid JSON.
      */
-    public function json(): mixed
+    public function json(?string $key = null): mixed
     {
         try {
-            return \json_decode($this->body(), true, 512, \JSON_THROW_ON_ERROR);
+            $decoded = \json_decode($this->body(), true, 512, \JSON_THROW_ON_ERROR);
         } catch (\JsonException $e) {
             throw new \RuntimeException(\sprintf(
                 'The response is not valid JSON: %s. Body: "%s".',
@@ -67,6 +70,8 @@ final readonly class LaravelResponse
                 \mb_substr($this->body(), 0, 255),
             ), previous: $e);
         }
+
+        return $key !== null ? \data_get($decoded, $key) : $decoded;
     }
 
     public function assertOk(): static

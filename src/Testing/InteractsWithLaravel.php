@@ -81,6 +81,16 @@ trait InteractsWithLaravel
     // ---- HTTP request helpers (with automatic cookie bridge) ----
 
     /**
+     * Set a single default header for subsequent requests.
+     */
+    protected function withHeader(string $name, string $value): static
+    {
+        $this->defaultHeaders[$name] = $value;
+
+        return $this;
+    }
+
+    /**
      * Merge headers into the defaults applied to every request.
      *
      * @param array<non-empty-string, string> $headers
@@ -110,6 +120,16 @@ trait InteractsWithLaravel
     protected function withServerVariables(array $server): static
     {
         $this->serverVariables = \array_merge($this->serverVariables, $server);
+
+        return $this;
+    }
+
+    /**
+     * Set the referer URL for the next request (for redirect-back tests).
+     */
+    protected function from(string $url): static
+    {
+        $this->defaultHeaders['Referer'] = $url;
 
         return $this;
     }
