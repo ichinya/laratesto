@@ -242,6 +242,19 @@ trait InteractsWithLaravel
             content: $content,
         );
 
+        // For relative URIs, force the Host header from the configured app URL
+        // so URL generation stays consistent with redirects (Laravel's own
+        // test requests carry the app URL host).
+        if (!\str_starts_with($uri, 'http://') && !\str_starts_with($uri, 'https://')) {
+            $appUrl = (string) $this->app()['config']->get('app.url', 'http://localhost');
+            $host = (string) \parse_url($appUrl, \PHP_URL_HOST);
+            $port = \parse_url($appUrl, \PHP_URL_PORT);
+
+            if ($host !== '') {
+                $request->headers->set('HOST', $port !== null && $port !== false ? $host . ':' . $port : $host);
+            }
+        }
+
         $response = $kernel->handle($request);
         $kernel->terminate($request, $response);
 
