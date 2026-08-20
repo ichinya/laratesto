@@ -119,10 +119,12 @@ final readonly class LaravelResponse
         return $this;
     }
 
-    public function assertSee(string $needle): static
+    public function assertSee(string $needle, bool $escape = true): static
     {
+        $value = $escape ? \htmlspecialchars($needle, \ENT_QUOTES | \ENT_SUBSTITUTE, 'UTF-8', false) : $needle;
+
         Assert::true(
-            \str_contains($this->body(), $needle),
+            \str_contains($this->body(), $value),
             \sprintf('The response body does not contain "%s".', $needle),
         );
 
@@ -134,11 +136,13 @@ final readonly class LaravelResponse
      *
      * @param non-empty-string|list<non-empty-string> $text
      */
-    public function assertDontSee(string|array $text): static
+    public function assertDontSee(string|array $text, bool $escape = true): static
     {
         foreach (\is_array($text) ? $text : [$text] as $needle) {
+            $value = $escape ? \htmlspecialchars($needle, \ENT_QUOTES | \ENT_SUBSTITUTE, 'UTF-8', false) : $needle;
+
             Assert::false(
-                \str_contains($this->body(), $needle),
+                \str_contains($this->body(), $value),
                 \sprintf('The response body contains "%s".', $needle),
             );
         }

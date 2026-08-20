@@ -31,6 +31,9 @@ trait InteractsWithLaravel
     /** @var array<non-empty-string, string> Default headers applied to every request. */
     private array $defaultHeaders = [];
 
+    /** @var array<non-empty-string, string> Server variables applied to every request. */
+    private array $serverVariables = [];
+
     /**
      * @internal Called by the bridge, not by user code.
      */
@@ -39,6 +42,7 @@ trait InteractsWithLaravel
         $this->laravelApplication = $application;
         $this->cookies = [];
         $this->defaultHeaders = [];
+        $this->serverVariables = [];
 
         $this->setUpLaravel();
     }
@@ -94,6 +98,18 @@ trait InteractsWithLaravel
     protected function withToken(string $token, string $type = 'Bearer'): static
     {
         $this->defaultHeaders['Authorization'] = $type . ' ' . $token;
+
+        return $this;
+    }
+
+    /**
+     * Merge server variables (e.g. `REMOTE_ADDR`) applied to every request.
+     *
+     * @param array<non-empty-string, string> $server
+     */
+    protected function withServerVariables(array $server): static
+    {
+        $this->serverVariables = \array_merge($this->serverVariables, $server);
 
         return $this;
     }
@@ -194,13 +210,15 @@ trait InteractsWithLaravel
 
         $headers = \array_merge($this->defaultHeaders, $headers);
 
+        $server = self::prepareServer($headers) + $this->serverVariables;
+
         $request = Request::create(
             uri: $uri,
             method: $method,
             parameters: $parameters,
             cookies: $this->cookies,
             files: [],
-            server: self::prepareServer($headers),
+            server: $server,
             content: $content,
         );
 
