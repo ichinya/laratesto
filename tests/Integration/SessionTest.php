@@ -27,9 +27,8 @@ final class SessionTest extends LaravelTestCase
 
     public function testValidationErrorsAreCapturedInSession(): void
     {
-        $response = $this->post('/session/flash', []);
+        $this->post('/session/flash', [])->assertRedirect();
 
-        Assert::same($response->status(), 302);
         $this->assertSessionHasErrors(['email']);
     }
 

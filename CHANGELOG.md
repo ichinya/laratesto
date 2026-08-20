@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-08-19
+
+### Added
+
+- `LaravelResponse` assertion parity with Laravel's `TestResponse` (all
+  PHPUnit-free, on top of Testo assertions):
+  - `assertJsonPath(string $path, mixed $value)` — dot-path traversal,
+    strict same, closure expectations
+  - `assertJsonStructure(array $structure)` — recursive key-structure check
+    with `'*'` wildcard
+  - `assertRedirect(?string $uri = null)` — redirect status check
+    (201/301/302/303/307/308) + optional `Location` comparison
+  - `assertDontSee(string|array)` — inverse of `assertSee`
+  - `assertHeaderMissing(string)` — inverse of `assertHeader`
+  - status shortcuts: `assertCreated`, `assertBadRequest`, `assertUnauthorized`,
+    `assertForbidden`, `assertNotFound`, `assertUnprocessable`
+- Failure messages include the JSON path and expected/actual values.
+
 ## [0.2.0] - 2026-08-19
 
 ### Added
@@ -65,6 +83,7 @@ First public release.
   `#[DatabaseTransactions]` (transaction wrap with rollback) attributes.
 - Self-hosted test suite on a fixture Laravel application.
 
+[0.3.0]: https://github.com/ichinya/laratesto/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ichinya/laratesto/releases/tag/v0.2.0
 [0.1.2]: https://github.com/ichinya/laratesto/releases/tag/v0.1.2
 [0.1.1]: https://github.com/ichinya/laratesto/releases/tag/v0.1.1

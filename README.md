@@ -12,7 +12,7 @@ The bridge is a standalone Composer package. It does not require any changes to 
 - A **fresh application per test** with guaranteed cleanup of Laravel static state afterwards.
 - `.env.testing` support via the standard `APP_ENV` mechanism.
 - Service container, facades, global `app()` helper, Artisan.
-- HTTP requests through the HTTP kernel (`get`, `post`, `postJson`, …) with a Testo-native `LaravelResponse` wrapper (`assertOk`, `assertStatus`, `assertJson`, … — no PHPUnit).
+- HTTP requests through the HTTP kernel (`get`, `post`, `postJson`, …) with a Testo-native `LaravelResponse` wrapper (`assertOk`, `assertStatus`, `assertJson`, `assertJsonPath`, `assertJsonStructure`, `assertRedirect`, … — no PHPUnit).
 - `actingAs`, `actingAsGuest`, `assertAuthenticated`, `assertGuest`, `assertAuthenticatedAs`.
 - `assertDatabaseHas`, `assertDatabaseMissing`, `assertDatabaseCount`.
 - `assertSessionHas`, `assertSessionMissing`, `assertSessionHasErrors`.
@@ -187,7 +187,13 @@ Available via `LaravelTestCase` or the `InteractsWithLaravel` trait:
 | **Artisan**                                         |                                          |
 | `$this->assertExitCode($code, $command, $params)`   | Assert an Artisan command exit code.     |
 
-`LaravelResponse` methods: `status()`, `header()`, `headers()`, `body()`, `json()`, `assertOk()`, `assertStatus()`, `assertHeader()`, `assertJson()`, `assertSee()`, `response()`.
+`LaravelResponse` methods:
+`status()`, `header()`, `headers()`, `body()`, `json()`,
+`assertOk()`, `assertStatus()`, `assertCreated()`, `assertBadRequest()`, `assertUnauthorized()`, `assertForbidden()`, `assertNotFound()`, `assertUnprocessable()`,
+`assertHeader()`, `assertHeaderMissing()`,
+`assertSee()`, `assertDontSee()`,
+`assertJson()`, `assertJsonPath()` (dot-path, closure support), `assertJsonStructure()` (`'*'` wildcard),
+`assertRedirect(?string $uri)`, `response()`.
 
 ## How it works
 
