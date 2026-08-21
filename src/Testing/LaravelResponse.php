@@ -274,16 +274,16 @@ final readonly class LaravelResponse
     /**
      * Assert that the JSON at the given dot-path does not exist.
      *
+     * `Arr::has()` distinguishes a missing key from a key holding `null`,
+     * which `data_get()` cannot.
+     *
      * @param non-empty-string $path
      */
     public function assertJsonMissingPath(string $path): static
     {
-        $value = \data_get($this->json(), $path);
-        $exists = \count(\array_filter(\explode('.', $path))) > 0 && $value !== null && $value !== '__laravel_missing__';
-
         Assert::false(
-            $exists,
-            \sprintf('The JSON at path "%s" exists: %s.', $path, self::describe($value)),
+            \Illuminate\Support\Arr::has((array) $this->json(), $path),
+            \sprintf('The JSON at path "%s" exists.', $path),
         );
 
         return $this;

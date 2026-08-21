@@ -263,6 +263,28 @@ final class LaravelResponseTest
     }
 
     #[Test]
+    public function assertJsonMissingPath(): void
+    {
+        $response = new LaravelResponse(new Response('{"a": {"b": 1}, "n": null}', 200));
+
+        // Missing nested path
+        $response->assertJsonMissingPath('a.b.c');
+        // Missing top-level key
+        $response->assertJsonMissingPath('missing');
+
+        // A key holding null EXISTS and must not pass as missing
+        $failed = false;
+
+        try {
+            $response->assertJsonMissingPath('n');
+        } catch (\Testo\Assert\State\Assertion\AssertionException) {
+            $failed = true;
+        }
+
+        Assert::true($failed, 'assertJsonMissingPath must fail when the key exists with a null value.');
+    }
+
+    #[Test]
     public function assertJsonStructureFailsOnMissingKey(): void
     {
         $response = new LaravelResponse(new Response('{"id": 1}', 200));

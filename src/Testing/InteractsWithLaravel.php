@@ -297,7 +297,7 @@ trait InteractsWithLaravel
         foreach ((array) $middleware as $abstract) {
             $this->app()->instance($abstract, new class
             {
-                public function handle($request, $next)
+                public function handle(\Illuminate\Http\Request $request, \Closure $next): \Symfony\Component\HttpFoundation\Response
                 {
                     return $next($request);
                 }
@@ -527,16 +527,28 @@ trait InteractsWithLaravel
     /**
      * Collect Set-Cookie header values from the response so subsequent
      * requests in the same test preserve the session.
+     *
+     * Cookies the response expires (a past expiry time with an empty value)
+     * are removed from the jar instead of being replayed.
      */
     private function captureCookies(\Symfony\Component\HttpFoundation\Response $response): void
     {
         foreach ($response->headers->getCookies() as $cookie) {
+            if ($cookie->isCleared()) {
+                unset($this->cookies[$cookie->getName()]);
+
+                continue;
+            }
+
             $this->cookies[$cookie->getName()] = $cookie->getValue();
         }
     }
 
     /**
      * Convert header names into the server variables expected by Symfony requests.
+     *
+     * `Content-Type` and `Content-Length` map to `CONTENT_TYPE`/`CONTENT_LENGTH`
+     * (not `HTTP_*`) so they are recognised as actual request headers.
      *
      * @param array<non-empty-string, string> $headers
      *
@@ -549,12 +561,12 @@ trait InteractsWithLaravel
         foreach ($headers as $name => $value) {
             $upper = \strtoupper(\str_replace('-', '_', $name));
 
-            if (\str_starts_with($upper, 'HTTP_') || $upper === 'CONTENT_TYPE' || $upper === 'CONTENT_LENGTH') {
+            if ($upper === 'CONTENT_TYPE' || $upper === 'CONTENT_LENGTH') {
                 $server[$upper] = $value;
                 continue;
             }
 
-            $server['HTTP_' . $upper] = $value;
+            $server[\str_starts_with($upper, 'HTTP_') ? $upper : 'HTTP_' . $upper] = $value;
         }
 
         return $server;
