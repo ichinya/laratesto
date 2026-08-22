@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace Laratesto\Testing;
 
+use Illuminate\Contracts\Session\Session;
+use Illuminate\Contracts\View\View;
+use Illuminate\Support\Arr;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\ResponseHeaderBag;
 use Testo\Assert;
 
 /**
@@ -16,9 +20,22 @@ use Testo\Assert;
  */
 final readonly class LaravelResponse
 {
+    /**
+     * Symfony-compatible header access for tests migrated from Laravel's TestResponse.
+     */
+    public ResponseHeaderBag $headers;
+
+    /**
+     * The underlying response, matching Laravel TestResponse's public API.
+     */
+    public Response $baseResponse;
+
     public function __construct(
         private Response $response,
-    ) {}
+    ) {
+        $this->baseResponse = $response;
+        $this->headers = $response->headers;
+    }
 
     /**
      * The underlying Symfony response.
@@ -31,6 +48,14 @@ final readonly class LaravelResponse
     public function status(): int
     {
         return $this->response->getStatusCode();
+    }
+
+    /**
+     * Symfony/Laravel compatibility alias.
+     */
+    public function getStatusCode(): int
+    {
+        return $this->status();
     }
 
     /**
@@ -49,6 +74,14 @@ final readonly class LaravelResponse
     public function body(): string
     {
         return (string) $this->response->getContent();
+    }
+
+    /**
+     * Symfony/Laravel compatibility alias.
+     */
+    public function getContent(): string
+    {
+        return $this->body();
     }
 
     /**
@@ -101,7 +134,7 @@ final readonly class LaravelResponse
         );
 
         if ($value !== null) {
-            Assert::same($actual, $value, \sprintf(
+            Assert::same(\strtolower((string) $actual), \strtolower($value), \sprintf(
                 'Expected header "%s" to be "%s", got "%s".',
                 $name,
                 $value,
@@ -120,6 +153,18 @@ final readonly class LaravelResponse
     public function assertJson(array $expected): static
     {
         Assert::same($this->json(), $expected, 'The JSON response does not match the expected value.');
+
+        return $this;
+    }
+
+    /**
+     * Assert that the decoded response body exactly matches the expected JSON.
+     *
+     * @param array<array-key, mixed> $expected
+     */
+    public function assertExactJson(array $expected): static
+    {
+        Assert::same($this->json(), $expected, 'The JSON response does not exactly match the expected value.');
 
         return $this;
     }
@@ -170,10 +215,13 @@ final readonly class LaravelResponse
         );
 
         if ($uri !== null) {
+            $expected = self::absoluteLocation($uri);
+            $actual = self::absoluteLocation((string) $this->header('Location'));
+
             Assert::same(
-                $this->header('Location'),
-                $uri,
-                \sprintf('Expected redirect to "%s", got "%s".', $uri, (string) $this->header('Location')),
+                $actual,
+                $expected,
+                \sprintf('Expected redirect to "%s", got "%s".', $expected, $actual),
             );
         }
 
@@ -240,13 +288,7 @@ final readonly class LaravelResponse
      */
     public function assertSessionHasErrors(string|array $keys = []): static
     {
-        $store = app('session.store');
-
-        if (!$store->isStarted()) {
-            $store->start();
-        }
-
-        $errors = $store->get('errors');
+        $errors = $this->session()->get('errors');
 
         Assert::notNull($errors, 'Session is missing expected errors bag.');
 
@@ -256,16 +298,39 @@ final readonly class LaravelResponse
             ? $errors->getBag('default')
             : $errors;
 
-        $has = static function (string $field) use ($bag): bool {
-            if (\is_object($bag) && \method_exists($bag, 'has')) {
-                return $bag->has($field);
+        if (\is_array($bag) && \array_key_exists('default', $bag)) {
+            $bag = $bag['default'];
+        }
+
+        if ($bag instanceof \Illuminate\Contracts\Support\MessageBag) {
+            $messagesByField = $bag->getMessages();
+        } elseif (\is_array($bag) && \is_array($bag['messages'] ?? null)) {
+            $messagesByField = $bag['messages'];
+        } elseif (\is_array($bag)) {
+            $messagesByField = $bag;
+        } else {
+            $messagesByField = [];
+        }
+
+        foreach ((array) $keys as $key => $value) {
+            $field = \is_int($key) ? $value : $key;
+            Assert::true(\array_key_exists((string) $field, $messagesByField), \sprintf(
+                'Session is missing error for field [%s]. Available errors: %s.',
+                $field,
+                self::describe($messagesByField),
+            ));
+
+            if (\is_int($key)) {
+                continue;
             }
 
-            return \is_array($bag) && \array_key_exists($field, $bag);
-        };
+            $messages = (array) ($messagesByField[$field] ?? []);
 
-        foreach ((array) $keys as $key) {
-            Assert::true($has($key), \sprintf('Session is missing error for field [%s].', $key));
+            Assert::contains(
+                $messages,
+                $value,
+                \sprintf('Session error for field [%s] does not contain the expected message.', $field),
+            );
         }
 
         return $this;
@@ -343,6 +408,31 @@ final readonly class LaravelResponse
         return $this->assertStatus(422);
     }
 
+    public function assertFound(): static
+    {
+        return $this->assertStatus(302);
+    }
+
+    public function assertMethodNotAllowed(): static
+    {
+        return $this->assertStatus(405);
+    }
+
+    public function assertConflict(): static
+    {
+        return $this->assertStatus(409);
+    }
+
+    public function assertGone(): static
+    {
+        return $this->assertStatus(410);
+    }
+
+    public function assertInternalServerError(): static
+    {
+        return $this->assertStatus(500);
+    }
+
     public function assertTooManyRequests(): static
     {
         return $this->assertStatus(429);
@@ -361,6 +451,170 @@ final readonly class LaravelResponse
         Assert::same($this->body(), $content, 'The response body does not match the expected content.');
 
         return $this;
+    }
+
+    /**
+     * Assert that the response session contains a key or binding.
+     *
+     * @param non-empty-string|array<array-key, mixed> $key
+     */
+    public function assertSessionHas(string|array $key, mixed $value = null): static
+    {
+        if (\is_array($key)) {
+            foreach ($key as $binding => $expected) {
+                \is_int($binding)
+                    ? $this->assertSessionHas((string) $expected)
+                    : $this->assertSessionHas((string) $binding, $expected);
+            }
+
+            return $this;
+        }
+
+        $session = $this->session();
+        Assert::true($session->has($key), \sprintf('Session is missing expected key [%s].', $key));
+
+        if ($value instanceof \Closure) {
+            Assert::true($value($session->get($key)), \sprintf(
+                'Session value at [%s] did not satisfy the given closure.',
+                $key,
+            ));
+        } elseif ($value !== null) {
+            Assert::equals($session->get($key), $value, \sprintf(
+                'Session value at [%s] does not match the expected value.',
+                $key,
+            ));
+        }
+
+        return $this;
+    }
+
+    /**
+     * Assert that the response session does not contain a key or value.
+     *
+     * @param non-empty-string|list<non-empty-string> $key
+     */
+    public function assertSessionMissing(string|array $key, mixed $value = null): static
+    {
+        if (\is_array($key)) {
+            foreach ($key as $item) {
+                $this->assertSessionMissing($item);
+            }
+
+            return $this;
+        }
+
+        $session = $this->session();
+
+        if ($value instanceof \Closure) {
+            Assert::false($value($session->get($key)), \sprintf(
+                'Session value at [%s] unexpectedly satisfied the given closure.',
+                $key,
+            ));
+        } elseif ($value !== null) {
+            Assert::notEquals($session->get($key), $value, \sprintf(
+                'Session key [%s] unexpectedly has the given value.',
+                $key,
+            ));
+        } else {
+            Assert::false($session->has($key), \sprintf('Session has unexpected key [%s].', $key));
+        }
+
+        return $this;
+    }
+
+    /**
+     * Assert that JSON validation errors exist for the requested fields.
+     *
+     * @param non-empty-string|array<array-key, mixed> $errors
+     */
+    public function assertJsonValidationErrors(string|array $errors, string $responseKey = 'errors'): static
+    {
+        $expected = Arr::wrap($errors);
+        Assert::false($expected === [], 'No validation errors were provided.');
+
+        $actual = Arr::get((array) $this->json(), $responseKey, []);
+        Assert::true(\is_array($actual), 'The JSON validation error payload is not an array.');
+
+        foreach ($expected as $key => $value) {
+            $field = \is_int($key) ? $value : $key;
+            Assert::true(Arr::has($actual, (string) $field), \sprintf(
+                'The JSON response is missing a validation error for [%s].',
+                $field,
+            ));
+
+            if (\is_int($key)) {
+                continue;
+            }
+
+            foreach (Arr::wrap($value) as $message) {
+                $matches = false;
+                foreach (Arr::wrap(Arr::get($actual, (string) $field)) as $actualMessage) {
+                    if (\str_contains((string) $actualMessage, (string) $message)) {
+                        $matches = true;
+                        break;
+                    }
+                }
+
+                Assert::true($matches, \sprintf(
+                    'The JSON validation error for [%s] does not contain [%s].',
+                    $field,
+                    $message,
+                ));
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * Assert that the original response view contains a bound value.
+     */
+    public function assertViewHas(string|array $key, mixed $value = null): static
+    {
+        if (\is_array($key)) {
+            foreach ($key as $binding => $expected) {
+                \is_int($binding)
+                    ? $this->assertViewHas((string) $expected)
+                    : $this->assertViewHas((string) $binding, $expected);
+            }
+
+            return $this;
+        }
+
+        $original = \method_exists($this->response, 'getOriginalContent')
+            ? $this->response->getOriginalContent()
+            : null;
+
+        Assert::instanceOf($original, View::class, 'The response does not contain a view.');
+        $data = $original->getData();
+        $actual = Arr::get($data, $key);
+
+        if ($value === null) {
+            Assert::true(Arr::has($data, $key), \sprintf(
+                'The response view is missing the key [%s].',
+                $key,
+            ));
+        } elseif ($value instanceof \Closure) {
+            Assert::true($value($actual), \sprintf(
+                'The response view value at [%s] did not satisfy the given closure.',
+                $key,
+            ));
+        } else {
+            Assert::equals($actual, $value, \sprintf(
+                'The response view value at [%s] does not match the expected value.',
+                $key,
+            ));
+        }
+
+        return $this;
+    }
+
+    /**
+     * Return the session attached to a redirect response, or the active store.
+     */
+    public function getSession(): Session
+    {
+        return $this->session();
     }
 
     /**
@@ -410,5 +664,35 @@ final readonly class LaravelResponse
         return \is_scalar($value) || $value === null
             ? \var_export($value, true)
             : (string) \json_encode($value, \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE);
+    }
+
+    private function session(): Session
+    {
+        if (\method_exists($this->response, 'getSession')) {
+            $session = $this->response->getSession();
+            if ($session instanceof Session) {
+                if (!$session->isStarted()) {
+                    $session->start();
+                }
+
+                return $session;
+            }
+        }
+
+        $session = app('session.store');
+        if (!$session->isStarted()) {
+            $session->start();
+        }
+
+        return $session;
+    }
+
+    private static function absoluteLocation(string $uri): string
+    {
+        $container = \Illuminate\Container\Container::getInstance();
+
+        return $container->bound('url')
+            ? $container->make('url')->to($uri)
+            : $uri;
     }
 }

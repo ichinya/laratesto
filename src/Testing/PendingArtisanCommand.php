@@ -66,6 +66,20 @@ final class PendingArtisanCommand
     }
 
     /**
+     * Assert the command did not exit successfully.
+     */
+    public function assertFailed(): static
+    {
+        Assert::notSame($this->exitCode, 0, \sprintf(
+            'Expected [artisan %s] to fail, but it exited successfully. Output: "%s".',
+            $this->command,
+            \mb_substr($this->output, 0, 255),
+        ));
+
+        return $this;
+    }
+
+    /**
      * Assert the command output contains the given text.
      */
     public function expectsOutputToContain(string $text): static

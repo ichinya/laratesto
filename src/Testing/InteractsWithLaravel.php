@@ -9,7 +9,10 @@ use Illuminate\Contracts\Auth\Guard;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
+use Illuminate\Cookie\CookieValuePrefix;
+use Illuminate\Foundation\Testing\Wormhole;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Testo\Assert;
 
 /**
@@ -34,6 +37,8 @@ trait InteractsWithLaravel
     /** @var array<non-empty-string, string> Server variables applied to every request. */
     private array $serverVariables = [];
 
+    private bool $followRedirects = false;
+
     /**
      * @internal Called by the bridge, not by user code.
      */
@@ -43,8 +48,32 @@ trait InteractsWithLaravel
         $this->cookies = [];
         $this->defaultHeaders = [];
         $this->serverVariables = [];
+        $this->followRedirects = false;
+    }
 
+    /**
+     * @internal Called by the lifecycle interceptor after database attributes.
+     */
+    public function setUpLaravelApplication(): void
+    {
         $this->setUpLaravel();
+    }
+
+    /**
+     * @internal Called by the bridge after every test, not by user code.
+     */
+    public function tearDownLaravelApplication(): void
+    {
+        try {
+            $this->tearDownLaravel();
+        } finally {
+            $this->laravelApplication = null;
+            $this->cookies = [];
+            $this->defaultHeaders = [];
+            $this->serverVariables = [];
+            $this->followRedirects = false;
+            Carbon::setTestNow();
+        }
     }
 
     /**
@@ -54,6 +83,15 @@ trait InteractsWithLaravel
      * case instance is reused across test methods by Testo).
      */
     protected function setUpLaravel(): void
+    {
+        // No-op by default.
+    }
+
+    /**
+     * Hook for subclasses: runs after the test method and before Laravel's
+     * global state is cleaned. PHPUnit tearDown() methods migrate here.
+     */
+    protected function tearDownLaravel(): void
     {
         // No-op by default.
     }
@@ -103,11 +141,84 @@ trait InteractsWithLaravel
     }
 
     /**
+     * Remove a default header from subsequent requests.
+     */
+    protected function withoutHeader(string $name): static
+    {
+        foreach (\array_keys($this->defaultHeaders) as $header) {
+            if (\strcasecmp($header, $name) === 0) {
+                unset($this->defaultHeaders[$header]);
+            }
+        }
+
+        return $this;
+    }
+
+    /**
      * Set the bearer token for subsequent requests.
      */
     protected function withToken(string $token, string $type = 'Bearer'): static
     {
         $this->defaultHeaders['Authorization'] = $type . ' ' . $token;
+
+        return $this;
+    }
+
+    /**
+     * Seed session values before the next request.
+     *
+     * @param array<string, mixed> $data
+     */
+    protected function withSession(array $data): static
+    {
+        $session = $this->session();
+
+        foreach ($data as $key => $value) {
+            $session->put($key, $value);
+        }
+
+        // The bridge deliberately carries cookies between requests. Persist the
+        // in-memory override and bind its ID to the next request so StartSession
+        // cannot reload older values from the previously captured cookie.
+        $session->save();
+        $this->cookies[$session->getName()] = $this->encryptedCookie(
+            $session->getName(),
+            $session->getId(),
+        );
+
+        return $this;
+    }
+
+    /**
+     * Add a Laravel-encrypted cookie to subsequent requests.
+     */
+    protected function withCookie(string $name, string $value): static
+    {
+        $this->cookies[$name] = $this->encryptedCookie($name, $value);
+
+        return $this;
+    }
+
+    /**
+     * Add Laravel-encrypted cookies to subsequent requests.
+     *
+     * @param array<non-empty-string, string> $cookies
+     */
+    protected function withCookies(array $cookies): static
+    {
+        foreach ($cookies as $name => $value) {
+            $this->withCookie($name, $value);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Follow redirect responses until a non-redirect response is reached.
+     */
+    protected function followingRedirects(): static
+    {
+        $this->followRedirects = true;
 
         return $this;
     }
@@ -215,6 +326,60 @@ trait InteractsWithLaravel
     }
 
     /**
+     * Send a DELETE request with a JSON body.
+     *
+     * @param array<array-key, mixed> $payload
+     */
+    protected function deleteJson(string $uri, array $payload = [], array $headers = []): LaravelResponse
+    {
+        return $this->sendRequest(
+            method: Request::METHOD_DELETE,
+            uri: $uri,
+            headers: $headers + [
+                'CONTENT_TYPE' => 'application/json',
+                'ACCEPT' => 'application/json',
+            ],
+            content: \json_encode($payload, \JSON_THROW_ON_ERROR),
+        );
+    }
+
+    /**
+     * Send a request using Laravel's low-level testing signature.
+     *
+     * @param array<array-key, mixed> $parameters
+     * @param array<non-empty-string, string> $cookies
+     * @param array<array-key, mixed> $files
+     * @param array<non-empty-string, string> $server
+     */
+    protected function call(
+        string $method,
+        string $uri,
+        array $parameters = [],
+        array $cookies = [],
+        array $files = [],
+        array $server = [],
+        ?string $content = null,
+    ): LaravelResponse {
+        return $this->sendRequest(
+            method: $method,
+            uri: $uri,
+            parameters: $parameters,
+            content: $content,
+            cookies: $cookies,
+            files: $files,
+            server: $server,
+        );
+    }
+
+    /**
+     * Begin travelling forward in Laravel's test clock.
+     */
+    protected function travel(int $value): Wormhole
+    {
+        return new Wormhole($value);
+    }
+
+    /**
      * Send a request with an arbitrary method.
      *
      * @param array<array-key, mixed> $parameters
@@ -225,19 +390,22 @@ trait InteractsWithLaravel
         array $parameters = [],
         array $headers = [],
         ?string $content = null,
+        array $cookies = [],
+        array $files = [],
+        array $server = [],
     ): LaravelResponse {
         $kernel = $this->app()->make(HttpKernel::class);
 
         $headers = \array_merge($this->defaultHeaders, $headers);
 
-        $server = self::prepareServer($headers) + $this->serverVariables;
+        $server = \array_replace($this->serverVariables, self::prepareServer($headers), $server);
 
         $request = Request::create(
             uri: $uri,
             method: $method,
             parameters: $parameters,
-            cookies: $this->cookies,
-            files: [],
+            cookies: \array_merge($this->cookies, $cookies),
+            files: $files,
             server: $server,
             content: $content,
         );
@@ -260,7 +428,24 @@ trait InteractsWithLaravel
 
         $this->captureCookies($response);
 
-        return new LaravelResponse($response);
+        $wrapped = new LaravelResponse($response);
+
+        if (!$this->followRedirects) {
+            return $wrapped;
+        }
+
+        $this->followRedirects = false;
+
+        while ($wrapped->response()->isRedirect()) {
+            $location = $wrapped->header('Location');
+            if ($location === null) {
+                break;
+            }
+
+            $wrapped = $this->get($location);
+        }
+
+        return $wrapped;
     }
 
     /**
@@ -542,6 +727,13 @@ trait InteractsWithLaravel
 
             $this->cookies[$cookie->getName()] = $cookie->getValue();
         }
+    }
+
+    private function encryptedCookie(string $name, string $value): string
+    {
+        $key = $this->app()->make('encrypter')->getKey();
+
+        return \encrypt(CookieValuePrefix::create($name, $key) . $value, false);
     }
 
     /**

@@ -4,6 +4,39 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.6.9] - 2026-08-22
+
+### Added
+
+- `php artisan test` now runs Testo first and then one detected legacy runner:
+  Pest is preferred over PHPUnit to avoid executing Pest's PHPUnit-backed suite
+  twice. Shared selectors, runner-specific arguments, aggregate exit status and
+  optional stage-level fail-fast behavior are supported.
+- `php artisan laratesto:migrate-phpunit` safely converts common PHPUnit unit
+  and Laravel feature tests to the `tests/Testo` layout. It supports dry-run,
+  explicit target directories, conflict protection and opt-in source removal.
+- `setUpLaravel()` / `tearDownLaravel()` lifecycle hooks around every Laravel
+  test, including teardown execution when the test pipeline fails.
+- PHPUnit's `DatabaseMigrations` trait migrates to the native
+  `#[DatabaseMigrations]` attribute.
+- Laravel-compatible request, response, session, cookie, redirect, JSON, view,
+  time-travel and Artisan assertion helpers needed by migrated suites.
+
+### Fixed
+
+- Database attributes now prepare state before `setUpLaravel()` and roll it back
+  after `tearDownLaravel()`, matching Laravel's PHPUnit lifecycle.
+- `SkipTest` and `CancelTest` thrown from Laravel lifecycle hooks retain their
+  Testo statuses instead of being reported as aborted pipeline failures.
+
+### Safety
+
+- Migration refuses data providers, dependencies, coverage/group attributes,
+  PHPUnit mocks and constraints, regex exception expectations and other
+  constructs without a faithful mechanical Testo conversion.
+
 ## [0.4.0] - 2026-08-19
 
 ### Added
@@ -96,6 +129,7 @@ First public release.
   `#[DatabaseTransactions]` (transaction wrap with rollback) attributes.
 - Self-hosted test suite on a fixture Laravel application.
 
+[0.6.9]: https://github.com/ichinya/laratesto/releases/tag/v0.6.9
 [0.4.0]: https://github.com/ichinya/laratesto/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ichinya/laratesto/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ichinya/laratesto/releases/tag/v0.2.0

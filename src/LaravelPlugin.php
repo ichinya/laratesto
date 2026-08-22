@@ -6,6 +6,7 @@ namespace Laratesto;
 
 use Internal\Container\Container;
 use Laratesto\Config\LaravelConfig;
+use Laratesto\Pipeline\LaravelLifecycleInterceptor;
 use Laratesto\Pipeline\LaravelTestInterceptor;
 use Laratesto\Runtime\LaravelApplicationFactory;
 use Laratesto\Runtime\LaravelStateCleaner;
@@ -46,11 +47,11 @@ final readonly class LaravelPlugin implements PluginConfigurator
         // DatabaseTransactions) which are instantiated by the pipeline injector.
         $container->set($factory, LaravelApplicationFactory::class);
 
-        $container
-            ->get(InterceptorCollector::class)
-            ->addInterceptor(new LaravelTestInterceptor(
-                factory: $factory,
-                cleaner: new LaravelStateCleaner(),
-            ));
+        $interceptors = $container->get(InterceptorCollector::class);
+        $interceptors->addInterceptor(new LaravelTestInterceptor(
+            factory: $factory,
+            cleaner: new LaravelStateCleaner(),
+        ));
+        $interceptors->addInterceptor(new LaravelLifecycleInterceptor());
     }
 }

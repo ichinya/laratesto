@@ -7,6 +7,7 @@ namespace Laratesto\Tests\Integration;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Testo\Assert;
+use Laratesto\Attribute\DatabaseMigrations;
 use Laratesto\Attribute\DatabaseTransactions;
 use Laratesto\Attribute\RefreshDatabase;
 use Laratesto\Testing\InteractsWithLaravel;
@@ -14,6 +15,16 @@ use Laratesto\Testing\InteractsWithLaravel;
 final class DatabaseTest
 {
     use InteractsWithLaravel;
+
+    private bool $schemaWasReadyDuringSetUp = false;
+
+    private int $transactionLevelDuringSetUp = 0;
+
+    protected function setUpLaravel(): void
+    {
+        $this->schemaWasReadyDuringSetUp = Schema::hasTable('things');
+        $this->transactionLevelDuringSetUp = $this->make('db')->transactionLevel();
+    }
 
     public function testWithoutAttributesTheDatabaseIsEmpty(): void
     {
@@ -23,6 +34,7 @@ final class DatabaseTest
     #[RefreshDatabase]
     public function testRefreshDatabaseRunsMigrations(): void
     {
+        Assert::true($this->schemaWasReadyDuringSetUp);
         Assert::true(Schema::hasTable('things'));
 
         DB::table('things')->insert(['name' => 'first']);
@@ -41,6 +53,16 @@ final class DatabaseTest
     #[DatabaseTransactions]
     public function testDatabaseTransactionsWrapsTheTestInATransaction(): void
     {
+        Assert::same($this->transactionLevelDuringSetUp, 1);
         Assert::same($this->make('db')->transactionLevel(), 1);
+    }
+
+    #[DatabaseMigrations]
+    public function testDatabaseMigrationsRunsFreshMigrations(): void
+    {
+        Assert::true($this->schemaWasReadyDuringSetUp);
+        Assert::true(Schema::hasTable('things'));
+        DB::table('things')->insert(['name' => 'temporary']);
+        Assert::same(DB::table('things')->count(), 1);
     }
 }

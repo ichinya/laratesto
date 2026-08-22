@@ -19,10 +19,13 @@ final class LaravelResponseTest
         );
 
         Assert::same($response->status(), 201);
+        Assert::same($response->getStatusCode(), 201);
         Assert::same($response->header('X-Test'), 'yes');
+        Assert::same($response->headers->get('X-Test'), 'yes');
         Assert::null($response->header('X-Missing'));
         Assert::same($response->header('X-Missing', 'fallback'), 'fallback');
         Assert::same($response->body(), '{"ok": true}');
+        Assert::same($response->getContent(), '{"ok": true}');
         Assert::same($response->json(), ['ok' => true]);
     }
 
@@ -40,6 +43,24 @@ final class LaravelResponseTest
         }
 
         Assert::true($failed, 'json() must throw a RuntimeException for a non-JSON body.');
+    }
+
+    #[Test]
+    public function assertExactJsonMatchesTheWholeDecodedPayload(): void
+    {
+        $response = new LaravelResponse(new Response('{"created":true}', 201));
+
+        Assert::same($response->assertExactJson(['created' => true]), $response);
+
+        $failed = false;
+
+        try {
+            $response->assertExactJson(['created' => true, 'extra' => false]);
+        } catch (\Testo\Assert\State\Assertion\AssertionException) {
+            $failed = true;
+        }
+
+        Assert::true($failed, 'assertExactJson must reject a non-identical JSON payload.');
     }
 
     #[Test]

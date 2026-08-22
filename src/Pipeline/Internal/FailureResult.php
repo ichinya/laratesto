@@ -6,6 +6,8 @@ namespace Laratesto\Pipeline\Internal;
 
 use Testo\Core\Context\TestInfo;
 use Testo\Core\Context\TestResult;
+use Testo\Core\Exception\CancelTest;
+use Testo\Core\Exception\SkipTest;
 use Testo\Core\Value\Status;
 
 /**
@@ -26,6 +28,25 @@ final class FailureResult
         return new TestResult(
             info: $info,
             status: Status::Aborted,
+            failure: $failure,
+        );
+    }
+
+    /**
+     * Classify exceptions from a user lifecycle hook exactly as Testo classifies
+     * exceptions thrown from a test body. Other hook failures remain aborts.
+     */
+    public static function fromLifecycle(TestInfo $info, \Throwable $failure): TestResult
+    {
+        $status = match (true) {
+            $failure instanceof SkipTest => Status::Skipped,
+            $failure instanceof CancelTest => Status::Cancelled,
+            default => Status::Aborted,
+        };
+
+        return new TestResult(
+            info: $info,
+            status: $status,
             failure: $failure,
         );
     }

@@ -14,7 +14,8 @@ use Testo\Pipeline\Attribute\InterceptorOptions;
 use Testo\Pipeline\Middleware\TestRunInterceptor;
 
 /**
- * Boots the Laravel application before every test and cleans up after it.
+ * Boots and injects the Laravel application before every test and cleans up
+ * after all other Laravel interceptors have finished.
  *
  * The interceptor is ordered to run before attribute interceptors (RefreshDatabase,
  * DatabaseTransactions), so those always see a booted application.
@@ -47,7 +48,7 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
             $this->injectApplication($info, $application);
         } catch (\Throwable $injectionFailure) {
             $this->cleanupQuietly($application);
-            return FailureResult::aborted($info, $injectionFailure);
+            return FailureResult::fromLifecycle($info, $injectionFailure);
         }
 
         try {
@@ -112,4 +113,5 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
 
         $this->factory->flush();
     }
+
 }

@@ -22,6 +22,8 @@ return Application::configure(basePath: dirname(__DIR__))
         SessionServiceProvider::class,
         ValidationServiceProvider::class,
         AuthServiceProvider::class,
+        \Laratesto\LaratestoServiceProvider::class,
+        \App\Providers\CompetingTestServiceProvider::class,
         \App\Providers\TestAuthServiceProvider::class,
     ])
     ->withMiddleware(function (Middleware $middleware): void {

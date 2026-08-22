@@ -19,7 +19,12 @@ The bridge is a standalone Composer package. It does not require any changes to 
 - `assertExitCode` for Artisan commands.
 - `withoutMiddleware` (all or specific middleware classes).
 - Session cookies are automatically bridged across requests within the same test.
-- `#[RefreshDatabase]` and `#[DatabaseTransactions]` attributes.
+- `#[RefreshDatabase]`, `#[DatabaseMigrations]` and `#[DatabaseTransactions]`
+  attributes with Laravel-compatible lifecycle ordering.
+- Safe `php artisan laratesto:migrate-phpunit` source converter with dry-run,
+  conflict protection and explicit diagnostics for manual-only constructs.
+- Unified `php artisan test` entry point: Testo first, then Pest or PHPUnit when
+  a legacy-compatible runner is still installed.
 
 ## Requirements
 
@@ -76,6 +81,82 @@ Run with:
 vendor/bin/testo run --suite=Laravel
 ```
 
+## Running all application tests
+
+Package discovery replaces Laravel Collision's `test` command with a unified
+runner:
+
+```bash
+php artisan test
+```
+
+The command always runs `php vendor/bin/testo run` first. It then runs Pest when
+`vendor/bin/pest` exists, otherwise PHPUnit when `vendor/bin/phpunit` exists. It
+never runs Pest and PHPUnit separately because Pest already uses PHPUnit as its
+test engine; doing both would execute the same legacy suite twice. If neither is
+installed, a successful Testo run is the complete result.
+
+Every started runner contributes to the final exit code. By default the next
+runner still executes after a failure so one CI job reports the full picture;
+`--fail-fast` stops before the next stage instead.
+
+```bash
+# Testo only, useful after the migration is complete.
+php artisan test --testo-only
+
+# Only the detected Pest/PHPUnit runner.
+php artisan test --legacy-only
+
+# Common selectors are translated for each runner.
+php artisan test --filter=User --testsuite=Feature --path=tests/Feature
+
+# Runner-specific arguments are passed literally without a shell.
+php artisan test --testo-arg=--json --legacy-arg=--colors=always
+```
+
+Supported shared options are `--filter`, `--group`, `--suite` / `--testsuite`,
+`--path`, `--coverage` and `--no-coverage`. Positional paths are accepted as
+well. `--without-tty` remains available for Laravel CI command compatibility;
+the child processes are always streamed without an interactive TTY.
+
+## Migrating PHPUnit tests
+
+Laravel package discovery registers a conservative migration command:
+
+```bash
+# Preview the default tests/Unit -> tests/Testo/Unit migration.
+php artisan laratesto:migrate-phpunit --dry-run
+
+# Convert a directory while keeping the PHPUnit sources.
+php artisan laratesto:migrate-phpunit tests/Unit
+
+# Move sources only after every generated target has been verified on disk.
+php artisan laratesto:migrate-phpunit tests/Unit --remove-source
+```
+
+Pass `--target=tests/Testo/Custom` for a non-standard layout. Existing targets
+are never overwritten unless `--force` is present. `--dry-run` performs the
+same parsing and compatibility checks but does not write or remove anything.
+
+The command converts the common mechanical surface: PHPUnit assertion argument
+order, `TestCase` removal, Laravel's `Tests\TestCase` bridge, database traits,
+`setUp()` / `tearDown()` hooks, exception expectations, skips and Laravel
+response accessors. It refuses a file when it finds data providers, dependencies,
+coverage/group metadata, PHPUnit mocks, constraints, regex exception matching,
+class-level lifecycle hooks or another construct without a faithful Testo
+equivalent. Those files need an explicit human migration; the command will not
+write a partial target for them.
+
+The converter intentionally does not rewrite `phpunit.xml`: reproduce its
+environment overrides and suite boundaries in `testo.php`. Generated `test*()`
+methods also require `NamingConventionPlugin` in the target suite.
+
+After conversion, run the exact Testo scope before removing PHPUnit:
+
+```bash
+vendor/bin/testo run --suite=Unit
+```
+
 ## Writing tests
 
 ### Base class
@@ -114,6 +195,23 @@ final class UserServiceTest
 }
 ```
 
+### Setup and teardown hooks
+
+`LaravelTestCase` calls hooks after application injection and before final state
+cleanup. PHPUnit lifecycle methods migrate as follows:
+
+```php
+protected function setUpLaravel(): void
+{
+    // Laravel application is available here.
+}
+
+protected function tearDownLaravel(): void
+{
+    // Runs after the test while Laravel is still available.
+}
+```
+
 ### Function style
 
 After the framework is booted, global helpers work in plain test functions too:
@@ -140,6 +238,7 @@ function testResolvesUserService(): void
 ## Database attributes
 
 ```php
+use Laratesto\Attribute\DatabaseMigrations;
 use Laratesto\Attribute\DatabaseTransactions;
 use Laratesto\Attribute\RefreshDatabase;
 
@@ -149,6 +248,9 @@ final class BillingTest
 
     #[RefreshDatabase]          // migrate:fresh before the test (seed: true to run seeders)
     public function testInvoicesAreCreated(): void { /* ... */ }
+
+    #[DatabaseMigrations]       // migrate:fresh before, migrate:rollback afterwards
+    public function testLegacyMigrationFlow(): void { /* ... */ }
 
     #[DatabaseTransactions]     // wrap the test in a transaction, roll back afterwards
     public function testPaymentIsProcessed(): void { /* ... */ }
@@ -239,11 +341,11 @@ public function testLogsWarningOnFailure(): void
 1. `LaravelTestInterceptor` runs before attribute interceptors for every test:
    it forces `APP_ENV`, requires `bootstrap/app.php`, bootstraps the Console kernel
    and applies config overrides.
-2. The booted application is injected into test cases that use `LaravelTestCase`
-   or the `InteractsWithLaravel` trait.
-3. After the test — in a `finally` block — database connections are closed, the
-   container is flushed, facades are cleared and the static-state resets from the
-   framework's own test teardown are applied.
+2. The booted application is injected, database attributes prepare their state,
+   and only then `setUpLaravel()` runs, matching Laravel's PHPUnit lifecycle.
+3. After the test, `tearDownLaravel()` runs first; database transactions or
+   migrations are rolled back next; finally connections are closed, the
+   container is flushed, facades are cleared and framework static state resets.
 4. A new application instance is created for every test, which is what makes the
    cleanup sufficient: container-level state dies with the old application.
 5. Session cookies collected from each response are automatically bridged to the

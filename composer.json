@@ -34,6 +34,13 @@
             "App\\": "tests/Fixture/laravel/app/"
         }
     },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Laratesto\\LaratestoServiceProvider"
+            ]
+        }
+    },
     "config": {
         "sort-packages": true
     },
