@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "35e0f2823428c357d4509942e3302419",
+    "content-hash": "71bf4d27fbb9480f4fe9e0bf40fd7ab5",
     "packages": [
         {
             "name": "brick/math",
@@ -6951,6 +6951,55 @@
             "time": "2026-03-17T11:56:53+00:00"
         },
         {
+            "name": "ichinya/laratesto-rector",
+            "version": "dev-main",
+            "dist": {
+                "type": "path",
+                "url": "packages/rector",
+                "reference": "58ce4c6d1047e7d739ac85a06e94f7182661681d"
+            },
+            "require": {
+                "php": "^8.3",
+                "rector/rector": "2.6.2",
+                "testo/bridge-rector": "^0.2.4"
+            },
+            "suggest": {
+                "ichinya/laratesto": "Laratesto runtime API targeted by these rules (^0.6.9)"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "1.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Laratesto\\Rector\\": "src/"
+                }
+            },
+            "license": [
+                "BSD-3-Clause"
+            ],
+            "authors": [
+                {
+                    "name": "Ichi",
+                    "homepage": "https://github.com/ichinya"
+                }
+            ],
+            "description": "Rector rules to migrate Laravel PHPUnit test suites to Laratesto.",
+            "keywords": [
+                "laravel",
+                "migration",
+                "phpunit",
+                "rector",
+                "testo"
+            ],
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
             "name": "mockery/mockery",
             "version": "1.6.15",
             "source": {
@@ -7033,6 +7082,130 @@
             "time": "2026-08-19T19:37:52+00:00"
         },
         {
+            "name": "phpstan/phpstan",
+            "version": "2.2.9",
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/13d6b4f347bad222da436580c8304fa6f83e6bd0",
+                "reference": "13d6b4f347bad222da436580c8304fa6f83e6bd0",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^7.4|^8.0"
+            },
+            "conflict": {
+                "phpstan/phpstan-shim": "*"
+            },
+            "bin": [
+                "phpstan",
+                "phpstan.phar"
+            ],
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "bootstrap.php"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Ondřej Mirtes"
+                },
+                {
+                    "name": "Markus Staab"
+                },
+                {
+                    "name": "Vincent Langlet"
+                }
+            ],
+            "description": "PHPStan - PHP Static Analysis Tool",
+            "keywords": [
+                "dev",
+                "static analysis"
+            ],
+            "support": {
+                "docs": "https://phpstan.org/user-guide/getting-started",
+                "forum": "https://github.com/phpstan/phpstan/discussions",
+                "issues": "https://github.com/phpstan/phpstan/issues",
+                "security": "https://github.com/phpstan/phpstan/security/policy",
+                "source": "https://github.com/phpstan/phpstan-src"
+            },
+            "funding": [
+                {
+                    "url": "https://github.com/ondrejmirtes",
+                    "type": "github"
+                },
+                {
+                    "url": "https://github.com/phpstan",
+                    "type": "github"
+                }
+            ],
+            "time": "2026-08-22T07:38:16+00:00"
+        },
+        {
+            "name": "rector/rector",
+            "version": "2.6.2",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/rectorphp/rector.git",
+                "reference": "03cd615cdd5648abb5f10ff3a684fdb976687190"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/rectorphp/rector/zipball/03cd615cdd5648abb5f10ff3a684fdb976687190",
+                "reference": "03cd615cdd5648abb5f10ff3a684fdb976687190",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^7.4|^8.0",
+                "phpstan/phpstan": "^2.2.6"
+            },
+            "conflict": {
+                "rector/rector-doctrine": "*",
+                "rector/rector-downgrade-php": "*",
+                "rector/rector-phpunit": "*",
+                "rector/rector-symfony": "*"
+            },
+            "suggest": {
+                "ext-dom": "To manipulate phpunit.xml via the custom-rule command"
+            },
+            "bin": [
+                "bin/rector"
+            ],
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "bootstrap.php"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "Instant Upgrade and Automated Refactoring of any PHP code",
+            "homepage": "https://getrector.com/",
+            "keywords": [
+                "automation",
+                "dev",
+                "migration",
+                "refactoring"
+            ],
+            "support": {
+                "issues": "https://github.com/rectorphp/rector/issues",
+                "source": "https://github.com/rectorphp/rector/tree/2.6.2"
+            },
+            "funding": [
+                {
+                    "url": "https://github.com/tomasvotruba",
+                    "type": "github"
+                }
+            ],
+            "time": "2026-08-12T06:23:05+00:00"
+        },
+        {
             "name": "testo/bridge-mockery",
             "version": "0.1.2",
             "source": {
@@ -7094,11 +7267,81 @@
                 }
             ],
             "time": "2026-08-06T07:43:13+00:00"
+        },
+        {
+            "name": "testo/bridge-rector",
+            "version": "0.2.4",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/php-testo/bridge-rector.git",
+                "reference": "ba310f73e9f786103654bad10d4d3f922772cba5"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/php-testo/bridge-rector/zipball/ba310f73e9f786103654bad10d4d3f922772cba5",
+                "reference": "ba310f73e9f786103654bad10d4d3f922772cba5",
+                "shasum": ""
+            },
+            "require": {
+                "internal/path": "^1.2",
+                "php": ">=8.2",
+                "rector/rector": "^2.0"
+            },
+            "require-dev": {
+                "testo/assert": "^0.1.13",
+                "testo/data": "^0.1.8",
+                "testo/filter": "^0.1.6",
+                "testo/testo": "0.10.42 - 1"
+            },
+            "suggest": {
+                "testo/testo": "To test your Rector rules inline with the bundled Testo\\Bridge\\Rector\\Testing harness."
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-1.x": "1.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Testo\\Bridge\\Rector\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "BSD-3-Clause"
+            ],
+            "authors": [
+                {
+                    "name": "Aleksei Gagarin (roxblnfk)",
+                    "homepage": "https://github.com/roxblnfk"
+                }
+            ],
+            "description": "Rector rules to convert test suites between PEST, PHPUnit and Testo.",
+            "keywords": [
+                "migration",
+                "pest",
+                "phpunit",
+                "rector",
+                "testo"
+            ],
+            "support": {
+                "source": "https://github.com/php-testo/bridge-rector/tree/0.2.4"
+            },
+            "funding": [
+                {
+                    "url": "https://boosty.to/roxblnfk",
+                    "type": "boosty"
+                }
+            ],
+            "time": "2026-08-18T05:56:45+00:00"
         }
     ],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {},
+    "stability-flags": {
+        "ichinya/laratesto-rector": 20
+    },
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {

@@ -7,6 +7,7 @@ use Laratesto\LaravelPlugin;
 use Testo\Application\Config\ApplicationConfig;
 use Testo\Application\Config\SuiteConfig;
 use Testo\Bridge\Mockery\MockeryPlugin;
+use Testo\Bridge\Rector\Testing\RectorTestingPlugin;
 use Testo\Convention\NamingConventionPlugin;
 
 return new ApplicationConfig(
@@ -29,6 +30,13 @@ return new ApplicationConfig(
                         ],
                     ),
                 ),
+            ],
+        ),
+        new SuiteConfig(
+            name: 'Rector',
+            location: ['packages/rector/tests'],
+            plugins: [
+                new RectorTestingPlugin(),
             ],
         ),
     ],
