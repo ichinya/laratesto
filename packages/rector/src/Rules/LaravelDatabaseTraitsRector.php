@@ -19,8 +19,7 @@ use PhpParser\Node\Stmt\Property;
 use PhpParser\Node\Stmt\TraitUse;
 use PhpParser\Node\Stmt\Use_;
 use PhpParser\NodeVisitor;
-use PhpParser\Comment;
-use Rector\NodeTypeResolver\Node\AttributeKey;
+use Laratesto\Rector\Residuals\ResidualMarker;
 use Rector\PhpParser\Node\FileNode;
 use Rector\Rector\AbstractRector;
 use Symplify\RuleDocGenerator\ValueObject\CodeSample\CodeSample;
@@ -374,21 +373,11 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
      */
     private function addResidualMarker(Class_ $class, string $attribute): void
     {
-        $marker = \sprintf(
-            'laratesto-residual(rule=%s): %s has custom hook methods — migrate manually',
+        ResidualMarker::mark(
+            $class,
             static::class,
-            (new FullyQualified($attribute))->getLast(),
+            \sprintf('%s has custom hook methods — migrate manually', (new FullyQualified($attribute))->getLast()),
         );
-
-        foreach ($class->getComments() as $comment) {
-            if (\str_contains($comment->getText(), 'laratesto-residual')) {
-                return;
-            }
-        }
-
-        $comments = $class->getAttribute(AttributeKey::COMMENTS) ?? [];
-        $comments[] = new Comment('/* ' . $marker . ' */');
-        $class->setAttribute(AttributeKey::COMMENTS, $comments);
     }
 
     private function fileHasHookMethods(): bool
