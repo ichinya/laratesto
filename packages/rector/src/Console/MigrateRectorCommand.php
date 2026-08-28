@@ -38,6 +38,7 @@ final class MigrateRectorCommand extends Command
     protected $signature = 'laratesto:migrate-rector
         {--path=* : Files or directories to process (default: tests)}
         {--base-class=* : Additional source base classes to convert (the defaults stay active)}
+        {--target-mode=base_class : Conversion target: base_class or trait}
         {--apply : Write the changes in place instead of a dry-run}
         {--allow-dirty : Allow --apply over modified (non-untracked) processed paths}
         {--report= : Residuals report path, relative to the project root (default: laratesto-residuals.json)}';
@@ -53,6 +54,16 @@ final class MigrateRectorCommand extends Command
     {
         $root = (string) $this->laravel->basePath();
         $apply = (bool) $this->option('apply');
+
+        $targetMode = trim((string) $this->option('target-mode'));
+        if (! in_array($targetMode, [
+            LaravelBaseClassRector::TARGET_MODE_BASE_CLASS,
+            LaravelBaseClassRector::TARGET_MODE_TRAIT,
+        ], true)) {
+            $this->error('--target-mode must be "base_class" or "trait".');
+
+            return self::EXIT_FAILURE;
+        }
 
         $paths = $this->paths($root);
 
@@ -104,32 +115,36 @@ final class MigrateRectorCommand extends Command
             return self::EXIT_FAILURE;
         }
 
-        if ($this->rectorReportedErrors()) {
-            $this->error('Rector reported processing errors — see the output above. No report was written.');
-
-            return self::EXIT_FAILURE;
-        }
-
+        // Whatever happens below, the machine-JSON scratch file must not outlive the run.
         try {
-            $residuals = $this->collectResiduals($apply, $paths);
-        } catch (\RuntimeException $failure) {
-            $this->error($failure->getMessage() . ' The previous report, if any, was NOT replaced.');
+            if ($this->rectorReportedErrors()) {
+                $this->error('Rector reported processing errors — see the output above. No report was written.');
 
-            return self::EXIT_FAILURE;
-        }
+                return self::EXIT_FAILURE;
+            }
 
-        @\unlink($this->tempJsonPath());
-        $relativePaths = \array_map(
-            fn(string $path): string => $this->normalizeRelative(\substr($path, \strlen($root) + 1)),
-            $paths,
-        );
+            try {
+                $residuals = $this->collectResiduals($apply, $paths);
+            } catch (\RuntimeException $failure) {
+                $this->error($failure->getMessage() . ' The previous report, if any, was NOT replaced.');
 
-        try {
-            $this->report->write($reportFile, $apply ? 'apply' : 'dry-run', $relativePaths, $residuals);
-        } catch (\RuntimeException $failure) {
-            $this->error($failure->getMessage());
+                return self::EXIT_FAILURE;
+            }
 
-            return self::EXIT_FAILURE;
+            $relativePaths = \array_map(
+                fn(string $path): string => $this->normalizeRelative(\substr($path, \strlen($root) + 1)),
+                $paths,
+            );
+
+            try {
+                $this->report->write($reportFile, $apply ? 'apply' : 'dry-run', $relativePaths, $residuals);
+            } catch (\RuntimeException $failure) {
+                $this->error($failure->getMessage());
+
+                return self::EXIT_FAILURE;
+            }
+        } finally {
+            @\unlink($this->tempJsonPath());
         }
 
         $this->line($this->scanner->renderTable($residuals));
@@ -307,7 +322,11 @@ final class MigrateRectorCommand extends Command
      */
     private function writeConfig(array $paths): string
     {
-        $config = \tempnam(\sys_get_temp_dir(), 'laratesto-rector-') . '.php';
+        // tempnam() creates an empty placeholder we do not use — drop it right away
+        // instead of leaking one per run; the actual config lives next to it.
+        $base = \tempnam(\sys_get_temp_dir(), 'laratesto-rector-');
+        $config = $base . '.php';
+        @\unlink($base);
 
         $pathsCode = \implode(', ', \array_map(
             static fn(string $path): string => \var_export($path, true),
@@ -320,21 +339,33 @@ final class MigrateRectorCommand extends Command
             static fn(mixed $base): string => \trim((string) $base),
             (array) $this->option('base-class'),
         )));
+        $targetMode = \trim((string) $this->option('target-mode'));
 
-        $overrideCode = $extraBases === []
+        $baseConfiguration = $extraBases === []
             ? ''
             : \sprintf(
-                <<<'PHP'
-                    // The set already registered the rule; this re-configures the same instance.
-                    $rectorConfig->ruleWithConfiguration(%s::class, ['base_classes' => [%s]]);
-
-                    PHP,
-                \var_export(LaravelBaseClassRector::class, true),
+                '%s::BASE_CLASSES => [%s],',
+                '\\' . LaravelBaseClassRector::class,
                 \implode(', ', [
                     \var_export('Tests\TestCase', true),
                     \var_export('Illuminate\Foundation\Testing\TestCase', true),
                     ... \array_map(static fn(string $base): string => \var_export($base, true), $extraBases),
                 ]),
+            );
+
+        $overrideCode = \sprintf(
+                <<<'PHP'
+                    // The set already registered the rule; this re-configures the same instance.
+                    $rectorConfig->ruleWithConfiguration(%s::class, [
+                        %s
+                        %s::TARGET_MODE => %s,
+                    ]);
+
+                    PHP,
+                \var_export(LaravelBaseClassRector::class, true),
+                $baseConfiguration,
+                '\\' . LaravelBaseClassRector::class,
+                \var_export($targetMode, true),
             );
 
         \file_put_contents($config, <<<PHP
