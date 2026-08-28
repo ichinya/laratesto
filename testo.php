@@ -34,7 +34,7 @@ return new ApplicationConfig(
         ),
         new SuiteConfig(
             name: 'Rector',
-            location: ['packages/rector/tests'],
+            location: ['packages/rector/tests', 'packages/rector/src'],
             plugins: [
                 new RectorTestingPlugin(),
             ],
