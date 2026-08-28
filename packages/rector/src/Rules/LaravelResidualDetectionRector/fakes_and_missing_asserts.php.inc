@@ -33,7 +33,8 @@ use Illuminate\Foundation\Testing\TestCase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Mail;
 
-/* laratesto-residual(rule=Laratesto\Rector\Rules\LaravelResidualDetectionRector): Mail::fake(), Bus::fake(), withoutExceptionHandling(), assertJsonFragment() — no automatic conversion; migrate manually */
+/* laratesto-residual(code=LARAVEL_FAKE_UNSUPPORTED, rule=Laratesto\Rector\Rules\LaravelResidualDetectionRector, severity=manual): Mail::fake(), Bus::fake() — no stable Testo-native fakes yet; migrate manually */
+/* laratesto-residual(code=RESPONSE_UNSUPPORTED_API, rule=Laratesto\Rector\Rules\LaravelResidualDetectionRector, severity=manual): withoutExceptionHandling(), assertJsonFragment() — no automatic conversion; migrate manually */
 final class SignupTest extends TestCase
 {
     public function test_signup_sends_mail(): void

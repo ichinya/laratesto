@@ -28,7 +28,7 @@ namespace Tests\Support;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 
-/* laratesto-residual(rule=Laratesto\Rector\Rules\LaravelResidualDetectionRector): Laravel constructs outside a convertible hierarchy (RefreshDatabase trait, TestResponse, $this->app) — base class does not resolve; migrate manually */
+/* laratesto-residual(code=LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY, rule=Laratesto\Rector\Rules\LaravelResidualDetectionRector, severity=manual): Laravel constructs outside a convertible hierarchy (RefreshDatabase trait, TestResponse, $this->app) — base class does not resolve; migrate manually */
 abstract class CustomScenario
 {
     use RefreshDatabase;

@@ -151,11 +151,12 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
             return false;
         }
 
-        if ($this->isName($node->extends, self::TARGET_BASE)) {
-            return true;
-        }
-
+        // 'LaravelTestCase' short form matters: within one run LaravelBaseClassRector
+        // may already have rewritten extends to an import-style short name whose scope
+        // snapshot cannot resolve it — the literal match keeps us order-independent.
         return $this->isNames($node->extends, [
+            self::TARGET_BASE,
+            'LaravelTestCase',
             'Tests\TestCase',
             'Illuminate\Foundation\Testing\TestCase',
         ]);
@@ -375,6 +376,7 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
     {
         ResidualMarker::mark(
             $class,
+            'DATABASE_UNSUPPORTED_CONFIGURATION',
             static::class,
             \sprintf('%s has custom hook methods — migrate manually', (new FullyQualified($attribute))->getLast()),
         );

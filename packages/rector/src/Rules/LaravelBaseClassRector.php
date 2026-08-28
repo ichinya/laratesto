@@ -19,6 +19,7 @@ use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\ClassMethod;
 use PhpParser\Node\Stmt\Expression;
 use PhpParser\Node\Stmt\Use_;
+use Rector\Contract\Rector\ConfigurableRectorInterface;
 use Rector\PhpParser\Node\FileNode;
 use Rector\Rector\AbstractRector;
 use Symplify\RuleDocGenerator\ValueObject\CodeSample\CodeSample;
@@ -53,7 +54,7 @@ use Testo\Bridge\Rector\Testing\TestRectorFixtures;
  * the detection rules (ticket 04).
  */
 #[TestRectorFixtures('LaravelBaseClassRector')]
-final class LaravelBaseClassRector extends AbstractRector
+final class LaravelBaseClassRector extends AbstractRector implements ConfigurableRectorInterface
 {
     private const string TARGET_BASE = 'Laratesto\Testing\LaravelTestCase';
 
@@ -62,13 +63,17 @@ final class LaravelBaseClassRector extends AbstractRector
     private const string PHPUNIT_TEST_ATTRIBUTE = 'PHPUnit\Framework\Attributes\Test';
 
     /**
-     * Laravel PHPUnit base classes converted by name. A project-specific base goes first:
-     * the conventional Laravel skeleton TestCase.
+     * Default Laravel PHPUnit base classes converted by name; overridable through
+     * `base_classes` configuration (a project-specific base replaces the list, so
+     * pass the defaults along when you only want to add one).
      */
-    private const array LARAVEL_BASES = [
+    private const array DEFAULT_BASES = [
         'Tests\TestCase',
         'Illuminate\Foundation\Testing\TestCase',
     ];
+
+    /** @var list<non-empty-string> */
+    private array $laravelBases = self::DEFAULT_BASES;
 
     private const string OLD_RESPONSE = 'Illuminate\Testing\TestResponse';
 
@@ -126,6 +131,23 @@ final class LaravelBaseClassRector extends AbstractRector
         return [Class_::class, Use_::class];
     }
 
+    #[\Override]
+    public function configure(array $configuration): void
+    {
+        // `base_classes` overrides the default Laravel bases (Rector's
+        // ruleWithConfiguration() lands here; see the compatibility contract).
+        $bases = $configuration['base_classes'] ?? null;
+
+        if (! \is_array($bases) || $bases === []) {
+            return;
+        }
+
+        $this->laravelBases = \array_values(\array_map(
+            static fn(mixed $base): string => (string) $base,
+            $bases,
+        ));
+    }
+
     /**
      * @param Class_|Use_ $node
      */
@@ -145,7 +167,7 @@ final class LaravelBaseClassRector extends AbstractRector
             return null;
         }
 
-        if (! $this->isNames($node->extends, self::LARAVEL_BASES)) {
+        if (! $this->isNames($node->extends, $this->laravelBases)) {
             return null;
         }
 
@@ -157,7 +179,7 @@ final class LaravelBaseClassRector extends AbstractRector
         $changed = false;
 
         foreach ($node->uses as $use) {
-            if ($this->isNames($use->name, self::LARAVEL_BASES)) {
+            if ($this->isNames($use->name, $this->laravelBases)) {
                 // Inside a use statement the name is resolved as fully qualified anyway;
                 // a plain Name prints without the leading backslash.
                 $use->name = new Name(self::TARGET_BASE);
@@ -177,7 +199,7 @@ final class LaravelBaseClassRector extends AbstractRector
         // the target — Use_ is visited before Class_ in the same traversal); fully
         // qualified when the extends was written long-hand with no import.
         $shortBase = (new FullyQualified(self::TARGET_BASE))->getLast();
-        $wasImported = $this->fileImportsAny(self::LARAVEL_BASES);
+        $wasImported = $this->fileImportsAny($this->laravelBases);
 
         $node->extends = $wasImported
             ? new Name($shortBase)

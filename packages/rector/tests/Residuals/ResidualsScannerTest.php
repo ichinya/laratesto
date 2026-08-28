@@ -39,7 +39,7 @@ final class ResidualsScannerTest
     }
 
     #[Test]
-    public function collectsMarkerWithFileLineRuleAndReason(): void
+    public function collectsMarkerWithFileLineCodeRuleAndReason(): void
     {
         $residuals = $this->scanner->scan('SignupTest.php', <<<"PHP"
             <?php
@@ -48,7 +48,7 @@ final class ResidualsScannerTest
             {
             }
 
-            /* laratesto-residual(rule=Laratesto\\Rector\\Rules\\LaravelResidualDetectionRector): Mail::fake() — no automatic conversion; migrate manually */
+            /* laratesto-residual(code=LARAVEL_FAKE_UNSUPPORTED, rule=Laratesto\\Rector\\Rules\\LaravelResidualDetectionRector, severity=manual): Mail::fake() — no automatic conversion; migrate manually */
             final class SignupTest
             {
             }
@@ -62,6 +62,8 @@ final class ResidualsScannerTest
 
         Assert::same($residual->file, 'SignupTest.php');
         Assert::same($residual->line, 7);
+        Assert::same($residual->code, 'LARAVEL_FAKE_UNSUPPORTED');
+        Assert::same($residual->severity, 'manual');
         Assert::same($residual->rule, 'Laratesto\Rector\Rules\LaravelResidualDetectionRector');
         Assert::same($residual->reason, 'Mail::fake() — no automatic conversion; migrate manually');
     }
@@ -69,8 +71,8 @@ final class ResidualsScannerTest
     #[Test]
     public function rendersTableAndReport(): void
     {
-        $residuals = $this->scanner->scan('A.php', "/* laratesto-residual(rule=RuleOne): first reason */\n");
-        $residuals = [...$residuals, ...$this->scanner->scan('B.php', "line\n/* laratesto-residual(rule=RuleTwo): second reason */\n")];
+        $residuals = $this->scanner->scan('A.php', "/* laratesto-residual(code=TEST_ONE, rule=RuleOne, severity=manual): first reason */\n");
+        $residuals = [...$residuals, ...$this->scanner->scan('B.php', "line\n/* laratesto-residual(code=TEST_TWO, rule=RuleTwo, severity=manual): second reason */\n")];
 
         $table = $this->scanner->renderTable($residuals);
 
@@ -81,7 +83,7 @@ final class ResidualsScannerTest
 
         $report = $this->scanner->renderReport($residuals);
 
-        Assert::true(str_contains($report, '- B.php:2 [RuleTwo] second reason'));
+        Assert::true(str_contains($report, '- B.php:2 [TEST_TWO/RuleTwo] second reason'));
         Assert::count(explode("\n", $report), 6);
     }
 }

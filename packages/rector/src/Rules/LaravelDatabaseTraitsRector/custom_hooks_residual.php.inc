@@ -26,7 +26,7 @@ namespace Tests\Feature;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase;
 
-/* laratesto-residual(rule=Laratesto\Rector\Rules\LaravelDatabaseTraitsRector): RefreshDatabase has custom hook methods — migrate manually */
+/* laratesto-residual(code=DATABASE_UNSUPPORTED_CONFIGURATION, rule=Laratesto\Rector\Rules\LaravelDatabaseTraitsRector, severity=manual): RefreshDatabase has custom hook methods — migrate manually */
 final class CustomHooksTest extends TestCase
 {
     use RefreshDatabase;

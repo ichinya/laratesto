@@ -20,39 +20,48 @@ use Rector\NodeTypeResolver\Node\AttributeKey;
 final class ResidualMarker
 {
     /**
-     * Canonical marker pattern; the scanner's regex is derived from it.
+     * Canonical marker pattern (see the compatibility contract); the scanner's regex is
+     * derived from it.
      */
-    public const string PATTERN = 'laratesto-residual(rule=%s): %s';
+    public const string PATTERN = 'laratesto-residual(code=%s, rule=%s, severity=%s): %s';
 
     /**
-     * Marks the class, unless it already carries a residual marker.
+     * Marks the class with this code, unless it already carries a marker of the same
+     * code — the contract's identity is `code + AST node`, so one class may carry
+     * several distinct codes without any of them duplicating.
      *
+     * @param non-empty-string $code Stable `[A-Z0-9_]+` residual code.
      * @param class-string $rule
      * @param non-empty-string $reason Human-readable reason, no closing comment marker.
-     * @return bool Whether the marker was added (false = already marked, skipped).
+     * @param non-empty-string $severity `manual` or `warning`.
+     * @return bool Whether the marker was added (false = same code already marked).
      */
-    public static function mark(Class_ $class, string $rule, string $reason): bool
+    public static function mark(Class_ $class, string $code, string $rule, string $reason, string $severity = 'manual'): bool
     {
+        $needle = \sprintf('laratesto-residual(code=%s,', $code);
+
         foreach ($class->getComments() as $comment) {
-            if (\str_contains($comment->getText(), 'laratesto-residual')) {
+            if (\str_contains($comment->getText(), $needle)) {
                 return false;
             }
         }
 
         $comments = $class->getAttribute(AttributeKey::COMMENTS) ?? [];
-        $comments[] = new Comment(\sprintf('/* ' . self::PATTERN . ' */', $rule, $reason));
+        $comments[] = new Comment(\sprintf('/* ' . self::PATTERN . ' */', $code, $rule, $severity, $reason));
         $class->setAttribute(AttributeKey::COMMENTS, $comments);
 
         return true;
     }
 
     /**
-     * Whether the node already carries a residual marker.
+     * Whether the node already carries a marker of this code.
      */
-    public static function isMarked(Node $node): bool
+    public static function isMarked(Node $node, string $code): bool
     {
+        $needle = \sprintf('laratesto-residual(code=%s,', $code);
+
         foreach ($node->getComments() as $comment) {
-            if (\str_contains($comment->getText(), 'laratesto-residual')) {
+            if (\str_contains($comment->getText(), $needle)) {
                 return true;
             }
         }

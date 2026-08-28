@@ -111,7 +111,7 @@ final class LaravelResidualDetectionRector extends AbstractRector
                         use Illuminate\Foundation\Testing\TestCase;
                         use Illuminate\Support\Facades\Mail;
 
-                        /* laratesto-residual(rule=Laratesto\Rector\Rules\LaravelResidualDetectionRector): Mail::fake() — no automatic conversion; migrate manually */
+                        /* laratesto-residual(code=LARAVEL_FAKE_UNSUPPORTED, rule=Laratesto\Rector\Rules\LaravelResidualDetectionRector, severity=manual): Mail::fake() — no stable Testo-native fakes yet; migrate manually */
                         final class SignupTest extends TestCase
                         {
                             public function test_signup_sends_mail(): void
@@ -151,11 +151,15 @@ final class LaravelResidualDetectionRector extends AbstractRector
             return false;
         }
 
-        return $this->isName($node->extends, self::TARGET_BASE)
-            || $this->isNames($node->extends, [
-                'Tests\TestCase',
-                'Illuminate\Foundation\Testing\TestCase',
-            ]);
+        // 'LaravelTestCase' short form matters: within one run LaravelBaseClassRector
+        // may already have rewritten extends to an import-style short name whose scope
+        // snapshot cannot resolve it — the literal match keeps us order-independent.
+        return $this->isNames($node->extends, [
+            self::TARGET_BASE,
+            'LaravelTestCase',
+            'Tests\TestCase',
+            'Illuminate\Foundation\Testing\TestCase',
+        ]);
     }
 
     /**
@@ -163,13 +167,14 @@ final class LaravelResidualDetectionRector extends AbstractRector
      */
     private function detectUnsupportedInside(Class_ $node): ?Node
     {
-        $found = [];
+        $fakes = [];
+        $unsupported = [];
 
-        $this->traverseNodesWithCallable($node->stmts, function (Node $inner) use (&$found): void {
+        $this->traverseNodesWithCallable($node->stmts, function (Node $inner) use (&$fakes, &$unsupported): void {
             if ($inner instanceof StaticCall
                 && $this->isNames($inner->class, self::FAKE_FACADES)
                 && $this->isName($inner->name, 'fake')) {
-                $found[] = \sprintf(
+                $fakes[] = \sprintf(
                     '%s::fake()',
                     (new FullyQualified((string) $this->getName($inner->class)))->getLast(),
                 );
@@ -179,22 +184,29 @@ final class LaravelResidualDetectionRector extends AbstractRector
 
             if ($inner instanceof MethodCall
                 && $this->isNames($inner->name, self::UNSUPPORTED_METHOD_CALLS)) {
-                $found[] = \sprintf('%s()', $this->getName($inner->name));
+                $unsupported[] = \sprintf('%s()', $this->getName($inner->name));
             }
         });
 
-        if ($found === []) {
-            return null;
-        }
+        $changed = false;
 
-        ResidualMarker::mark(
+        $fakes !== [] and $changed = ResidualMarker::mark(
             $node,
+            'LARAVEL_FAKE_UNSUPPORTED',
             static::class,
-            \implode(', ', \array_values(\array_unique($found)))
-                . ' — no automatic conversion; migrate manually',
+            \implode(', ', \array_values(\array_unique($fakes)))
+                . ' — no stable Testo-native fakes yet; migrate manually',
         );
 
-        return $node;
+        $unsupported !== [] and $changed = ResidualMarker::mark(
+            $node,
+            'RESPONSE_UNSUPPORTED_API',
+            static::class,
+            \implode(', ', \array_values(\array_unique($unsupported)))
+                . ' — no automatic conversion; migrate manually',
+        ) || $changed;
+
+        return $changed ? $node : null;
     }
 
     /**
@@ -237,6 +249,7 @@ final class LaravelResidualDetectionRector extends AbstractRector
 
         ResidualMarker::mark(
             $node,
+            'LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY',
             static::class,
             'Laravel constructs outside a convertible hierarchy ('
             . \implode(', ', \array_values(\array_unique($found)))
