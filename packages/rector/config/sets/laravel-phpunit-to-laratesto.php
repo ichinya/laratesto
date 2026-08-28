@@ -14,7 +14,10 @@ return static function (RectorConfig $rectorConfig): void {
     $rectorConfig->import(TestoRectorSetList::PHPUNIT_TO_TESTO);
 
     // Laravel-specific rules.
-    $rectorConfig->rule(LaravelBaseClassRector::class);
+    $rectorConfig->ruleWithConfiguration(LaravelBaseClassRector::class, [
+        LaravelBaseClassRector::BASE_CLASSES => LaravelBaseClassRector::DEFAULT_BASE_CLASSES,
+        LaravelBaseClassRector::TARGET_MODE => LaravelBaseClassRector::TARGET_MODE_BASE_CLASS,
+    ]);
     $rectorConfig->rule(LaravelDatabaseTraitsRector::class);
     $rectorConfig->rule(LaravelSourceCompatibleCallsRector::class);
     $rectorConfig->rule(LaravelResidualDetectionRector::class);

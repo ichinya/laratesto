@@ -134,7 +134,7 @@ final readonly class LaravelResponse
         );
 
         if ($value !== null) {
-            Assert::same(\strtolower((string) $actual), \strtolower($value), \sprintf(
+            Assert::same((string) $actual, $value, \sprintf(
                 'Expected header "%s" to be "%s", got "%s".',
                 $name,
                 $value,
@@ -146,13 +146,18 @@ final readonly class LaravelResponse
     }
 
     /**
-     * Assert that the response body is JSON equal to the expected value.
+     * Assert that the response JSON contains the expected recursive subset.
      *
      * @param array<array-key, mixed> $expected
      */
-    public function assertJson(array $expected): static
+    public function assertJson(array $expected, bool $strict = false): static
     {
-        Assert::same($this->json(), $expected, 'The JSON response does not match the expected value.');
+        $actual = $this->json();
+
+        Assert::true(
+            \is_array($actual) && self::jsonContains($expected, $actual, $strict),
+            'The JSON response does not contain the expected subset.',
+        );
 
         return $this;
     }
@@ -664,6 +669,36 @@ final readonly class LaravelResponse
         return \is_scalar($value) || $value === null
             ? \var_export($value, true)
             : (string) \json_encode($value, \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * Laravel's assertJson(array, strict) remains a subset assertion; strict controls
+     * scalar type/value comparison, while assertExactJson owns whole-document equality.
+     *
+     * @param array<array-key, mixed> $expected
+     * @param array<array-key, mixed> $actual
+     */
+    private static function jsonContains(array $expected, array $actual, bool $strict): bool
+    {
+        foreach ($expected as $key => $value) {
+            if (! \array_key_exists($key, $actual)) {
+                return false;
+            }
+
+            if (\is_array($value)) {
+                if (! \is_array($actual[$key]) || ! self::jsonContains($value, $actual[$key], $strict)) {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if ($strict ? $actual[$key] !== $value : $actual[$key] != $value) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function session(): Session

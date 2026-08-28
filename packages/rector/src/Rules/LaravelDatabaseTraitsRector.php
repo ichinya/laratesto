@@ -4,116 +4,50 @@ declare(strict_types=1);
 
 namespace Laratesto\Rector\Rules;
 
+use Laratesto\Rector\Analysis\DatabaseConfigurationAnalysis;
+use Laratesto\Rector\Analysis\DatabaseConfigurationAnalyzer;
+use Laratesto\Rector\Residuals\ResidualMarker;
 use PhpParser\Node;
 use PhpParser\Node\Arg;
 use PhpParser\Node\Attribute;
 use PhpParser\Node\AttributeGroup;
-use PhpParser\Node\Expr;
 use PhpParser\Node\Identifier;
-use PhpParser\Node\Name;
 use PhpParser\Node\Name\FullyQualified;
-use PhpParser\Node\Scalar;
-use PhpParser\Node\Stmt;
 use PhpParser\Node\Stmt\Class_;
-use PhpParser\Node\Stmt\Property;
 use PhpParser\Node\Stmt\TraitUse;
-use PhpParser\Node\Stmt\Use_;
-use PhpParser\NodeVisitor;
-use Laratesto\Rector\Residuals\ResidualMarker;
+use PhpParser\NodeFinder;
 use Rector\PhpParser\Node\FileNode;
 use Rector\Rector\AbstractRector;
 use Symplify\RuleDocGenerator\ValueObject\CodeSample\CodeSample;
 use Symplify\RuleDocGenerator\ValueObject\RuleDefinition;
 use Testo\Bridge\Rector\Testing\TestRectorFixtures;
 
-/**
- * Converts Laravel database traits to Laratesto class attributes.
- *
- * ```php
- * use Illuminate\Foundation\Testing\RefreshDatabase;
- *
- * final class UsersTest extends Tests\TestCase
- * {
- *     use RefreshDatabase;
- * }
- * ```
- * becomes
- * ```php
- * use Laratesto\Testing\LaravelTestCase;
- *
- * #[\Laratesto\Attribute\RefreshDatabase]
- * final class UsersTest extends LaravelTestCase
- * {
- * }
- * ```
- *
- * Trait options configured as class properties (`$seed`, `$seeder`, `$connection`,
- * `$tablesToTruncate`, `$dropViews`, `$dropTypes` — literal values only) migrate into
- * attribute arguments; the property is dropped when nothing else references it.
- *
- * Custom trait hooks (`beforeRefreshingDatabase`, `afterRefreshingDatabase`,
- * `beforeTruncatingDatabase`, `afterTruncatingDatabase`) have no automatic counterpart:
- * the trait is kept in place and the class gets a greppable residual marker — the
- * scanner (ticket 04) surfaces it in the report; the migration is manual.
- */
+/** Atomically converts one statically supported Laravel database trait. */
 #[TestRectorFixtures('LaravelDatabaseTraitsRector')]
 final class LaravelDatabaseTraitsRector extends AbstractRector
 {
-    /**
-     * Laravel PHPUnit database trait => Laratesto attribute.
-     */
-    private const array TRAITS = [
-        'Illuminate\Foundation\Testing\RefreshDatabase' => 'Laratesto\Attribute\RefreshDatabase',
-        'Illuminate\Foundation\Testing\DatabaseTransactions' => 'Laratesto\Attribute\DatabaseTransactions',
-        'Illuminate\Foundation\Testing\DatabaseMigrations' => 'Laratesto\Attribute\DatabaseMigrations',
-        'Illuminate\Foundation\Testing\DatabaseTruncation' => 'Laratesto\Attribute\DatabaseTruncation',
-    ];
+    /** @var array<string, list<non-empty-string>> */
+    private array $pendingImportRemovals = [];
 
-    /**
-     * Property configuring a trait => attribute argument it becomes
-     * (`tablesToTruncate` is the PHPUnit trait's name for the table list).
-     */
-    private const array PROPERTY_OPTIONS = [
-        'seed' => 'seed',
-        'seeder' => 'seeder',
-        'connection' => 'connection',
-        'tablesToTruncate' => 'tables',
-        'dropViews' => 'dropViews',
-        'dropTypes' => 'dropTypes',
-    ];
-
-    /**
-     * Customization hooks that block automatic conversion of their trait.
-     */
-    private const array HOOK_METHODS = [
-        'beforeRefreshingDatabase',
-        'afterRefreshingDatabase',
-        'beforeTruncatingDatabase',
-        'afterTruncatingDatabase',
-    ];
-
-    private const string TARGET_BASE = 'Laratesto\Testing\LaravelTestCase';
+    public function __construct(
+        private readonly DatabaseConfigurationAnalyzer $analyzer,
+    ) {}
 
     public function getRuleDefinition(): RuleDefinition
     {
         return new RuleDefinition(
-            'Convert Laravel database traits (RefreshDatabase, DatabaseTransactions, DatabaseMigrations, DatabaseTruncation) to Laratesto attributes',
+            'Atomically convert supported Laravel database traits and literal configuration to Laratesto attributes',
             [
                 new CodeSample(
                     <<<'PHP'
-                        use Illuminate\Foundation\Testing\RefreshDatabase;
-                        use Illuminate\Foundation\Testing\TestCase;
-
-                        final class UsersTest extends TestCase
+                        final class UsersTest extends \Illuminate\Foundation\Testing\TestCase
                         {
-                            use RefreshDatabase;
+                            use \Illuminate\Foundation\Testing\RefreshDatabase;
                         }
                         PHP,
                     <<<'PHP'
-                        use Illuminate\Foundation\Testing\TestCase;
-
                         #[\Laratesto\Attribute\RefreshDatabase]
-                        final class UsersTest extends TestCase
+                        final class UsersTest extends \Illuminate\Foundation\Testing\TestCase
                         {
                         }
                         PHP,
@@ -125,300 +59,162 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
     #[\Override]
     public function getNodeTypes(): array
     {
-        return [Class_::class, Use_::class];
+        return [FileNode::class, Class_::class];
     }
 
-    /**
-     * @param Class_|Use_ $node
-     */
+    /** @param FileNode|Class_ $node */
     #[\Override]
     public function refactor(Node $node): null|Node|int
     {
-        if ($node instanceof Use_) {
-            return $this->refactorUse($node);
+        if ($node instanceof FileNode) {
+            return $this->removeQueuedImports($node);
         }
 
-        if (! $this->isLaravelTestClass($node)) {
+        if (! $this->isLaravelTestClass($node) || $this->hasBlockingMarker($node)) {
             return null;
         }
 
-        return $this->convertTraits($node);
-    }
+        $analysis = $this->analyzer->analyze($node);
 
-    private function isLaravelTestClass(Class_ $node): bool
-    {
-        if ($node->extends === null) {
-            return false;
+        if ($analysis->unsupportedReason !== null) {
+            $changed = ResidualMarker::mark(
+                $node,
+                'DATABASE_UNSUPPORTED_CONFIGURATION',
+                static::class,
+                $analysis->unsupportedReason,
+            );
+
+            return $changed ? $node : null;
         }
 
-        // 'LaravelTestCase' short form matters: within one run LaravelBaseClassRector
-        // may already have rewritten extends to an import-style short name whose scope
-        // snapshot cannot resolve it — the literal match keeps us order-independent.
-        return $this->isNames($node->extends, [
-            self::TARGET_BASE,
+        if (! $analysis->supported()) {
+            return null;
+        }
+
+        $this->applyConversion($node, $analysis);
+        $symbols = [(string) $analysis->sourceTrait];
+        foreach ($analysis->removableAttributes as $attribute) {
+            $name = $this->analyzer->resolvedName($attribute->name);
+            $name !== null and $symbols[] = $name;
+        }
+        $this->queueImportsWithoutRemainingUses(array_values(array_unique($symbols)));
+
+        return $node;
+    }
+
+    private function applyConversion(Class_ $class, DatabaseConfigurationAnalysis $analysis): void
+    {
+        $arguments = [];
+        foreach (['seed', 'seeder', 'dropViews', 'dropTypes', 'connections', 'tables', 'exceptTables'] as $name) {
+            if (isset($analysis->options[$name])) {
+                $arguments[] = new Arg($analysis->options[$name], name: new Identifier($name));
+            }
+        }
+
+        $class->attrGroups[] = new AttributeGroup([
+            new Attribute(new FullyQualified((string) $analysis->targetAttribute), $arguments),
+        ]);
+
+        foreach ($class->stmts as $key => $statement) {
+            if ($statement === $analysis->traitUse) {
+                /** @var TraitUse $statement */
+                $statement->traits = array_values(array_filter(
+                    $statement->traits,
+                    fn(Node\Name $trait): bool => $this->analyzer->resolvedName($trait) !== $analysis->sourceTrait,
+                ));
+
+                if ($statement->traits === []) {
+                    unset($class->stmts[$key]);
+                }
+            }
+
+            foreach ($analysis->removableProperties as $property) {
+                if ($statement === $property) {
+                    unset($class->stmts[$key]);
+                }
+            }
+        }
+        $class->stmts = array_values($class->stmts);
+
+        foreach ($class->attrGroups as $groupKey => $group) {
+            $group->attrs = array_values(array_filter(
+                $group->attrs,
+                static fn(Attribute $attribute): bool => ! in_array($attribute, $analysis->removableAttributes, true),
+            ));
+
+            if ($group->attrs === []) {
+                unset($class->attrGroups[$groupKey]);
+            }
+        }
+        $class->attrGroups = array_values($class->attrGroups);
+    }
+
+    private function isLaravelTestClass(Class_ $class): bool
+    {
+        return $class->extends !== null && $this->isNames($class->extends, [
+            'Laratesto\Testing\LaravelTestCase',
             'LaravelTestCase',
             'Tests\TestCase',
             'Illuminate\Foundation\Testing\TestCase',
         ]);
     }
 
-    private function refactorUse(Use_ $node): null|Node|int
+    private function hasBlockingMarker(Class_ $class): bool
     {
-        $uses = [];
-
-        foreach ($node->uses as $use) {
-            if ($this->isNames($use->name, array_keys(self::TRAITS))
-                && $this->fileConvertsTrait($use->name)) {
-                continue;
+        foreach ([
+            'CLASS_UNSAFE_HIERARCHY',
+            'LIFECYCLE_UNSUPPORTED',
+            'HTTP_UNSUPPORTED_SIGNATURE',
+            'RESPONSE_UNSUPPORTED_API',
+            'ARTISAN_INTERACTION_UNSUPPORTED',
+        ] as $code) {
+            if (ResidualMarker::isMarked($class, $code)) {
+                return true;
             }
-
-            $uses[] = $use;
         }
 
-        if ($uses === []) {
-            return NodeVisitor::REMOVE_NODE;
-        }
-
-        if (\count($uses) === \count($node->uses)) {
-            return null;
-        }
-
-        $node->uses = $uses;
-
-        return $node;
+        return false;
     }
 
-    /**
-     * Whether the file holds a Laravel test class whose use of this trait this run
-     * converts (a plain PHPUnit class, or hooks blocking conversion, keeps the import —
-     * removing it there would break the leftover `use TraitName;` in the class body).
-     */
-    private function fileConvertsTrait(Name $trait): bool
+    /** @param list<non-empty-string> $symbols */
+    private function queueImportsWithoutRemainingUses(array $symbols): void
     {
-        if ($this->fileHasHookMethods()) {
-            return false;
-        }
+        $statements = $this->getFile()->getNewStmts();
+        $nodeFinder = new NodeFinder();
 
-        foreach ($this->topLevelStmts() as $stmt) {
-            if (! $stmt instanceof Class_ || ! $this->isLaravelTestClass($stmt)) {
-                continue;
-            }
+        foreach ($symbols as $key => $symbol) {
+            /** @var list<Class_> $classes */
+            $classes = $nodeFinder->findInstanceOf($statements, Class_::class);
 
-            foreach ($stmt->stmts as $classStmt) {
-                if ($classStmt instanceof TraitUse) {
-                    foreach ($classStmt->traits as $candidate) {
-                        if ($this->isName($candidate, $this->getName($trait) ?? '')) {
-                            return true;
-                        }
+            foreach ($classes as $class) {
+                /** @var list<Node\Name> $names */
+                $names = $nodeFinder->findInstanceOf($class, Node\Name::class);
+                foreach ($names as $name) {
+                    if ($this->analyzer->resolvedName($name) === $symbol) {
+                        unset($symbols[$key]);
+                        continue 3;
                     }
                 }
             }
         }
 
-        return false;
-    }
-
-    private function convertTraits(Class_ $node): ?Node
-    {
-        $changed = false;
-
-        foreach ($node->stmts as $key => $stmt) {
-            if (! $stmt instanceof TraitUse) {
-                continue;
-            }
-
-            foreach ($stmt->traits as $trait) {
-                $attribute = $this->traitTarget($trait);
-
-                if ($attribute === null) {
-                    continue;
-                }
-
-                if ($this->fileHasHookMethods()) {
-                    // Manual migration required — leave the trait, mark the class.
-                    $this->addResidualMarker($node, $attribute);
-
-                    continue;
-                }
-
-                $this->addAttribute($node, $attribute, $this->collectOptions($node, $trait));
-                $this->removeTraitUse($node, $key, $stmt);
-                $changed = true;
-            }
+        if ($symbols === []) {
+            return;
         }
 
-        return $changed ? $node : null;
+        $filePath = $this->getFile()->getFilePath();
+        $this->pendingImportRemovals[$filePath] = array_values(array_unique([
+            ...($this->pendingImportRemovals[$filePath] ?? []),
+            ...$symbols,
+        ]));
     }
 
-    private function traitTarget(Name $trait): ?string
+    private function removeQueuedImports(FileNode $fileNode): ?FileNode
     {
-        foreach (self::TRAITS as $from => $to) {
-            if ($this->isName($trait, $from)) {
-                return $to;
-            }
-        }
+        $filePath = $this->getFile()->getFilePath();
+        $symbols = $this->pendingImportRemovals[$filePath] ?? [];
+        unset($this->pendingImportRemovals[$filePath]);
 
-        return null;
-    }
-
-    /**
-     * Literal trait-option properties of the class, keyed by attribute argument name.
-     *
-     * @return array<non-empty-string, Arg>
-     */
-    private function collectOptions(Class_ $class, Name $trait): array
-    {
-        $options = [];
-
-        foreach ($class->getProperties() as $property) {
-            $name = $property->props[0]->name?->toString() ?? null;
-
-            if ($name === null || ! isset(self::PROPERTY_OPTIONS[$name])) {
-                continue;
-            }
-
-            // No default value (or a non-literal one) — leave the option alone.
-            $default = $property->props[0]->default;
-
-            if (! $this->isLiteralValue($default)) {
-                continue;
-            }
-
-            if ($this->propertyIsReferenced($class, $name)) {
-                continue;
-            }
-
-            $options[self::PROPERTY_OPTIONS[$name]] = new Arg($default, name: new Identifier(self::PROPERTY_OPTIONS[$name]));
-            $this->removeProperty($class, $property);
-        }
-
-        return $options;
-    }
-
-    private function isLiteralValue(?Node\Expr $expr): bool
-    {
-        if ($expr instanceof Scalar\String_ || $expr instanceof Node\Expr\ConstFetch) {
-            return true;
-        }
-
-        if ($expr instanceof Node\Expr\Array_) {
-            foreach ($expr->items as $item) {
-                if ($item === null || ! $this->isLiteralValue($item->value)) {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        return false;
-    }
-
-    private function propertyIsReferenced(Class_ $class, string $name): bool
-    {
-        $referenced = false;
-
-        $this->traverseNodesWithCallable($class->stmts, function (Node $node) use ($name, &$referenced): void {
-            if ($node instanceof Expr\PropertyFetch
-                && $node->var instanceof Expr\Variable
-                && $node->var->name === 'this'
-                && $node->name instanceof Identifier
-                && $node->name->toString() === $name) {
-                $referenced = true;
-            }
-        });
-
-        return $referenced;
-    }
-
-    private function removeProperty(Class_ $class, Property $property): void
-    {
-        foreach ($class->stmts as $key => $stmt) {
-            if ($stmt === $property) {
-                unset($class->stmts[$key]);
-                $class->stmts = array_values($class->stmts);
-
-                return;
-            }
-        }
-    }
-
-    private function removeTraitUse(Class_ $class, int $key, TraitUse $use): void
-    {
-        unset($class->stmts[$key]);
-        $class->stmts = array_values($class->stmts);
-    }
-
-    /**
-     * @param array<non-empty-string, Arg> $options
-     */
-    private function addAttribute(Class_ $class, string $attribute, array $options): void
-    {
-        // Idempotency: an existing attribute of the same name wins.
-        foreach ($class->attrGroups as $group) {
-            foreach ($group->attrs as $attr) {
-                if ($this->isName($attr->name, $attribute)) {
-                    return;
-                }
-            }
-        }
-
-        $class->attrGroups[] = new AttributeGroup([
-            new Attribute(new FullyQualified($attribute), array_values($options)),
-        ]);
-    }
-
-    /**
-     * Attaches the canonical residual marker (see ticket 04): replace-or-skip, never
-     * duplicated.
-     */
-    private function addResidualMarker(Class_ $class, string $attribute): void
-    {
-        ResidualMarker::mark(
-            $class,
-            'DATABASE_UNSUPPORTED_CONFIGURATION',
-            static::class,
-            \sprintf('%s has custom hook methods — migrate manually', (new FullyQualified($attribute))->getLast()),
-        );
-    }
-
-    private function fileHasHookMethods(): bool
-    {
-        foreach ($this->topLevelStmts() as $stmt) {
-            if (! $stmt instanceof Stmt\ClassLike) {
-                continue;
-            }
-
-            foreach ($stmt->getMethods() as $method) {
-                $name = $this->getName($method->name);
-
-                if ($name !== null && \in_array($name, self::HOOK_METHODS, true)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Class-like statements of the file, unwrapped from the Rector FileNode and
-     * namespace blocks.
-     *
-     * @return list<Stmt>
-     */
-    private function topLevelStmts(): array
-    {
-        $result = [];
-
-        foreach ($this->getFile()->getOldStmts() as $stmt) {
-            $stmts = $stmt instanceof FileNode ? $stmt->stmts : [$stmt];
-
-            foreach ($stmts as $inner) {
-                $result[] = $inner instanceof Stmt\Namespace_ ? $inner->stmts : [$inner];
-            }
-        }
-
-        return array_merge(...$result);
+        return $symbols !== [] && $fileNode->removeImports($symbols) ? $fileNode : null;
     }
 }

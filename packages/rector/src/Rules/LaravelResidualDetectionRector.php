@@ -63,9 +63,12 @@ final class LaravelResidualDetectionRector extends AbstractRector
     /**
      * Response/method calls inside a Laravel test that Laratesto does not provide.
      */
-    private const array UNSUPPORTED_METHOD_CALLS = [
+    private const array UNSUPPORTED_TEST_HELPERS = [
         'withoutExceptionHandling',
         'withExceptionHandling',
+    ];
+
+    private const array UNSUPPORTED_RESPONSE_METHODS = [
         'assertJsonFragment',
         'assertJsonCount',
         'assertCookie',
@@ -168,9 +171,10 @@ final class LaravelResidualDetectionRector extends AbstractRector
     private function detectUnsupportedInside(Class_ $node): ?Node
     {
         $fakes = [];
-        $unsupported = [];
+        $unsupportedHelpers = [];
+        $unsupportedResponses = [];
 
-        $this->traverseNodesWithCallable($node->stmts, function (Node $inner) use (&$fakes, &$unsupported): void {
+        $this->traverseNodesWithCallable($node->stmts, function (Node $inner) use (&$fakes, &$unsupportedHelpers, &$unsupportedResponses): void {
             if ($inner instanceof StaticCall
                 && $this->isNames($inner->class, self::FAKE_FACADES)
                 && $this->isName($inner->name, 'fake')) {
@@ -182,9 +186,16 @@ final class LaravelResidualDetectionRector extends AbstractRector
                 return;
             }
 
-            if ($inner instanceof MethodCall
-                && $this->isNames($inner->name, self::UNSUPPORTED_METHOD_CALLS)) {
-                $unsupported[] = \sprintf('%s()', $this->getName($inner->name));
+            if (! $inner instanceof MethodCall) {
+                return;
+            }
+
+            if ($this->isNames($inner->name, self::UNSUPPORTED_TEST_HELPERS)) {
+                $unsupportedHelpers[] = \sprintf('%s()', $this->getName($inner->name));
+            }
+
+            if ($this->isNames($inner->name, self::UNSUPPORTED_RESPONSE_METHODS)) {
+                $unsupportedResponses[] = \sprintf('%s()', $this->getName($inner->name));
             }
         });
 
@@ -198,11 +209,19 @@ final class LaravelResidualDetectionRector extends AbstractRector
                 . ' — no stable Testo-native fakes yet; migrate manually',
         );
 
-        $unsupported !== [] and $changed = ResidualMarker::mark(
+        $unsupportedHelpers !== [] and $changed = ResidualMarker::mark(
+            $node,
+            'HTTP_UNSUPPORTED_SIGNATURE',
+            static::class,
+            \implode(', ', \array_values(\array_unique($unsupportedHelpers)))
+                . ' — no automatic helper conversion; migrate manually',
+        ) || $changed;
+
+        $unsupportedResponses !== [] and $changed = ResidualMarker::mark(
             $node,
             'RESPONSE_UNSUPPORTED_API',
             static::class,
-            \implode(', ', \array_values(\array_unique($unsupported)))
+            \implode(', ', \array_values(\array_unique($unsupportedResponses)))
                 . ' — no automatic conversion; migrate manually',
         ) || $changed;
 

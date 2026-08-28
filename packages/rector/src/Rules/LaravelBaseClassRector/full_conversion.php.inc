@@ -39,10 +39,10 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Laratesto\Testing\LaravelTestCase;
-use Laratesto\Testing\LaravelResponse;
+use Illuminate\Foundation\Testing\TestCase;
+use Illuminate\Testing\TestResponse;
 
-final class UsersListTest extends LaravelTestCase
+final class UsersListTest extends \Laratesto\Testing\LaravelTestCase
 {
     use RefreshDatabase;
 
@@ -51,7 +51,7 @@ final class UsersListTest extends LaravelTestCase
         $this->make('router');
     }
 
-    public function response(): LaravelResponse
+    public function response(): TestResponse
     {
         return $this->get('/users');
     }

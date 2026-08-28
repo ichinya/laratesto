@@ -15,7 +15,7 @@ use Testo\Pipeline\Attribute\Interceptable;
  * #[DatabaseTruncation]
  * public function testReportListsUsers(): void { ... }
  *
- * #[DatabaseTruncation(connection: 'replica', tables: ['users', 'orders'])]
+ * #[DatabaseTruncation(connections: ['replica'], tables: ['users', 'orders'])]
  * public function testOrdersAreRebuilt(): void { ... }
  * ```
  *
@@ -34,18 +34,19 @@ final readonly class DatabaseTruncation implements Interceptable
     /**
      * @param bool $seed Run the database seeder after truncating.
      * @param string|null $seeder Use a specific seeder class instead of the default one.
-     * @param string|null $connection Database connection to truncate (null = default).
-     * @param list<non-empty-string>|null $tables Truncate only these tables
-     *        (null = every table on the connection).
+     * @param list<non-empty-string|null>|null $connections Connections to truncate.
+     * @param list<non-empty-string>|array<string, list<non-empty-string>>|null $tables
+     * @param list<non-empty-string>|array<string, list<non-empty-string>>|null $exceptTables
      * @param bool $dropViews Drop views during the initial migrate:fresh, when it runs.
      * @param bool $dropTypes Drop types during the initial migrate:fresh, when it runs.
      */
     public function __construct(
         public bool $seed = false,
         public ?string $seeder = null,
-        public ?string $connection = null,
-        public ?array $tables = null,
         public bool $dropViews = false,
         public bool $dropTypes = false,
+        public ?array $connections = null,
+        public ?array $tables = null,
+        public ?array $exceptTables = null,
     ) {}
 }

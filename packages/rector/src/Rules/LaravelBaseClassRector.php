@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Laratesto\Rector\Rules;
 
+use Laratesto\Rector\Analysis\DatabaseConfigurationAnalyzer;
+use Laratesto\Rector\Analysis\HttpCompatibilityAnalyzer;
+use Laratesto\Rector\Residuals\ResidualMarker;
 use PhpParser\Node;
 use PhpParser\Node\Attribute;
 use PhpParser\Node\AttributeGroup;
@@ -12,110 +15,97 @@ use PhpParser\Node\Expr\MethodCall;
 use PhpParser\Node\Expr\PropertyFetch;
 use PhpParser\Node\Expr\StaticCall;
 use PhpParser\Node\Identifier;
-use PhpParser\Node\Name;
 use PhpParser\Node\Name\FullyQualified;
 use PhpParser\Node\Stmt;
 use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\ClassMethod;
 use PhpParser\Node\Stmt\Expression;
-use PhpParser\Node\Stmt\Use_;
+use PhpParser\Node\Stmt\TraitUse;
 use Rector\Contract\Rector\ConfigurableRectorInterface;
-use Rector\PhpParser\Node\FileNode;
+use Rector\PhpParser\AstResolver;
 use Rector\Rector\AbstractRector;
 use Symplify\RuleDocGenerator\ValueObject\CodeSample\CodeSample;
 use Symplify\RuleDocGenerator\ValueObject\RuleDefinition;
 use Testo\Bridge\Rector\Testing\TestRectorFixtures;
 
 /**
- * Converts a Laravel PHPUnit test class to the Laratesto base class.
- *
- * Applies to a class whose `extends` names a Laravel test base — the default targets
- * are `Tests\TestCase` (the conventional project base, configurable) and
- * `Illuminate\Foundation\Testing\TestCase`; matching is by name, fully-qualified,
- * imported or aliased alike. The deterministic conversion axis of the hybrid
- * detection decision: everything happens INSIDE a matched class, nothing outside.
- *
- * Inside a matched class the rule:
- *   - rewrites `extends` to `Laratesto\Testing\LaravelTestCase`
- *     (import-style when a `use` of the old base exists, fully-qualified otherwise),
- *   - renames `setUp()`/`tearDown()` to `setUpLaravel()`/`tearDownLaravel()` and drops
- *     their `parent::setUp()` / `parent::tearDown()` calls — the Laratesto bridge runs
- *     the lifecycle itself (also removes a `#[Testo\Lifecycle\...]` attribute that the
- *     upstream generic rule may have attached before the rename),
- *   - marks test methods with `#[\Testo\Test]` the way upstream does for plain PHPUnit
- *     classes (attribute rewrite for `#[PHPUnit\Framework\Attributes\Test]`, addition
- *     for `test`-prefixed public methods),
- *   - rewrites `$this->app` to `$this->app()` and `$this->app->make(X)` to `$this->make(X)`,
- *   - rewrites `Illuminate\Testing\TestResponse` references (typehints, imports, FQ usages)
- *     to `Laratesto\Testing\LaravelResponse`.
- *
- * Idempotent: a class already extending LaravelTestCase is left untouched. Classes with
- * an unresolvable or custom base are not touched here — they surface as residuals via
- * the detection rules (ticket 04).
+ * Atomically converts an eligible Laravel PHPUnit class to one of the two
+ * Laratesto targets. A failed preflight adds a residual marker and deliberately
+ * leaves the class hierarchy, lifecycle and `$this->app` expressions untouched.
  */
 #[TestRectorFixtures('LaravelBaseClassRector')]
 final class LaravelBaseClassRector extends AbstractRector implements ConfigurableRectorInterface
 {
+    public const string BASE_CLASSES = 'base_classes';
+
+    public const string TARGET_MODE = 'target_mode';
+
+    public const string TARGET_MODE_BASE_CLASS = 'base_class';
+
+    public const string TARGET_MODE_TRAIT = 'trait';
+
+    /** @var list<non-empty-string> */
+    public const array DEFAULT_BASE_CLASSES = [
+        'Tests\TestCase',
+        'Illuminate\Foundation\Testing\TestCase',
+    ];
+
+    private const string FRAMEWORK_BASE = 'Illuminate\Foundation\Testing\TestCase';
+
     private const string TARGET_BASE = 'Laratesto\Testing\LaravelTestCase';
+
+    private const string TARGET_TRAIT = 'Laratesto\Testing\InteractsWithLaravel';
 
     private const string TEST_ATTRIBUTE = 'Testo\Test';
 
     private const string PHPUNIT_TEST_ATTRIBUTE = 'PHPUnit\Framework\Attributes\Test';
 
     /**
-     * Default Laravel PHPUnit base classes converted by name; overridable through
-     * `base_classes` configuration (a project-specific base replaces the list, so
-     * pass the defaults along when you only want to add one).
+     * Laravel/PHPUnit boot hooks that the Laratesto application factory does not call.
+     * Keeping such a method while replacing the parent would silently drop behavior.
      */
-    private const array DEFAULT_BASES = [
-        'Tests\TestCase',
-        'Illuminate\Foundation\Testing\TestCase',
+    private const array UNSUPPORTED_BOOTSTRAP_METHODS = [
+        'createApplication',
+        'getPackageProviders',
+        'getPackageAliases',
+        'getEnvironmentSetUp',
+        'defineEnvironment',
+        'resolveApplication',
+        'afterApplicationCreated',
+        'beforeApplicationDestroyed',
     ];
 
     /** @var list<non-empty-string> */
-    private array $laravelBases = self::DEFAULT_BASES;
+    private array $laravelBases = self::DEFAULT_BASE_CLASSES;
 
-    private const string OLD_RESPONSE = 'Illuminate\Testing\TestResponse';
+    private string $targetMode = self::TARGET_MODE_BASE_CLASS;
 
-    private const string NEW_RESPONSE = 'Laratesto\Testing\LaravelResponse';
+    public function __construct(
+        private readonly AstResolver $astResolver,
+        private readonly DatabaseConfigurationAnalyzer $databaseAnalyzer,
+        private readonly HttpCompatibilityAnalyzer $httpAnalyzer,
+    ) {}
 
     public function getRuleDefinition(): RuleDefinition
     {
         return new RuleDefinition(
-            'Convert a Laravel PHPUnit test (base class, lifecycle, $this->app, TestResponse) to Laratesto',
+            'Atomically convert a Laravel PHPUnit base class and exactly-once lifecycle to Laratesto',
             [
                 new CodeSample(
                     <<<'PHP'
-                        use Illuminate\Foundation\Testing\TestCase;
-
-                        final class UsersTest extends TestCase
+                        final class UsersTest extends \Illuminate\Foundation\Testing\TestCase
                         {
                             protected function setUp(): void
                             {
                                 parent::setUp();
                             }
-
-                            public function test_users_list(): void
-                            {
-                                $response = $this->get('/users');
-                                $response->assertStatus(200);
-                            }
                         }
                         PHP,
                     <<<'PHP'
-                        use Laratesto\Testing\LaravelTestCase;
-
-                        final class UsersTest extends LaravelTestCase
+                        final class UsersTest extends \Laratesto\Testing\LaravelTestCase
                         {
                             protected function setUpLaravel(): void
                             {
-                            }
-
-                            #[\Testo\Test]
-                            public function test_users_list(): void
-                            {
-                                $response = $this->get('/users');
-                                $response->assertStatus(200);
                             }
                         }
                         PHP,
@@ -127,42 +117,54 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
     #[\Override]
     public function getNodeTypes(): array
     {
-        // Use_ rewrites the import of the old base/response classes; Class_ does the rest.
-        return [Class_::class, Use_::class];
+        // File-global import rewrites are intentionally forbidden: a file may contain
+        // both eligible and residual classes. FQ targets keep those classes isolated.
+        return [Class_::class];
     }
 
     #[\Override]
     public function configure(array $configuration): void
     {
-        // `base_classes` overrides the default Laravel bases (Rector's
-        // ruleWithConfiguration() lands here; see the compatibility contract).
-        $bases = $configuration['base_classes'] ?? null;
+        if (array_key_exists(self::BASE_CLASSES, $configuration)) {
+            $bases = $configuration[self::BASE_CLASSES];
 
-        if (! \is_array($bases) || $bases === []) {
-            return;
+            if (! is_array($bases) || $bases === []) {
+                throw new \InvalidArgumentException('base_classes must be a non-empty list of class names.');
+            }
+
+            $normalized = [];
+            foreach ($bases as $base) {
+                if (! is_string($base) || trim($base, " \\t\\n\\r\\0\\x0B\\") === '') {
+                    throw new \InvalidArgumentException('base_classes must contain only non-empty class names.');
+                }
+
+                $normalized[] = trim($base, " \\t\\n\\r\\0\\x0B\\");
+            }
+
+            $this->laravelBases = array_values(array_unique($normalized));
         }
 
-        $this->laravelBases = \array_values(\array_map(
-            static fn(mixed $base): string => (string) $base,
-            $bases,
-        ));
+        if (array_key_exists(self::TARGET_MODE, $configuration)) {
+            $mode = $configuration[self::TARGET_MODE];
+
+            if (! is_string($mode) || ! in_array($mode, [self::TARGET_MODE_BASE_CLASS, self::TARGET_MODE_TRAIT], true)) {
+                throw new \InvalidArgumentException('target_mode must be "base_class" or "trait".');
+            }
+
+            $this->targetMode = $mode;
+        }
     }
 
     /**
-     * @param Class_|Use_ $node
+     * @param Class_ $node
      */
     #[\Override]
     public function refactor(Node $node): ?Node
     {
-        if ($node instanceof Use_) {
-            return $this->refactorUse($node);
-        }
-
         if ($node->extends === null) {
             return null;
         }
 
-        // Idempotency: an already-converted class (or a native Laratesto test) is a no-op.
         if ($this->isName($node->extends, self::TARGET_BASE)) {
             return null;
         }
@@ -171,50 +173,259 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             return null;
         }
 
-        return $this->convertClass($node);
-    }
+        if ($this->hasBlockingMarker($node)) {
+            return null;
+        }
 
-    private function refactorUse(Use_ $node): ?Node
-    {
         $changed = false;
+        $hierarchyFailures = $this->hierarchyFailures($node);
+        $lifecycleFailures = $this->lifecycleFailures($node);
+        $appFailures = $this->appFailures($node);
+        $databaseAnalysis = $this->databaseAnalyzer->analyze($node);
+        $httpAnalysis = $this->httpAnalyzer->analyze($node);
+        $httpFailures = array_values(array_unique([
+            ...$appFailures,
+            ...($httpAnalysis->reasonsByCode['HTTP_UNSUPPORTED_SIGNATURE'] ?? []),
+        ]));
 
-        foreach ($node->uses as $use) {
-            if ($this->isNames($use->name, $this->laravelBases)) {
-                // Inside a use statement the name is resolved as fully qualified anyway;
-                // a plain Name prints without the leading backslash.
-                $use->name = new Name(self::TARGET_BASE);
-                $changed = true;
-            } elseif ($this->isName($use->name, self::OLD_RESPONSE)) {
-                $use->name = new Name(self::NEW_RESPONSE);
-                $changed = true;
+        if ($hierarchyFailures !== []) {
+            $changed = ResidualMarker::mark(
+                $node,
+                'CLASS_UNSAFE_HIERARCHY',
+                static::class,
+                implode('; ', $hierarchyFailures),
+            ) || $changed;
+        }
+
+        if ($lifecycleFailures !== []) {
+            $changed = ResidualMarker::mark(
+                $node,
+                'LIFECYCLE_UNSUPPORTED',
+                static::class,
+                implode('; ', $lifecycleFailures),
+            ) || $changed;
+        }
+
+        if ($httpFailures !== []) {
+            $changed = ResidualMarker::mark(
+                $node,
+                'HTTP_UNSUPPORTED_SIGNATURE',
+                static::class,
+                implode('; ', $httpFailures),
+            ) || $changed;
+        }
+
+        foreach (['RESPONSE_UNSUPPORTED_API', 'ARTISAN_INTERACTION_UNSUPPORTED'] as $code) {
+            $reasons = $httpAnalysis->reasonsByCode[$code] ?? [];
+            if ($reasons !== []) {
+                $changed = ResidualMarker::mark(
+                    $node,
+                    $code,
+                    LaravelSourceCompatibleCallsRector::class,
+                    implode('; ', $reasons),
+                ) || $changed;
             }
         }
 
-        return $changed ? $node : null;
+        if ($databaseAnalysis->unsupportedReason !== null) {
+            $changed = ResidualMarker::mark(
+                $node,
+                'DATABASE_UNSUPPORTED_CONFIGURATION',
+                LaravelDatabaseTraitsRector::class,
+                $databaseAnalysis->unsupportedReason,
+            ) || $changed;
+        }
+
+        if ($hierarchyFailures !== []
+            || $lifecycleFailures !== []
+            || $httpAnalysis->reasonsByCode !== []
+            || $appFailures !== []
+            || $databaseAnalysis->unsupportedReason !== null) {
+            return $changed ? $node : null;
+        }
+
+        return $this->convertClass($node);
     }
 
-    private function convertClass(Class_ $node): Node
+    /** @return list<non-empty-string> */
+    private function hierarchyFailures(Class_ $class): array
     {
-        // Import-style when the old base had a use statement (this rule rewrites it to
-        // the target — Use_ is visited before Class_ in the same traversal); fully
-        // qualified when the extends was written long-hand with no import.
-        $shortBase = (new FullyQualified(self::TARGET_BASE))->getLast();
-        $wasImported = $this->fileImportsAny($this->laravelBases);
+        $failures = [];
 
-        $node->extends = $wasImported
-            ? new Name($shortBase)
-            : new FullyQualified(self::TARGET_BASE);
+        if (! $this->isName($class->extends, self::FRAMEWORK_BASE) && ! $this->isSafePassThroughParent($class->extends)) {
+            $failures[] = sprintf(
+                'parent %s is not a resolvable pass-through Laravel test base',
+                $this->getName($class->extends) ?? 'unknown',
+            );
+        }
 
-        foreach ($node->getMethods() as $method) {
+        foreach ($class->stmts as $stmt) {
+            if ($stmt instanceof TraitUse && $stmt->adaptations !== []) {
+                $failures[] = 'trait adaptations cannot be preserved by automatic class conversion';
+                break;
+            }
+        }
+
+        foreach ($class->getMethods() as $method) {
+            $name = $this->getName($method->name);
+
+            if ($name !== null && in_array($name, self::UNSUPPORTED_BOOTSTRAP_METHODS, true)) {
+                $failures[] = sprintf('custom bootstrap method %s() is not called by the Laratesto target', $name);
+            }
+        }
+
+        if ($this->targetMode === self::TARGET_MODE_TRAIT && $class->isAnonymous()) {
+            $failures[] = 'trait target mode does not support anonymous test classes';
+        }
+
+        return array_values(array_unique($failures));
+    }
+
+    private function isSafePassThroughParent(Node\Name $parent): bool
+    {
+        $parentName = $this->getName($parent);
+
+        if ($parentName === null || ! in_array($parentName, $this->laravelBases, true)) {
+            return false;
+        }
+
+        try {
+            $parentNode = $this->astResolver->resolveClassFromName($parentName);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return $parentNode instanceof Class_
+            && $parentNode->extends !== null
+            && $this->isName($parentNode->extends, self::FRAMEWORK_BASE)
+            && $parentNode->stmts === [];
+    }
+
+    /** @return list<non-empty-string> */
+    private function lifecycleFailures(Class_ $class): array
+    {
+        $failures = [];
+
+        foreach (['setUp', 'tearDown'] as $name) {
+            $method = $class->getMethod($name);
+
+            if (! $method instanceof ClassMethod) {
+                continue;
+            }
+
+            if ($method->isStatic() || $method->isPrivate() || $method->params !== [] || $method->stmts === null) {
+                $failures[] = sprintf('%s() must be a concrete non-static zero-argument override', $name);
+            }
+
+            if ($class->getMethod($name . 'Laravel') instanceof ClassMethod) {
+                $failures[] = sprintf('%s() conflicts with an existing %sLaravel() hook', $name, $name);
+            }
+
+            if ($this->hasNestedOrMismatchedParentLifecycleCall($method, $name)) {
+                $failures[] = sprintf('%s() contains a parent lifecycle call that cannot be removed safely', $name);
+            }
+        }
+
+        return array_values(array_unique($failures));
+    }
+
+    private function hasNestedOrMismatchedParentLifecycleCall(ClassMethod $method, string $expected): bool
+    {
+        if ($method->stmts === null) {
+            return false;
+        }
+
+        $allowed = [];
+        foreach ($method->stmts as $stmt) {
+            if ($stmt instanceof Expression
+                && $stmt->expr instanceof StaticCall
+                && $this->isName($stmt->expr->class, 'parent')
+                && $this->isName($stmt->expr->name, $expected)) {
+                $allowed[spl_object_id($stmt->expr)] = true;
+            }
+        }
+
+        $unsafe = false;
+        $this->traverseNodesWithCallable($method->stmts, function (Node $inner) use ($allowed, &$unsafe): void {
+            if ($inner instanceof StaticCall
+                && $this->isName($inner->class, 'parent')
+                && $this->isNames($inner->name, ['setUp', 'tearDown'])
+                && ! isset($allowed[spl_object_id($inner)])) {
+                $unsafe = true;
+            }
+        });
+
+        return $unsafe;
+    }
+
+    /** @return list<non-empty-string> */
+    private function appFailures(Class_ $class): array
+    {
+        $failures = [];
+
+        $this->traverseNodesWithCallable($class->stmts, function (Node $inner) use (&$failures): void {
+            if ($inner instanceof PropertyFetch
+                && $inner->var instanceof Expr\Variable
+                && $inner->var->name === 'this'
+                && ! $inner->name instanceof Identifier) {
+                $failures[] = 'dynamic $this property access cannot be classified as $this->app';
+            }
+
+            if (! $inner instanceof MethodCall
+                || ! $inner->var instanceof PropertyFetch
+                || ! $this->isThisApp($inner->var)
+                || ! $this->isName($inner->name, 'make')) {
+                return;
+            }
+
+            if (count($inner->args) !== 1 || $inner->args[0]->unpack) {
+                $failures[] = '$this->app->make() is automatic only with one argument';
+                return;
+            }
+
+            $argumentName = $inner->args[0]->name?->toString();
+            if ($argumentName !== null && $argumentName !== 'abstract') {
+                $failures[] = '$this->app->make() uses an unsupported named argument';
+            }
+        });
+
+        return array_values(array_unique($failures));
+    }
+
+    private function convertClass(Class_ $class): Node
+    {
+        if ($this->targetMode === self::TARGET_MODE_BASE_CLASS) {
+            $class->extends = new FullyQualified(self::TARGET_BASE);
+        } else {
+            $class->extends = null;
+            $this->addTargetTrait($class);
+        }
+
+        foreach ($class->getMethods() as $method) {
             $this->convertLifecycleMethod($method);
             $this->markTestMethod($method);
         }
 
-        $this->traverseNodesWithCallable($node->stmts, function (Node $inner): ?Node {
-            return $this->convertExpression($inner);
-        });
+        $this->traverseNodesWithCallable($class->stmts, fn(Node $inner): ?Node => $this->convertAppExpression($inner));
 
-        return $node;
+        return $class;
+    }
+
+    private function addTargetTrait(Class_ $class): void
+    {
+        foreach ($class->stmts as $stmt) {
+            if (! $stmt instanceof TraitUse) {
+                continue;
+            }
+
+            foreach ($stmt->traits as $trait) {
+                if ($this->isName($trait, self::TARGET_TRAIT)) {
+                    return;
+                }
+            }
+        }
+
+        array_unshift($class->stmts, new TraitUse([new FullyQualified(self::TARGET_TRAIT)]));
     }
 
     private function convertLifecycleMethod(ClassMethod $method): void
@@ -225,12 +436,6 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             return;
         }
 
-        // A signature PHPUnit would not accept (parameters) is not a lifecycle override;
-        // leave it — it surfaces as a residual.
-        if ($method->params !== []) {
-            return;
-        }
-
         $method->name = new Identifier($name . 'Laravel');
         $this->removeLifecycleAttributes($method);
 
@@ -238,40 +443,34 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             return;
         }
 
-        // parent::setUp() must go: LaravelTestCase has no such method — the bridge calls
-        // setUpLaravel() itself around every test.
         $method->stmts = array_values(array_filter(
             $method->stmts,
-            function (Stmt $stmt): bool {
-                if (! $stmt instanceof Expression || ! $stmt->expr instanceof StaticCall) {
-                    return true;
-                }
-
-                $call = $stmt->expr;
-
-                return ! $this->isName($call->class, 'parent')
-                    || ! $this->isNames($call->name, ['setUp', 'tearDown']);
-            },
+            fn(Stmt $stmt): bool => ! ($stmt instanceof Expression
+                && $stmt->expr instanceof StaticCall
+                && $this->isName($stmt->expr->class, 'parent')
+                && $this->isName($stmt->expr->name, $name)),
         ));
     }
 
     private function removeLifecycleAttributes(ClassMethod $method): void
     {
-        // The upstream LifecycleMethodToTestoRector may have attached BeforeTest/AfterTest
-        // to the method by its old name; after the rename the attribute would double the
-        // lifecycle the bridge already runs.
-        $method->attrGroups = array_values(array_filter(
-            $method->attrGroups,
-            function (AttributeGroup $group): bool {
-                foreach ($group->attrs as $attr) {
-                    if ($this->isNames($attr->name, ['Testo\Lifecycle\BeforeTest', 'Testo\Lifecycle\AfterTest'])) {
-                        return false;
-                    }
-                }
+        $groups = [];
 
-                return true;
-            },
-        ));
+        foreach ($method->attrGroups as $group) {
+            $attributes = array_values(array_filter(
+                $group->attrs,
+                fn(Attribute $attribute): bool => ! $this->isNames(
+                    $attribute->name,
+                    ['Testo\Lifecycle\BeforeTest', 'Testo\Lifecycle\AfterTest'],
+                ),
+            ));
+
+            if ($attributes !== []) {
+                $groups[] = new AttributeGroup($attributes, $group->getAttributes());
+            }
+        }
+
+        $method->attrGroups = $groups;
     }
 
     private function markTestMethod(ClassMethod $method): void
@@ -281,26 +480,23 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         }
 
         foreach ($method->attrGroups as $group) {
-            foreach ($group->attrs as $attr) {
-                // Idempotent: already discoverable by Testo.
-                if ($this->isName($attr->name, self::TEST_ATTRIBUTE)) {
+            foreach ($group->attrs as $attribute) {
+                if ($this->isName($attribute->name, self::TEST_ATTRIBUTE)) {
                     return;
                 }
             }
         }
 
         foreach ($method->attrGroups as $group) {
-            foreach ($group->attrs as $attr) {
-                if ($this->isName($attr->name, self::PHPUNIT_TEST_ATTRIBUTE)) {
-                    $attr->name = new FullyQualified(self::TEST_ATTRIBUTE);
-
+            foreach ($group->attrs as $attribute) {
+                if ($this->isName($attribute->name, self::PHPUNIT_TEST_ATTRIBUTE)) {
+                    $attribute->name = new FullyQualified(self::TEST_ATTRIBUTE);
                     return;
                 }
             }
         }
 
         $name = $this->getName($method->name);
-
         if ($name !== null && str_starts_with($name, 'test')) {
             $method->attrGroups[] = new AttributeGroup([
                 new Attribute(new FullyQualified(self::TEST_ATTRIBUTE)),
@@ -308,49 +504,23 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         }
     }
 
-    private function convertExpression(Node $node): ?Node
+    private function convertAppExpression(Node $node): ?Node
     {
-        if ($node instanceof Name && $this->isName($node, self::OLD_RESPONSE)) {
-            // Short name when the old response class had a use statement (rewritten to the
-            // target already); fully-qualified for a long-hand reference with no import.
-            return $this->fileImportsAny([self::OLD_RESPONSE])
-                ? new Name((new FullyQualified(self::NEW_RESPONSE))->getLast())
-                : new FullyQualified(self::NEW_RESPONSE);
-        }
-
-        if (! $node instanceof PropertyFetch && ! $node instanceof MethodCall) {
-            return null;
-        }
-
-        // $this->app->make(X) => $this->make(X)
-        if (
-            $node instanceof MethodCall
+        if ($node instanceof MethodCall
             && $node->var instanceof PropertyFetch
             && $this->isThisApp($node->var)
             && $this->isName($node->name, 'make')
-            && $node->args !== []
-        ) {
-            return new MethodCall(
-                new Expr\Variable('this'),
-                new Identifier('make'),
-                $node->args,
-            );
+            && count($node->args) === 1) {
+            return new MethodCall(new Expr\Variable('this'), new Identifier('make'), $node->args);
         }
 
-        // $this->app => $this->app()
         if ($node instanceof PropertyFetch && $this->isThisApp($node)) {
-            return new MethodCall(
-                new Expr\Variable('this'),
-                new Identifier('app'),
-            );
+            return new MethodCall(new Expr\Variable('this'), new Identifier('app'));
         }
 
         return null;
     }
 
-    /**
-     * Whether $node is exactly `$this->app` (the Laravel application property).
-     */
     private function isThisApp(PropertyFetch $node): bool
     {
         return $node->var instanceof Expr\Variable
@@ -359,52 +529,21 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             && $node->name->toString() === 'app';
     }
 
-    /**
-     * Whether the ORIGINAL file (before this rule's changes) imports any of $classes —
-     * the signal that the import-style rewrite applies instead of a fully-qualified name.
-     *
-     * @param list<string> $classes
-     */
-    private function fileImportsAny(array $classes): bool
+    private function hasBlockingMarker(Class_ $class): bool
     {
-        // Old stmts come wrapped in a Rector FileNode; use statements live inside
-        // Namespace_->stmts when the file declares a namespace.
-        foreach ($this->getFile()->getOldStmts() as $stmt) {
-            foreach ($this->unwrapUseScope($stmt) as $inner) {
-                if (! $inner instanceof Use_) {
-                    continue;
-                }
-
-                foreach ($inner->uses as $use) {
-                    if ($this->isNames($use->name, $classes)) {
-                        return true;
-                    }
-                }
+        foreach ([
+            'CLASS_UNSAFE_HIERARCHY',
+            'LIFECYCLE_UNSUPPORTED',
+            'DATABASE_UNSUPPORTED_CONFIGURATION',
+            'HTTP_UNSUPPORTED_SIGNATURE',
+            'RESPONSE_UNSUPPORTED_API',
+            'ARTISAN_INTERACTION_UNSUPPORTED',
+        ] as $code) {
+            if (ResidualMarker::isMarked($class, $code)) {
+                return true;
             }
         }
 
         return false;
-    }
-
-    /**
-     * The statements a `use` can live under: inside a Rector FileNode wrapper, inside a
-     * namespace block, or at the top level of a file.
-     *
-     * @return Stmt[]
-     */
-    private function unwrapUseScope(Stmt $stmt): array
-    {
-        if ($stmt instanceof FileNode) {
-            $stmts = $stmt->stmts;
-        } else {
-            $stmts = [$stmt];
-        }
-
-        $result = [];
-        foreach ($stmts as $inner) {
-            $result[] = $inner instanceof Stmt\Namespace_ ? $inner->stmts : [$inner];
-        }
-
-        return array_merge(...$result);
     }
 }

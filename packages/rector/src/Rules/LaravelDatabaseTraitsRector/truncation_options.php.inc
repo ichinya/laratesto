@@ -11,7 +11,7 @@ final class ArchiveTest extends TestCase
 {
     use DatabaseTruncation;
 
-    protected ?string $connection = 'archive';
+    protected array $connectionsToTruncate = ['archive'];
 
     protected array $tablesToTruncate = ['orders', 'invoices'];
 }
@@ -24,7 +24,7 @@ namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\TestCase;
 
-#[\Laratesto\Attribute\DatabaseTruncation(connection: 'archive', tables: ['orders', 'invoices'])]
+#[\Laratesto\Attribute\DatabaseTruncation(connections: ['archive'], tables: ['orders', 'invoices'])]
 final class ArchiveTest extends TestCase
 {
 }

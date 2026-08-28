@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Laratesto\Pipeline;
 
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
-use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\Connection;
+use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Laratesto\Attribute\DatabaseTruncation;
+use Laratesto\Pipeline\Internal\DatabaseRuntime;
 use Laratesto\Pipeline\Internal\FailureResult;
 use Laratesto\Runtime\LaravelApplicationFactory;
 use Testo\Core\Context\TestInfo;
@@ -14,25 +16,7 @@ use Testo\Core\Context\TestResult;
 use Testo\Pipeline\Attribute\InterceptorOptions;
 use Testo\Pipeline\Middleware\TestRunInterceptor;
 
-/**
- * Truncates the database tables before the test.
- *
- * Mirrors the PHPUnit trait: when the schema is missing (a fresh in-memory database),
- * it runs `migrate:fresh` and stops — nothing to truncate yet. Once the schema exists,
- * every test starts from truncated tables, which avoids re-running migrations the way
- * {@see RefreshDatabaseInterceptor} does.
- *
- * Ordered on the same slot as {@see RefreshDatabaseInterceptor} (both create the
- * schema, so they are not combined) and before {@see DatabaseTransactionsInterceptor},
- * so a test may combine truncation with a wrapping transaction.
- *
- * Truncation failures are returned as aborted test results carrying the original
- * exception instead of being thrown (see {@see FailureResult} for why).
- *
- * @see DatabaseTruncation
- *
- * @api
- */
+/** Laravel-compatible first migration followed by selected multi-connection truncation. */
 #[InterceptorOptions(order: InterceptorOptions::ORDER_DEFAULT - 50_000)]
 final readonly class DatabaseTruncationInterceptor implements TestRunInterceptor
 {
@@ -55,82 +39,179 @@ final readonly class DatabaseTruncationInterceptor implements TestRunInterceptor
 
     private function truncateOrMigrate(): void
     {
-        $database = $this->factory->current()->make('db');
-        $connection = $database->connection($this->attribute->connection);
+        $application = $this->factory->current();
+        $connections = DatabaseRuntime::connectionNames($application, $this->attribute->connections);
+        DatabaseRuntime::restoreInMemoryConnections($application, $connections);
 
-        $tables = $connection->getSchemaBuilder()->getTableListing();
-
-        if ($tables === []) {
-            // First run over a fresh database: the trait migrates instead of truncating.
-            $this->migrateFresh();
+        if (! RefreshDatabaseState::$migrated || ! $this->allSchemasMigrated($connections)) {
+            try {
+                $this->migrateFresh($connections);
+                DatabaseRuntime::cacheInMemoryConnections($application, $connections);
+                RefreshDatabaseState::$migrated = true;
+            } catch (\Throwable $failure) {
+                RefreshDatabaseState::$migrated = false;
+                throw $failure;
+            }
 
             return;
         }
 
-        $this->truncateTables($connection, $tables);
+        foreach ($connections as $name) {
+            /** @var Connection $connection */
+            $connection = $application['db']->connection($name);
+            $this->truncateConnection($connection, $name);
+        }
 
         if ($this->attribute->seed || $this->attribute->seeder !== null) {
-            $this->seed();
+            $this->seed($connections);
         }
     }
 
-    /**
-     * @param list<string> $tables
-     */
-    private function truncateTables(ConnectionInterface $connection, array $tables): void
+    /** @param list<non-empty-string> $connections */
+    private function allSchemasMigrated(array $connections): bool
     {
-        $connection->getSchemaBuilder()->withoutForeignKeyConstraints(
-            function () use ($connection, $tables): void {
+        $application = $this->factory->current();
+
+        foreach ($connections as $connection) {
+            if (! DatabaseRuntime::schemaIsMigrated($application, $connection)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function truncateConnection(Connection $connection, string $name): void
+    {
+        $schema = $connection->getSchemaBuilder();
+        $tables = $schema->getTables($schema->getCurrentSchemaListing());
+        $included = $this->selectionFor($this->attribute->tables, $name);
+        $excluded = $included === null
+            ? $this->selectionFor($this->attribute->exceptTables, $name) ?? []
+            : [];
+        $excluded[] = DatabaseRuntime::migrationsTable($this->factory->current(), $name);
+
+        $schema->withoutForeignKeyConstraints(function () use ($connection, $tables, $included, $excluded): void {
+            $dispatcher = $connection->getEventDispatcher();
+            $connection->unsetEventDispatcher();
+
+            try {
                 foreach ($tables as $table) {
-                    if ($this->attribute->tables !== null
-                        && ! \in_array($table, $this->attribute->tables, true)) {
+                    if (! is_array($table)) {
                         continue;
                     }
 
-                    $connection->table($table)->truncate();
+                    if ($included !== null && ! $this->tableExistsIn($table, $included)) {
+                        continue;
+                    }
+
+                    if ($included === null && $this->tableExistsIn($table, $excluded)) {
+                        continue;
+                    }
+
+                    $qualified = (string) ($table['schema_qualified_name'] ?? $table['name'] ?? '');
+                    if ($qualified === '') {
+                        continue;
+                    }
+
+                    $connection->withoutTablePrefix(function (Connection $connection) use ($qualified): void {
+                        $query = $connection->table($qualified);
+                        if ($query->exists()) {
+                            $query->truncate();
+                        }
+                    });
                 }
-            },
-        );
+            } finally {
+                $connection->setEventDispatcher($dispatcher);
+            }
+        });
     }
 
-    private function migrateFresh(): void
+    /**
+     * @param list<non-empty-string>|array<string, list<non-empty-string>>|null $selection
+     * @return list<non-empty-string>|null
+     */
+    private function selectionFor(?array $selection, string $connection): ?array
     {
-        $kernel = $this->factory->current()->make(ConsoleKernel::class);
-
-        $parameters = ['--force' => true];
-
-        $this->attribute->dropViews and $parameters['--drop-views'] = true;
-        $this->attribute->dropTypes and $parameters['--drop-types'] = true;
-        $this->attribute->seed and $parameters['--seed'] = true;
-        $this->attribute->seeder !== null and $parameters['--seeder'] = $this->attribute->seeder;
-
-        $exitCode = $kernel->call('migrate:fresh', $parameters);
-
-        if ($exitCode !== 0) {
-            throw new \RuntimeException(\sprintf(
-                'migrate:fresh failed with exit code %d: %s',
-                $exitCode,
-                $kernel->output(),
-            ));
+        if ($selection === null) {
+            return null;
         }
+
+        if (! array_is_list($selection)) {
+            if (! array_key_exists($connection, $selection)) {
+                return [];
+            }
+
+            $selected = $selection[$connection];
+
+            return is_array($selected) && $selected !== [] ? array_values($selected) : null;
+        }
+
+        return $selection === [] ? null : array_values($selection);
     }
 
-    private function seed(): void
+    /** @param array<string, mixed> $table @param list<non-empty-string> $selection */
+    private function tableExistsIn(array $table, array $selection): bool
+    {
+        $name = (string) ($table['name'] ?? '');
+        $qualified = (string) ($table['schema_qualified_name'] ?? $name);
+
+        return in_array($name, $selection, true) || in_array($qualified, $selection, true);
+    }
+
+    /** @param list<non-empty-string> $connections */
+    private function migrateFresh(array $connections): void
     {
         $kernel = $this->factory->current()->make(ConsoleKernel::class);
 
-        $parameters = ['--force' => true];
+        foreach ($connections as $connection) {
+            $parameters = [
+                '--force' => true,
+                '--database' => $connection,
+                '--drop-views' => $this->attribute->dropViews,
+                '--drop-types' => $this->attribute->dropTypes,
+            ];
 
-        $this->attribute->seeder !== null and $parameters['--class'] = $this->attribute->seeder;
+            if ($this->attribute->seeder !== null) {
+                $parameters['--seeder'] = $this->attribute->seeder;
+            } else {
+                $parameters['--seed'] = $this->attribute->seed;
+            }
 
-        $exitCode = $kernel->call('db:seed', $parameters);
+            $exitCode = $kernel->call('migrate:fresh', $parameters);
+            if ($exitCode !== 0) {
+                throw new \RuntimeException(sprintf(
+                    'migrate:fresh failed for connection %s with exit code %d: %s',
+                    $connection,
+                    $exitCode,
+                    $kernel->output(),
+                ));
+            }
+        }
 
-        if ($exitCode !== 0) {
-            throw new \RuntimeException(\sprintf(
-                'db:seed failed with exit code %d: %s',
-                $exitCode,
-                $kernel->output(),
-            ));
+        $kernel->setArtisan(null);
+    }
+
+    /** @param list<non-empty-string> $connections */
+    private function seed(array $connections): void
+    {
+        $kernel = $this->factory->current()->make(ConsoleKernel::class);
+
+        foreach ($connections as $connection) {
+            $parameters = ['--force' => true, '--database' => $connection];
+            if ($this->attribute->seeder !== null) {
+                $parameters['--class'] = $this->attribute->seeder;
+            }
+
+            $exitCode = $kernel->call('db:seed', $parameters);
+            if ($exitCode !== 0) {
+                throw new \RuntimeException(sprintf(
+                    'db:seed failed for connection %s with exit code %d: %s',
+                    $connection,
+                    $exitCode,
+                    $kernel->output(),
+                ));
+            }
         }
     }
 }

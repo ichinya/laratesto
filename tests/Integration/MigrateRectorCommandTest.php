@@ -97,7 +97,7 @@ PHP;
 
             $applied = (string) \file_get_contents($file);
 
-            Assert::true(\str_contains($applied, 'extends LaravelTestCase'), 'The base class must be rewritten in place.');
+            Assert::true(\str_contains($applied, 'Laratesto\\Testing\\LaravelTestCase'), 'The base class must be rewritten in place.');
             Assert::true(\str_contains($applied, '#[\Laratesto\Attribute\RefreshDatabase]'), 'The trait must become an attribute.');
             Assert::true(\str_contains($applied, '#[\Testo\Test]'), 'Test methods must be discoverable by Testo.');
             Assert::true(\str_contains($applied, 'laratesto-residual(code=LARAVEL_FAKE_UNSUPPORTED'), 'The fake must stay visible as a residual marker.');
@@ -183,7 +183,7 @@ PHP;
             $applied = (string) \file_get_contents($file);
 
             Assert::true(
-                \str_contains($applied, 'extends LaravelTestCase'),
+                \str_contains($applied, 'Laratesto\\Testing\\LaravelTestCase'),
                 'The custom base class must be converted too.',
             );
         } finally {
@@ -219,7 +219,7 @@ PHP;
                 \str_contains($result->output(), 'allow-dirty'),
                 'The override must print an explicit warning about the lost safe rollback.',
             );
-            Assert::true(\str_contains((string) \file_get_contents($file), 'extends LaravelTestCase'));
+            Assert::true(\str_contains((string) \file_get_contents($file), 'Laratesto\\Testing\\LaravelTestCase'));
         } finally {
             \exec(\sprintf('git reset -q HEAD -- %s 2>&1', \escapeshellarg($file)));
 
@@ -246,6 +246,10 @@ PHP;
             <?php
 
             declare(strict_types=1);
+
+            namespace Tests;
+
+            abstract class ApiTestCase extends \Illuminate\Foundation\Testing\TestCase {}
 
             namespace Tests\Feature;
 

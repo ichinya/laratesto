@@ -15,6 +15,15 @@ return [
             'journal_mode' => null,
             'synchronous' => null,
         ],
+        'secondary' => [
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'prefix' => '',
+            'foreign_key_constraints' => true,
+            'busy_timeout' => null,
+            'journal_mode' => null,
+            'synchronous' => null,
+        ],
     ],
 
     'migrations' => [

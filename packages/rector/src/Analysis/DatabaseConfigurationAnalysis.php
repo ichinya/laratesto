@@ -1,0 +1,39 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Laratesto\Rector\Analysis;
+
+use PhpParser\Node\Attribute;
+use PhpParser\Node\Expr;
+use PhpParser\Node\Stmt\Property;
+use PhpParser\Node\Stmt\TraitUse;
+
+/** @internal Immutable result of the database trait all-or-nothing preflight. */
+final readonly class DatabaseConfigurationAnalysis
+{
+    /**
+     * @param array<non-empty-string, Expr> $options
+     * @param list<Property> $removableProperties
+     * @param list<Attribute> $removableAttributes
+     */
+    public function __construct(
+        public ?string $sourceTrait = null,
+        public ?string $targetAttribute = null,
+        public ?TraitUse $traitUse = null,
+        public array $options = [],
+        public array $removableProperties = [],
+        public array $removableAttributes = [],
+        public ?string $unsupportedReason = null,
+    ) {}
+
+    public function hasSourceTrait(): bool
+    {
+        return $this->sourceTrait !== null;
+    }
+
+    public function supported(): bool
+    {
+        return $this->hasSourceTrait() && $this->unsupportedReason === null;
+    }
+}

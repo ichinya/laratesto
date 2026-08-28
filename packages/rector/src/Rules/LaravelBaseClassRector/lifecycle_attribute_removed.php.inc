@@ -8,11 +8,13 @@ use Illuminate\Foundation\Testing\TestCase;
 
 final class TeardownTest extends TestCase
 {
+    #[\Testo\Lifecycle\BeforeTest, \Deprecated]
     protected function setUp(): void
     {
         parent::setUp();
     }
 
+    #[\Testo\Lifecycle\AfterTest]
     protected function tearDown(): void
     {
         parent::tearDown();
@@ -30,10 +32,11 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
-use Laratesto\Testing\LaravelTestCase;
+use Illuminate\Foundation\Testing\TestCase;
 
-final class TeardownTest extends LaravelTestCase
+final class TeardownTest extends \Laratesto\Testing\LaravelTestCase
 {
+    #[\Deprecated]
     protected function setUpLaravel(): void
     {
     }

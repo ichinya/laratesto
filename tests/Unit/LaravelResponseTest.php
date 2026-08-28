@@ -64,6 +64,50 @@ final class LaravelResponseTest
     }
 
     #[Test]
+    public function assertJsonUsesRecursiveSubsetAndOptionalStrictScalarComparison(): void
+    {
+        $response = new LaravelResponse(new Response(
+            '{"user":{"id":42,"name":"Ada"},"roles":["admin","editor"],"extra":true}',
+        ));
+
+        Assert::same($response->assertJson(['user' => ['id' => 42]]), $response);
+        $response->assertJson(['user' => ['id' => '42']]);
+
+        $strictFailed = false;
+        try {
+            $response->assertJson(['user' => ['id' => '42']], true);
+        } catch (\Testo\Assert\State\Assertion\AssertionException) {
+            $strictFailed = true;
+        }
+
+        $missingFailed = false;
+        try {
+            $response->assertJson(['user' => ['missing' => true]]);
+        } catch (\Testo\Assert\State\Assertion\AssertionException) {
+            $missingFailed = true;
+        }
+
+        Assert::true($strictFailed, 'Strict assertJson must not coerce scalar types.');
+        Assert::true($missingFailed, 'Subset assertJson must reject a missing nested key.');
+    }
+
+    #[Test]
+    public function assertHeaderMatchesNameCaseInsensitivelyButValueExactly(): void
+    {
+        $response = new LaravelResponse(new Response('', 200, ['X-Mode' => 'Production']));
+        $response->assertHeader('x-mode', 'Production');
+
+        $failed = false;
+        try {
+            $response->assertHeader('X-MODE', 'production');
+        } catch (\Testo\Assert\State\Assertion\AssertionException) {
+            $failed = true;
+        }
+
+        Assert::true($failed, 'Header values are case-sensitive even though header names are not.');
+    }
+
+    #[Test]
     public function assertionsReturnTheResponseForChaining(): void
     {
         $response = new LaravelResponse(

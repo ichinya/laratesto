@@ -9,7 +9,7 @@ use Testo\Pipeline\Attribute\FallbackInterceptor;
 use Testo\Pipeline\Attribute\Interceptable;
 
 /**
- * Drop all tables and re-run migrations before the test.
+ * Migrate once and wrap each selected connection in a transaction per test.
  *
  * ```php
  * #[RefreshDatabase]
@@ -33,5 +33,10 @@ final readonly class RefreshDatabase implements Interceptable
          * Run the database seeder after migrating.
          */
         public bool $seed = false,
+        public ?string $seeder = null,
+        public bool $dropViews = false,
+        public bool $dropTypes = false,
+        /** @var list<non-empty-string|null>|null */
+        public ?array $connections = null,
     ) {}
 }

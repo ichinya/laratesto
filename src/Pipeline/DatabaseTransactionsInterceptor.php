@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Laratesto\Pipeline;
 
 use Laratesto\Attribute\DatabaseTransactions;
+use Laratesto\Pipeline\Internal\DatabaseRuntime;
+use Laratesto\Pipeline\Internal\DatabaseTransactionScope;
 use Laratesto\Pipeline\Internal\FailureResult;
 use Laratesto\Runtime\LaravelApplicationFactory;
 use Testo\Core\Context\TestInfo;
@@ -12,30 +14,24 @@ use Testo\Core\Context\TestResult;
 use Testo\Pipeline\Attribute\InterceptorOptions;
 use Testo\Pipeline\Middleware\TestRunInterceptor;
 
-/**
- * Wraps a test into a database transaction and rolls it back afterwards.
- *
- * Runs inside {@see LaravelTestInterceptor}, so the application is already booted.
- * Transaction failures are returned as aborted test results carrying the original
- * exception instead of being thrown (see {@see FailureResult} for why).
- *
- * @see DatabaseTransactions
- *
- * @api
- */
+/** Wraps every configured connection and guarantees complete rollback cleanup. */
 #[InterceptorOptions(order: InterceptorOptions::ORDER_DEFAULT)]
 final readonly class DatabaseTransactionsInterceptor implements TestRunInterceptor
 {
     public function __construct(
+        private DatabaseTransactions $attribute,
         private LaravelApplicationFactory $factory,
     ) {}
 
     #[\Override]
     public function runTest(TestInfo $info, callable $next): TestResult
     {
+        $application = $this->factory->current();
+        $connections = DatabaseRuntime::connectionNames($application, $this->attribute->connections);
+        $scope = new DatabaseTransactionScope($application, $connections);
+
         try {
-            $manager = $this->factory->current()->make('db');
-            $manager->beginTransaction();
+            $scope->begin();
         } catch (\Throwable $failure) {
             return FailureResult::aborted($info, $failure);
         }
@@ -43,23 +39,14 @@ final readonly class DatabaseTransactionsInterceptor implements TestRunIntercept
         try {
             $result = $next($info);
         } catch (\Throwable $pipelineFailure) {
-            // Roll back quietly: the original failure is more useful
-            // than a rollback error on top of it.
-            try {
-                $manager->transactionLevel() > 0 and $manager->rollBack();
-            } catch (\Throwable) {
-                // ignored on purpose
-            }
-
+            $scope->closeQuietly();
             throw $pipelineFailure;
         }
 
-        if ($manager->transactionLevel() > 0) {
-            try {
-                $manager->rollBack();
-            } catch (\Throwable $rollbackFailure) {
-                return FailureResult::aborted($info, $rollbackFailure);
-            }
+        try {
+            $scope->close();
+        } catch (\Throwable $failure) {
+            return FailureResult::aborted($info, $failure);
         }
 
         return $result;
