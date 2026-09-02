@@ -24,7 +24,7 @@ final class ConfigurableSetTest
         Assert::true(mkdir($tmpDir . '/corpus', 0777, true) || is_dir($tmpDir . '/corpus'));
 
         try {
-            file_put_contents($tmpDir . '/ProjectTestCase.php', <<<'PHP'
+            file_put_contents($tmpDir . '/corpus/ProjectTestCase.php', <<<'PHP'
 <?php
 
 namespace Illuminate\Foundation\Testing {
@@ -57,34 +57,45 @@ final class FrameworkTest extends \Illuminate\Foundation\Testing\TestCase
 PHP);
 
             $paths = var_export($tmpDir . '/corpus', true);
-            $projectBase = var_export($tmpDir . '/ProjectTestCase.php', true);
             $set = var_export(LaratestoRectorSetList::LARAVEL_PHPUNIT_TO_LARATESTO, true);
             file_put_contents($tmpDir . '/rector.php', <<<PHP
 <?php
 
 declare(strict_types=1);
 
-require_once {$projectBase};
-
-use Laratesto\Rector\Rules\LaravelBaseClassRector;
-use Rector\Config\RectorConfig;
+use Laratesto\\Rector\\Rules\\LaravelBaseClassRector;
+use Rector\\Config\\RectorConfig;
 
 return RectorConfig::configure()
     ->withPaths([{$paths}])
     ->withSets([{$set}])
     ->withConfiguredRule(LaravelBaseClassRector::class, [
-        LaravelBaseClassRector::BASE_CLASSES => ['Acme\\Testing\\ProjectTestCase'],
+        LaravelBaseClassRector::BASE_CLASSES => ['Acme\\\\Testing\\\\ProjectTestCase'],
     ]);
 PHP);
 
             $this->runRector($rootDir, $tmpDir);
 
+            $projectBase = (string) file_get_contents($tmpDir . '/corpus/ProjectTestCase.php');
             $custom = (string) file_get_contents($tmpDir . '/corpus/CustomTest.php');
             $framework = (string) file_get_contents($tmpDir . '/corpus/FrameworkTest.php');
 
-            Assert::string($custom)->contains('extends \Laratesto\Testing\LaravelTestCase');
+            // The override replaces the whole base list: the framework base and its
+            // direct children are outside the configured scope.
+            Assert::string($projectBase)->contains('extends \Illuminate\Foundation\Testing\TestCase');
+
+            // A base outside the override list is not our business.
             Assert::string($framework)->contains('extends \Illuminate\Foundation\Testing\TestCase');
             Assert::string($framework)->notContains('Laratesto\Testing\LaravelTestCase');
+
+            // The descendant of the configured base is NOT half-migrated: since its
+            // chain bottoms out at a base that is not configured for conversion, the
+            // class fails closed with a residual instead.
+            Assert::string($custom)->contains('extends \Acme\Testing\ProjectTestCase');
+            Assert::string($custom)->notContains('Laratesto\Testing\LaravelTestCase');
+            Assert::string($custom)->notContains('#[\Testo\Test]');
+            Assert::string($custom)->contains('laratesto-residual(code=CLASS_UNSAFE_HIERARCHY');
+            Assert::string($custom)->contains('outside the configured base_classes');
         } finally {
             self::recursiveRemove($tmpDir);
         }

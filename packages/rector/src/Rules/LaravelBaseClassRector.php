@@ -6,6 +6,7 @@ namespace Laratesto\Rector\Rules;
 
 use Laratesto\Rector\Analysis\DatabaseConfigurationAnalyzer;
 use Laratesto\Rector\Analysis\HttpCompatibilityAnalyzer;
+use Laratesto\Rector\Configuration\BaseClassConfiguration;
 use Laratesto\Rector\Residuals\ResidualMarker;
 use PhpParser\Node;
 use PhpParser\Node\Attribute;
@@ -21,7 +22,12 @@ use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\ClassMethod;
 use PhpParser\Node\Stmt\Expression;
 use PhpParser\Node\Stmt\TraitUse;
+use PhpParser\NodeFinder;
+use PHPStan\Analyser\Scope;
+use Rector\Configuration\Option;
+use Rector\Configuration\Parameter\SimpleParameterProvider;
 use Rector\Contract\Rector\ConfigurableRectorInterface;
+use Rector\NodeTypeResolver\Node\AttributeKey;
 use Rector\PhpParser\AstResolver;
 use Rector\Rector\AbstractRector;
 use Symplify\RuleDocGenerator\ValueObject\CodeSample\CodeSample;
@@ -45,16 +51,19 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
     public const string TARGET_MODE_TRAIT = 'trait';
 
     /** @var list<non-empty-string> */
-    public const array DEFAULT_BASE_CLASSES = [
-        'Tests\TestCase',
-        'Illuminate\Foundation\Testing\TestCase',
-    ];
+    public const array DEFAULT_BASE_CLASSES = BaseClassConfiguration::DEFAULT_BASE_CLASSES;
 
     private const string FRAMEWORK_BASE = 'Illuminate\Foundation\Testing\TestCase';
 
     private const string TARGET_BASE = 'Laratesto\Testing\LaravelTestCase';
 
     private const string TARGET_TRAIT = 'Laratesto\Testing\InteractsWithLaravel';
+
+    /**
+     * Guard against cyclic or pathologically deep extends chains: anything deeper is
+     * reported as an unsafe hierarchy instead of being converted.
+     */
+    private const int MAX_CHAIN_DEPTH = 10;
 
     private const string TEST_ATTRIBUTE = 'Testo\Test';
 
@@ -75,16 +84,15 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         'beforeApplicationDestroyed',
     ];
 
-    /** @var list<non-empty-string> */
-    private array $laravelBases = self::DEFAULT_BASE_CLASSES;
-
-    private string $targetMode = self::TARGET_MODE_BASE_CLASS;
+    private BaseClassConfiguration $configuration;
 
     public function __construct(
         private readonly AstResolver $astResolver,
         private readonly DatabaseConfigurationAnalyzer $databaseAnalyzer,
         private readonly HttpCompatibilityAnalyzer $httpAnalyzer,
-    ) {}
+    ) {
+        $this->configuration = BaseClassConfiguration::defaults();
+    }
 
     public function getRuleDefinition(): RuleDefinition
     {
@@ -125,34 +133,10 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
     #[\Override]
     public function configure(array $configuration): void
     {
-        if (array_key_exists(self::BASE_CLASSES, $configuration)) {
-            $bases = $configuration[self::BASE_CLASSES];
-
-            if (! is_array($bases) || $bases === []) {
-                throw new \InvalidArgumentException('base_classes must be a non-empty list of class names.');
-            }
-
-            $normalized = [];
-            foreach ($bases as $base) {
-                if (! is_string($base) || trim($base, " \\t\\n\\r\\0\\x0B\\") === '') {
-                    throw new \InvalidArgumentException('base_classes must contain only non-empty class names.');
-                }
-
-                $normalized[] = trim($base, " \\t\\n\\r\\0\\x0B\\");
-            }
-
-            $this->laravelBases = array_values(array_unique($normalized));
-        }
-
-        if (array_key_exists(self::TARGET_MODE, $configuration)) {
-            $mode = $configuration[self::TARGET_MODE];
-
-            if (! is_string($mode) || ! in_array($mode, [self::TARGET_MODE_BASE_CLASS, self::TARGET_MODE_TRAIT], true)) {
-                throw new \InvalidArgumentException('target_mode must be "base_class" or "trait".');
-            }
-
-            $this->targetMode = $mode;
-        }
+        // One fresh value object per call: keys absent from $configuration fall back to
+        // the defaults, so a previous configuration can never leak through the shared
+        // singleton instance (see BaseClassConfiguration for the contract).
+        $this->configuration = BaseClassConfiguration::fromArray($configuration);
     }
 
     /**
@@ -169,7 +153,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             return null;
         }
 
-        if (! $this->isNames($node->extends, $this->laravelBases)) {
+        if (! $this->isNames($node->extends, $this->configuration->laravelBases)) {
             return null;
         }
 
@@ -178,7 +162,13 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         }
 
         $changed = false;
-        $hierarchyFailures = $this->hierarchyFailures($node);
+        [$kind, $chainFailure] = $this->classifyHierarchy($node);
+
+        $hierarchyFailures = $this->conversionGateFailures($node);
+        if ($chainFailure !== null) {
+            $hierarchyFailures[] = $chainFailure;
+        }
+
         $lifecycleFailures = $this->lifecycleFailures($node);
         $appFailures = $this->appFailures($node);
         $databaseAnalysis = $this->databaseAnalyzer->analyze($node);
@@ -244,27 +234,163 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             return $changed ? $node : null;
         }
 
-        return $this->convertClass($node);
+        \assert($kind !== null);
+
+        return $this->convertClass($node, $kind);
+    }
+
+    /**
+     * Decides how far this class may be rewritten: a direct framework child is
+     * converted to the Laratesto base itself, while a project-base descendant keeps
+     * its extends untouched - the project base is converted exactly once, and this
+     * class only receives lifecycle, API and database conversions.
+     *
+     * Only classes whose direct parent is a configured base reach this point; other
+     * hierarchies are simply not our business.
+     *
+     * @return array{('framework'|'descendant')|null, non-empty-string|null} kind + failure reason (null when safe)
+     */
+    private function classifyHierarchy(Class_ $class): array
+    {
+        $parentName = $this->getName($class->extends);
+
+        if ($parentName === null) {
+            return [null, 'the direct parent class name cannot be resolved'];
+        }
+
+        if ($parentName === self::FRAMEWORK_BASE) {
+            return ['framework', null];
+        }
+
+        return $this->classifyDescendant($parentName);
+    }
+
+    /**
+     * Walks the extends chain of a project base and proves three things: every class
+     * on the chain is resolvable, every project class on it is inside the processed
+     * paths and free of conversion blockers, and the chain terminates at the Laravel
+     * framework base (or at an already-migrated Laratesto base).
+     *
+     * @return array{('framework'|'descendant')|null, non-empty-string}
+     */
+    private function classifyDescendant(string $parentName): array
+    {
+        $seen = [];
+        $current = $parentName;
+
+        for ($depth = 0; $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
+            if ($current === self::FRAMEWORK_BASE || $current === self::TARGET_BASE) {
+                // A migrated base (either target) keeps providing the Laratesto API to
+                // this descendant.
+                return ['descendant', null];
+            }
+
+            if (isset($seen[$current])) {
+                return [null, sprintf('cyclic inheritance through %s cannot be classified', $current)];
+            }
+
+            $seen[$current] = true;
+
+            [$parentClass, $fromCurrentFile] = $this->resolveClassNode($current);
+
+            if (! $parentClass instanceof Class_) {
+                return [null, sprintf('parent %s cannot be resolved - migrate the project base in the same run', $current)];
+            }
+
+            if (! $fromCurrentFile && ! $this->isWithinProcessedPaths($parentClass)) {
+                return [null, sprintf(
+                    'project base %s is outside the processed paths - migrate it in the same run first',
+                    $current,
+                )];
+            }
+
+            if ($this->usesTargetTrait($parentClass)) {
+                return ['descendant', null];
+            }
+
+            $failures = [
+                ...$this->traitAdaptationFailures($parentClass),
+                ...$this->bootstrapMethodFailures($parentClass),
+                ...$this->lifecycleFailures($parentClass),
+            ];
+
+            if ($failures !== []) {
+                return [null, sprintf('project base %s carries unsupported constructs: %s', $current, implode('; ', $failures))];
+            }
+
+            if ($parentClass->extends === null) {
+                return [null, sprintf('parent %s does not extend a Laravel test base', $current)];
+            }
+
+            $next = $this->getName($parentClass->extends);
+
+            if ($next === null || $next === $current) {
+                return [null, sprintf('parent %s does not extend a resolvable Laravel test base', $current)];
+            }
+
+            if ($next === self::FRAMEWORK_BASE) {
+                // The chain bottom must itself be eligible, or the whole hierarchy
+                // would stay on PHPUnit under this descendant's Laratesto rewrite.
+                if (! in_array(self::FRAMEWORK_BASE, $this->configuration->laravelBases, true)) {
+                    return [null, sprintf(
+                        'project base %s extends the framework base, which is outside the configured base_classes',
+                        $current,
+                    )];
+                }
+
+                return ['descendant', null];
+            }
+
+            if ($next !== self::TARGET_BASE && ! in_array($next, $this->configuration->laravelBases, true)) {
+                return [null, sprintf(
+                    'project base %s extends %s, which is outside the configured base_classes',
+                    $current,
+                    $next,
+                )];
+            }
+
+            $current = $next;
+        }
+
+        return [null, sprintf('the extends chain is deeper than %d classes and cannot be classified safely', self::MAX_CHAIN_DEPTH)];
+    }
+
+    /**
+     * Conversion gates that apply to the class itself in both kinds: the constructs
+     * below are lost or broken by the lifecycle rewrite regardless of the parent.
+     *
+     * @return list<non-empty-string>
+     */
+    private function conversionGateFailures(Class_ $class): array
+    {
+        $failures = [
+            ...$this->traitAdaptationFailures($class),
+            ...$this->bootstrapMethodFailures($class),
+        ];
+
+        if ($this->configuration->targetMode === self::TARGET_MODE_TRAIT && $class->isAnonymous()) {
+            $failures[] = 'trait target mode does not support anonymous test classes';
+        }
+
+        return $failures;
     }
 
     /** @return list<non-empty-string> */
-    private function hierarchyFailures(Class_ $class): array
+    private function traitAdaptationFailures(Class_ $class): array
     {
-        $failures = [];
-
-        if (! $this->isName($class->extends, self::FRAMEWORK_BASE) && ! $this->isSafePassThroughParent($class->extends)) {
-            $failures[] = sprintf(
-                'parent %s is not a resolvable pass-through Laravel test base',
-                $this->getName($class->extends) ?? 'unknown',
-            );
-        }
-
         foreach ($class->stmts as $stmt) {
             if ($stmt instanceof TraitUse && $stmt->adaptations !== []) {
-                $failures[] = 'trait adaptations cannot be preserved by automatic class conversion';
-                break;
+                return ['trait adaptations cannot be preserved by automatic class conversion'];
             }
         }
+
+        return [];
+    }
+
+    /** @return list<non-empty-string> */
+    private function bootstrapMethodFailures(Class_ $class): array
+    {
+        $failures = [];
 
         foreach ($class->getMethods() as $method) {
             $name = $this->getName($method->name);
@@ -274,31 +400,96 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             }
         }
 
-        if ($this->targetMode === self::TARGET_MODE_TRAIT && $class->isAnonymous()) {
-            $failures[] = 'trait target mode does not support anonymous test classes';
-        }
-
-        return array_values(array_unique($failures));
+        return $failures;
     }
 
-    private function isSafePassThroughParent(Node\Name $parent): bool
+    /**
+     * @return array{Class_|null, bool} The second value reports whether the class
+     *         lives in the file currently being processed.
+     */
+    private function resolveClassNode(string $className): array
     {
-        $parentName = $this->getName($parent);
+        $local = (new NodeFinder())->findFirst(
+            $this->getFile()->getNewStmts(),
+            fn(Node $node): bool => $node instanceof Class_ && $this->isName($node, $className),
+        );
 
-        if ($parentName === null || ! in_array($parentName, $this->laravelBases, true)) {
-            return false;
+        if ($local instanceof Class_) {
+            return [$local, true];
         }
 
         try {
-            $parentNode = $this->astResolver->resolveClassFromName($parentName);
+            $resolved = $this->astResolver->resolveClassFromName($className);
         } catch (\Throwable) {
+            $resolved = null;
+        }
+
+        return [$resolved instanceof Class_ ? $resolved : null, false];
+    }
+
+    private function usesTargetTrait(Class_ $class): bool
+    {
+        foreach ($class->stmts as $stmt) {
+            if (! $stmt instanceof TraitUse) {
+                continue;
+            }
+
+            foreach ($stmt->traits as $trait) {
+                if ($this->isName($trait, self::TARGET_TRAIT)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function isWithinProcessedPaths(Class_ $class): bool
+    {
+        $scope = $class->getAttribute(AttributeKey::SCOPE);
+
+        $file = $scope instanceof Scope ? $scope->getFile() : null;
+
+        if ($file === null || $file === '') {
             return false;
         }
 
-        return $parentNode instanceof Class_
-            && $parentNode->extends !== null
-            && $this->isName($parentNode->extends, self::FRAMEWORK_BASE)
-            && $parentNode->stmts === [];
+        if ($file === $this->getFile()->getFilePath()) {
+            return true;
+        }
+
+        $realFile = \realpath($file);
+
+        if ($realFile === false) {
+            return false;
+        }
+
+        $realFile = self::normalizePath($realFile);
+
+        try {
+            $paths = SimpleParameterProvider::provideArrayParameter(Option::PATHS);
+        } catch (\Throwable $e) {
+            return false;
+        }
+
+        foreach ($paths as $path) {
+            $realPath = \realpath((string) $path);
+            $candidate = self::normalizePath($realPath === false ? (string) $path : $realPath);
+
+            if ($realFile === $candidate || \str_starts_with($realFile, $candidate . '/')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function normalizePath(string $path): string
+    {
+        $normalized = \str_replace('\\', '/', $path);
+
+        // Windows file paths are case-insensitive; compare them consistently.
+        return \DIRECTORY_SEPARATOR === '\\' ? \strtolower($normalized) : $normalized;
     }
 
     /** @return list<non-empty-string> */
@@ -392,14 +583,22 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         return array_values(array_unique($failures));
     }
 
-    private function convertClass(Class_ $class): Node
+    /**
+     * @param 'framework'|'descendant' $kind
+     */
+    private function convertClass(Class_ $class, string $kind): Node
     {
-        if ($this->targetMode === self::TARGET_MODE_BASE_CLASS) {
-            $class->extends = new FullyQualified(self::TARGET_BASE);
-        } else {
-            $class->extends = null;
-            $this->addTargetTrait($class);
+        if ($kind === 'framework') {
+            if ($this->configuration->targetMode === self::TARGET_MODE_BASE_CLASS) {
+                $class->extends = new FullyQualified(self::TARGET_BASE);
+            } else {
+                $class->extends = null;
+                $this->addTargetTrait($class);
+            }
         }
+
+        // A project-base descendant keeps its hierarchy: the converted base carries
+        // the Laratesto binding, this class only needs the lifecycle/API rewrites.
 
         foreach ($class->getMethods() as $method) {
             $this->convertLifecycleMethod($method);
