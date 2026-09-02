@@ -47,62 +47,6 @@ final class ResidualsScanner
     }
 
     /**
-     * Scan a unified diff's ADDED lines for residual markers — the dry-run channel:
-     * the disk holds no markers, the machine JSON diff does (see the compatibility
-     * contract). Line numbers follow the NEW file side of the hunks.
-     *
-     * @return list<Residual>
-     */
-    public function scanDiff(string $file, string $unifiedDiff): array
-    {
-        $residuals = [];
-        $newLine = 0;
-
-        foreach (\explode("\n", $unifiedDiff) as $line) {
-            if (\str_starts_with($line, '+++') || \str_starts_with($line, '---')) {
-                // File headers, not diff content.
-                continue;
-            }
-
-            if (\preg_match('/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/', $line, $hunk) === 1) {
-                $newLine = (int) $hunk[1];
-
-                continue;
-            }
-
-            if ($line === '' || $line[0] !== '+' && $line[0] !== '-' && $line[0] !== ' ') {
-                // File header or an empty context line; the latter still advances the
-                // new-side counter.
-                $line === '' and $newLine++;
-
-                continue;
-            }
-
-            if ($line[0] === '+') {
-                $content = \substr($line, 1);
-
-                if (\preg_match(self::MARKER_REGEX, $content, $match, \PREG_OFFSET_CAPTURE) === 1) {
-                    $residuals[] = new Residual(
-                        file: $file,
-                        line: $newLine,
-                        code: \trim($match['code'][0]),
-                        severity: \trim($match['severity'][0] ?? 'manual') ?: 'manual',
-                        rule: \trim($match['rule'][0]),
-                        reason: \trim($match['reason'][0]),
-                    );
-                }
-
-                $newLine++;
-            } elseif ($line[0] !== '-') {
-                // Context line of the new side.
-                $newLine++;
-            }
-        }
-
-        return $residuals;
-    }
-
-    /**
      * Render residuals as a console table.
      *
      * @param list<Residual> $residuals

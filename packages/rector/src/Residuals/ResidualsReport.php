@@ -25,8 +25,7 @@ final class ResidualsReport
      */
     public function render(string $mode, array $paths, array $residuals): string
     {
-        $sorted = $residuals;
-        \usort($sorted, static fn(Residual $a, Residual $b): int => $a->sortKey() <=> $b->sortKey());
+        $sorted = $this->sorted($residuals);
 
         $payload = [
             'schema_version' => self::SCHEMA_VERSION,
@@ -37,6 +36,28 @@ final class ResidualsReport
 
         return \json_encode($payload, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE)
             . "\n";
+    }
+
+    /**
+     * Deduplicated, deterministically ordered findings: file, then line numerically
+     * (10 comes after 9, not after 1), then code, then rule.
+     *
+     * @param list<Residual> $residuals
+     * @return list<Residual>
+     */
+    public function sorted(array $residuals): array
+    {
+        $unique = [];
+        foreach ($residuals as $residual) {
+            $unique[$residual->sortKey()] ??= $residual;
+        }
+
+        $sorted = \array_values($unique);
+        \usort($sorted, static function (Residual $a, Residual $b): int {
+            return [$a->file, $a->line, $a->code, $a->rule] <=> [$b->file, $b->line, $b->code, $b->rule];
+        });
+
+        return $sorted;
     }
 
     /**

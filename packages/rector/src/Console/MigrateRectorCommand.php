@@ -8,6 +8,7 @@ use Illuminate\Console\Command;
 use Laratesto\Rector\Residuals\Residual;
 use Laratesto\Rector\Residuals\ResidualsReport;
 use Laratesto\Rector\Residuals\ResidualsScanner;
+use Laratesto\Rector\Residuals\UnifiedDiffNewFileReconstructor;
 use Laratesto\Rector\Rules\LaravelBaseClassRector;
 use Laratesto\Rector\Set\LaratestoRectorSetList;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -46,6 +47,7 @@ final class MigrateRectorCommand extends Command
     public function __construct(
         private readonly ResidualsScanner $scanner = new ResidualsScanner(),
         private readonly ResidualsReport $report = new ResidualsReport(),
+        private readonly UnifiedDiffNewFileReconstructor $reconstructor = new UnifiedDiffNewFileReconstructor(),
     ) {
         parent::__construct();
     }
@@ -159,8 +161,9 @@ final class MigrateRectorCommand extends Command
     }
 
     /**
-     * Residuals of the run: dry-run reads them from the machine JSON diffs (the disk
-     * holds no markers yet); apply scans the processed paths as they now exist —
+     * Residuals of the run: dry-run scans the RECONSTRUCTED new-side content of each
+     * machine-JSON diff (the disk holds no markers yet, but markers already on disk
+     * must still be reported); apply scans the processed paths as they now exist —
      * including files an earlier run already migrated and left carrying markers.
      *
      * @param list<non-empty-string> $paths
@@ -168,9 +171,9 @@ final class MigrateRectorCommand extends Command
      */
     private function collectResiduals(bool $apply, array $paths): array
     {
-        if ($apply) {
-            $root = (string) $this->laravel->basePath();
+        $root = (string) $this->laravel->basePath();
 
+        if ($apply) {
             $residuals = [];
 
             foreach ($this->phpFiles($paths) as $absolute) {
@@ -193,7 +196,11 @@ final class MigrateRectorCommand extends Command
             return [];
         }
 
-        $payload = \json_decode($contents, true);
+        try {
+            $payload = \json_decode($contents, true, 512, \JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            throw new \RuntimeException('Rector produced an unreadable machine JSON output.');
+        }
 
         if (! \is_array($payload)) {
             throw new \RuntimeException('Rector produced an unreadable machine JSON output.');
@@ -206,13 +213,36 @@ final class MigrateRectorCommand extends Command
                 continue;
             }
 
+            $absolute = $this->isAbsolute($diff['file'])
+                ? $diff['file']
+                : $root . '/' . $this->normalizeRelative($diff['file']);
+
+            if (! \is_file($absolute)) {
+                continue;
+            }
+
+            $original = (string) \file_get_contents($absolute);
+            $virtual = $diff['diff'] === ''
+                ? $original
+                : $this->reconstructor->reconstruct($original, $diff['diff']);
+
             $residuals = [
                 ...$residuals,
-                ...$this->scanner->scanDiff($diff['file'], $diff['diff']),
+                ...$this->scanner->scan($this->relativeToRoot($root, $absolute), $virtual),
             ];
         }
 
         return $residuals;
+    }
+
+    private function relativeToRoot(string $root, string $absolute): string
+    {
+        $normalizedRoot = \str_replace('\\', '/', $root) . '/';
+        $normalized = \str_replace('\\', '/', $absolute);
+
+        return \str_starts_with($normalized, $normalizedRoot)
+            ? \substr($normalized, \strlen($normalizedRoot))
+            : $normalized;
     }
 
     /**
@@ -468,7 +498,11 @@ final class MigrateRectorCommand extends Command
             return true;
         }
 
-        $payload = \json_decode($contents, true);
+        try {
+            $payload = \json_decode($contents, true, 512, \JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return true;
+        }
 
         if (! \is_array($payload)) {
             return true;
