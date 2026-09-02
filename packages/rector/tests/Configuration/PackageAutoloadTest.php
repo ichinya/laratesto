@@ -15,6 +15,25 @@ use Testo\Test;
 final class PackageAutoloadTest
 {
     #[Test]
+    public function phpRequirementsMatchTesto(): void
+    {
+        $rootDir = \dirname(__DIR__, 4);
+        $packageDir = \dirname(__DIR__, 2);
+
+        $rootComposer = \json_decode((string) \file_get_contents($rootDir . '/composer.json'), true, flags: JSON_THROW_ON_ERROR);
+        $packageComposer = \json_decode((string) \file_get_contents($packageDir . '/composer.json'), true, flags: JSON_THROW_ON_ERROR);
+        $testoComposer = \json_decode((string) \file_get_contents($rootDir . '/vendor/testo/testo/composer.json'), true, flags: JSON_THROW_ON_ERROR);
+
+        $testoPhp = $testoComposer['require']['php'] ?? null;
+
+        Assert::same('>=8.2', $testoPhp, 'The installed Testo version must keep the documented PHP minimum.');
+        Assert::same($testoPhp, $rootComposer['require']['php'] ?? null, 'Laratesto must use Testo\'s PHP minimum.');
+        Assert::same($testoPhp, $packageComposer['require']['php'] ?? null, 'The Rector package must use Testo\'s PHP minimum.');
+        Assert::same('8.2.0', $rootComposer['config']['platform']['php'] ?? null, 'The lock file must resolve for the minimum supported PHP.');
+        Assert::same('^12.0 || ^13.0', $rootComposer['require']['laravel/framework'] ?? null, 'PHP 8.2 support requires the Laravel 12 compatibility branch.');
+    }
+
+    #[Test]
     public function thePackageComposerJsonMapsTheWholeSourceTree(): void
     {
         $packageDir = \dirname(__DIR__, 2);

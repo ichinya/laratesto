@@ -46,12 +46,12 @@ use Testo\Bridge\Rector\Testing\TestRectorFixtures;
 #[TestRectorFixtures('LaravelResidualDetectionRector')]
 final class LaravelResidualDetectionRector extends AbstractRector
 {
-    private const string TARGET_BASE = 'Laratesto\Testing\LaravelTestCase';
+    private const TARGET_BASE = 'Laratesto\Testing\LaravelTestCase';
 
     /**
      * Facade fakes without a stable Testo-native counterpart yet.
      */
-    private const array FAKE_FACADES = [
+    private const FAKE_FACADES = [
         'Illuminate\Support\Facades\Mail',
         'Illuminate\Support\Facades\Queue',
         'Illuminate\Support\Facades\Bus',
@@ -64,12 +64,12 @@ final class LaravelResidualDetectionRector extends AbstractRector
     /**
      * Response/method calls inside a Laravel test that Laratesto does not provide.
      */
-    private const array UNSUPPORTED_TEST_HELPERS = [
+    private const UNSUPPORTED_TEST_HELPERS = [
         'withoutExceptionHandling',
         'withExceptionHandling',
     ];
 
-    private const array UNSUPPORTED_RESPONSE_METHODS = [
+    private const UNSUPPORTED_RESPONSE_METHODS = [
         'assertJsonFragment',
         'assertJsonCount',
         'assertCookie',
@@ -83,7 +83,7 @@ final class LaravelResidualDetectionRector extends AbstractRector
     /**
      * Laravel test constructs that mark a NON-test class as carrying unmigrated code.
      */
-    private const array LARAVEL_TEST_TRAITS = [
+    private const LARAVEL_TEST_TRAITS = [
         'Illuminate\Foundation\Testing\RefreshDatabase',
         'Illuminate\Foundation\Testing\DatabaseTransactions',
         'Illuminate\Foundation\Testing\DatabaseMigrations',

@@ -16,7 +16,7 @@ namespace Laratesto\Rector\Residuals;
  */
 final class ResidualsScanner
 {
-    private const string MARKER_REGEX =
+    private const MARKER_REGEX =
         '/laratesto-residual\(code=(?<code>[^,)]+),\s*rule=(?<rule>[^,)]+)(?:,\s*severity=(?<severity>[^)]+))?\):\s*(?<reason>[^*]*)\*/';
 
     /**

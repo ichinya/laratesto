@@ -28,9 +28,9 @@ final class MigrateRectorCommand extends Command
     /**
      * Exit code: manual residuals present.
      */
-    private const int EXIT_MANUAL_RESIDUALS = 2;
+    private const EXIT_MANUAL_RESIDUALS = 2;
 
-    private const int EXIT_FAILURE = 1;
+    private const EXIT_FAILURE = 1;
 
     /**
      * @var string

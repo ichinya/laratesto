@@ -18,18 +18,18 @@ use Rector\NodeNameResolver\NodeNameResolver;
 /** @internal Pure whole-class preflight for Laravel database strategy conversion. */
 final class DatabaseConfigurationAnalyzer
 {
-    public const array TRAITS = [
+    public const TRAITS = [
         'Illuminate\Foundation\Testing\RefreshDatabase' => 'Laratesto\Attribute\RefreshDatabase',
         'Illuminate\Foundation\Testing\DatabaseTransactions' => 'Laratesto\Attribute\DatabaseTransactions',
         'Illuminate\Foundation\Testing\DatabaseMigrations' => 'Laratesto\Attribute\DatabaseMigrations',
         'Illuminate\Foundation\Testing\DatabaseTruncation' => 'Laratesto\Attribute\DatabaseTruncation',
     ];
 
-    public const string SEED_ATTRIBUTE = 'Illuminate\Foundation\Testing\Attributes\Seed';
+    public const SEED_ATTRIBUTE = 'Illuminate\Foundation\Testing\Attributes\Seed';
 
-    public const string SEEDER_ATTRIBUTE = 'Illuminate\Foundation\Testing\Attributes\Seeder';
+    public const SEEDER_ATTRIBUTE = 'Illuminate\Foundation\Testing\Attributes\Seeder';
 
-    private const array PROPERTY_OPTIONS = [
+    private const PROPERTY_OPTIONS = [
         'Illuminate\Foundation\Testing\RefreshDatabase' => [
             'seed' => 'seed',
             'seeder' => 'seeder',
@@ -57,7 +57,7 @@ final class DatabaseConfigurationAnalyzer
         ],
     ];
 
-    private const array UNSUPPORTED_OVERRIDES = [
+    private const UNSUPPORTED_OVERRIDES = [
         'beforeRefreshingDatabase',
         'afterRefreshingDatabase',
         'beforeTruncatingDatabase',

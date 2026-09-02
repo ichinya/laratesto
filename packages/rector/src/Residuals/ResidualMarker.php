@@ -23,7 +23,7 @@ final class ResidualMarker
      * Canonical marker pattern (see the compatibility contract); the scanner's regex is
      * derived from it.
      */
-    public const string PATTERN = 'laratesto-residual(code=%s, rule=%s, severity=%s): %s';
+    public const PATTERN = 'laratesto-residual(code=%s, rule=%s, severity=%s): %s';
 
     /**
      * Marks the class with this code, reconciling an existing marker of the same code.

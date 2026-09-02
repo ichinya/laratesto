@@ -28,8 +28,8 @@ The bridge is a standalone Composer package. It does not require any changes to 
 
 ## Requirements
 
-- PHP 8.3+
-- Laravel 13
+- PHP 8.2+ (the same minimum as Testo)
+- Laravel 12 or 13
 - Testo `^0.10.42`
 
 ## Installation
@@ -484,11 +484,12 @@ generation (the fixture-test bridge and the machine-JSON output contract), and
 Rector minor releases routinely rename them. Bump the pin only together with a
 green fixture suite and the parity end-to-end gate.
 
-CI (`.github/workflows/ci.yml`) runs on Linux and Windows, PHP 8.3 and 8.4:
+CI (`.github/workflows/ci.yml`) runs on Linux and Windows, PHP 8.2, 8.3 and 8.4:
 `composer validate --strict`, a locked install, `git diff --check`, the rector
 package's composer validation (non-strict — the deliberate Rector pin triggers
 a warning) and the full `composer test` suite, which includes the migration
-end-to-end gate.
+end-to-end gate. The root lock is resolved with Composer's PHP 8.2 platform so
+the same lock remains installable on every supported PHP version.
 
 ## License
 

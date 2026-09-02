@@ -15,7 +15,7 @@ namespace Laratesto\Rector\Residuals;
  */
 final class ResidualsReport
 {
-    public const int SCHEMA_VERSION = 1;
+    public const SCHEMA_VERSION = 1;
 
     /**
      * @param list<non-empty-string> $paths Processed paths, relative to the project

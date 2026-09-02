@@ -13,6 +13,6 @@ namespace Laratesto\Rector\Set;
  */
 final class LaratestoRectorSetList
 {
-    public const string LARAVEL_PHPUNIT_TO_LARATESTO =
+    public const LARAVEL_PHPUNIT_TO_LARATESTO =
         __DIR__ . '/../../config/sets/laravel-phpunit-to-laratesto.php';
 }

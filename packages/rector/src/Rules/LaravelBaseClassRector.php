@@ -43,38 +43,38 @@ use Testo\Bridge\Rector\Testing\TestRectorFixtures;
 #[TestRectorFixtures('LaravelBaseClassRector')]
 final class LaravelBaseClassRector extends AbstractRector implements ConfigurableRectorInterface
 {
-    public const string BASE_CLASSES = 'base_classes';
+    public const BASE_CLASSES = 'base_classes';
 
-    public const string TARGET_MODE = 'target_mode';
+    public const TARGET_MODE = 'target_mode';
 
-    public const string TARGET_MODE_BASE_CLASS = 'base_class';
+    public const TARGET_MODE_BASE_CLASS = 'base_class';
 
-    public const string TARGET_MODE_TRAIT = 'trait';
+    public const TARGET_MODE_TRAIT = 'trait';
 
     /** @var list<non-empty-string> */
-    public const array DEFAULT_BASE_CLASSES = BaseClassConfiguration::DEFAULT_BASE_CLASSES;
+    public const DEFAULT_BASE_CLASSES = BaseClassConfiguration::DEFAULT_BASE_CLASSES;
 
-    private const string FRAMEWORK_BASE = 'Illuminate\Foundation\Testing\TestCase';
+    private const FRAMEWORK_BASE = 'Illuminate\Foundation\Testing\TestCase';
 
-    private const string TARGET_BASE = 'Laratesto\Testing\LaravelTestCase';
+    private const TARGET_BASE = 'Laratesto\Testing\LaravelTestCase';
 
-    private const string TARGET_TRAIT = 'Laratesto\Testing\InteractsWithLaravel';
+    private const TARGET_TRAIT = 'Laratesto\Testing\InteractsWithLaravel';
 
     /**
      * Guard against cyclic or pathologically deep extends chains: anything deeper is
      * reported as an unsafe hierarchy instead of being converted.
      */
-    private const int MAX_CHAIN_DEPTH = 10;
+    private const MAX_CHAIN_DEPTH = 10;
 
-    private const string TEST_ATTRIBUTE = 'Testo\Test';
+    private const TEST_ATTRIBUTE = 'Testo\Test';
 
-    private const string PHPUNIT_TEST_ATTRIBUTE = 'PHPUnit\Framework\Attributes\Test';
+    private const PHPUNIT_TEST_ATTRIBUTE = 'PHPUnit\Framework\Attributes\Test';
 
     /**
      * Laravel/PHPUnit boot hooks that the Laratesto application factory does not call.
      * Keeping such a method while replacing the parent would silently drop behavior.
      */
-    private const array UNSUPPORTED_BOOTSTRAP_METHODS = [
+    private const UNSUPPORTED_BOOTSTRAP_METHODS = [
         'createApplication',
         'getPackageProviders',
         'getPackageAliases',

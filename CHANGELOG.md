@@ -39,11 +39,14 @@ versions follow [Semantic Versioning](https://semver.org/).
 - End-to-end migration gate: the parity fixture corpus is migrated by the real
   Rector binary, asserted marker-by-marker, verified byte-identical on a second
   apply and executed green under a real `testo run`.
-- CI workflow: Linux + Windows, PHP 8.3 + 8.4, composer validation, whitespace
+- CI workflow: Linux + Windows, PHP 8.2 + 8.3 + 8.4, composer validation, whitespace
   check and the full test suite including the migration gate.
 
 ### Changed
 
+- The minimum PHP version now follows Testo (`>=8.2`); Laravel 12 provides the
+  PHP 8.2 compatibility branch while Laravel 13 remains supported on PHP 8.3+.
+  The Rector package no longer uses PHP 8.3-only typed class constants.
 - The rector package is consumed as a symlinked path repository; the duplicate
   `Laratesto\Rector\` root autoload mapping is gone, and a packaging test pins
   the standalone package's own autoload contract.

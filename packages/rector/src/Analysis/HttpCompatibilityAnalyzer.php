@@ -19,11 +19,11 @@ use Rector\NodeNameResolver\NodeNameResolver;
 /** @internal Classifies only the statically proven common-path signature matrix. */
 final class HttpCompatibilityAnalyzer
 {
-    public const string TEST_RESPONSE = 'Illuminate\Testing\TestResponse';
+    public const TEST_RESPONSE = 'Illuminate\Testing\TestResponse';
 
-    public const string LARAVEL_RESPONSE = 'Laratesto\Testing\LaravelResponse';
+    public const LARAVEL_RESPONSE = 'Laratesto\Testing\LaravelResponse';
 
-    private const array REQUEST_SIGNATURES = [
+    private const REQUEST_SIGNATURES = [
         'get' => [1, 2, ['string', 'array']],
         'getJson' => [1, 2, ['string', 'array']],
         'post' => [1, 3, ['string', 'array', 'array']],
@@ -35,7 +35,7 @@ final class HttpCompatibilityAnalyzer
         'call' => [2, 7, ['string', 'string', 'array', 'array', 'array', 'array', 'nullable-string']],
     ];
 
-    private const array HELPER_SIGNATURES = [
+    private const HELPER_SIGNATURES = [
         'withHeaders' => [1, 1, ['array']],
         'withHeader' => [2, 2, ['string', 'string']],
         'withoutHeader' => [1, 1, ['string']],
@@ -62,7 +62,7 @@ final class HttpCompatibilityAnalyzer
         'assertSessionHasErrors' => [0, 1, ['array']],
     ];
 
-    private const array RESPONSE_SIGNATURES = [
+    private const RESPONSE_SIGNATURES = [
         'assertStatus' => [1, 1, ['int']],
         'assertOk' => [0, 0, []],
         'assertJson' => [1, 2, ['array', 'bool']],
@@ -75,7 +75,7 @@ final class HttpCompatibilityAnalyzer
         'getContent' => [0, 0, []],
     ];
 
-    private const array PENDING_ARTISAN_SIGNATURES = [
+    private const PENDING_ARTISAN_SIGNATURES = [
         'assertExitCode' => [1, 1, ['int']],
         'assertSuccessful' => [0, 0, []],
         'assertFailed' => [0, 0, []],
@@ -86,7 +86,7 @@ final class HttpCompatibilityAnalyzer
         'output' => [0, 0, []],
     ];
 
-    private const array RESPONSE_FLUENT_METHODS = [
+    private const RESPONSE_FLUENT_METHODS = [
         'assertStatus',
         'assertOk',
         'assertJson',
@@ -95,7 +95,7 @@ final class HttpCompatibilityAnalyzer
         'assertRedirect',
     ];
 
-    private const array INTERACTIVE_ARTISAN_METHODS = [
+    private const INTERACTIVE_ARTISAN_METHODS = [
         'expectsQuestion',
         'expectsConfirmation',
         'expectsChoice',

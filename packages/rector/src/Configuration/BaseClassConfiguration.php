@@ -16,12 +16,12 @@ namespace Laratesto\Rector\Configuration;
 final class BaseClassConfiguration
 {
     /** @var list<non-empty-string> */
-    public const array DEFAULT_BASE_CLASSES = [
+    public const DEFAULT_BASE_CLASSES = [
         'Tests\TestCase',
         'Illuminate\Foundation\Testing\TestCase',
     ];
 
-    public const string DEFAULT_TARGET_MODE = 'base_class';
+    public const DEFAULT_TARGET_MODE = 'base_class';
 
     /**
      * @param list<non-empty-string> $laravelBases Source base classes eligible for conversion.
