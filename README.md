@@ -470,6 +470,26 @@ wrapper, `tests/Integration` boots the fixture application in `tests/Fixture/lar
 (SQLite in-memory) and exercises HTTP requests, the database attributes and
 cross-test isolation.
 
+### Rector bridge development
+
+The migration rules live in the standalone package `packages/rector`
+(`ichinya/laratesto-rector`). The root repository wires it in as a Composer
+path repository in symlink mode, so `composer install` junctions the package
+into `vendor/` and the suite always exercises the live repo source — no
+duplicate `Laratesto\Rector\` autoload mapping is needed (or allowed).
+
+`rector/rector` is pinned to an exact version (`2.6.2`) in both the consuming
+application and the package: the rules depend on internals of that Rector
+generation (the fixture-test bridge and the machine-JSON output contract), and
+Rector minor releases routinely rename them. Bump the pin only together with a
+green fixture suite and the parity end-to-end gate.
+
+CI (`.github/workflows/ci.yml`) runs on Linux and Windows, PHP 8.3 and 8.4:
+`composer validate --strict`, a locked install, `git diff --check`, the rector
+package's composer validation (non-strict — the deliberate Rector pin triggers
+a warning) and the full `composer test` suite, which includes the migration
+end-to-end gate.
+
 ## License
 
 BSD 3-Clause. See [LICENSE](LICENSE).

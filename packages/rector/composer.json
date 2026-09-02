@@ -22,7 +22,7 @@
         "testo/bridge-rector": "^0.2.4"
     },
     "suggest": {
-        "ichinya/laratesto": "Laratesto runtime API targeted by these rules (^0.6.9)"
+        "ichinya/laratesto": "The Laratesto runtime API these rules rewrite to. Requires the release that ships the multi-connection database attributes (connections/tables/exceptTables on DatabaseTruncation and RefreshDatabase); use dev-main until that release — the rules do NOT produce code compatible with runtime 0.6.9."
     },
     "autoload": {
         "psr-4": {

@@ -25,5 +25,9 @@ runners.
 | B — Artisan    | both, fresh reset | dry-run (table + deterministic JSON, one residual set, exit 0/2) → `--apply` → repeat `--apply` (sources/markers/report unchanged) → green run; repeat with `--base-class`/`--target-mode`/`--path`/`--report` |
 | C — safety     | supported         | dirty processed blocks; dirty outside paths does not; non-Git blocks apply only; `--allow-dirty` warns; scoped `git restore --source=HEAD -- <paths>`                                                          |
 
-Traceability (matrix row → test ID → scenario) is recorded in the ticket artifact once the implementation snapshot (the
-reviewer's pending commit) is in.
+Traceability: scenario A is automated end-to-end by
+`Laratesto\Rector\Tests\Integration\ParityMigrationE2eTest` (real Rector apply over
+both corpora → byte-identical second apply → real `testo run` of the migrated
+supported corpus); scenario C's Git/path guards are covered by
+`Laratesto\Tests\Integration\MigrateRectorCommandGuardsTest` and the command
+e2e in `Laratesto\Tests\Integration\MigrateRectorCommandTest`.

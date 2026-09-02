@@ -6,6 +6,48 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Rector migration of Laravel PHPUnit test suites (PR #8 fix plan):
+  - the project base `Tests\TestCase` is converted exactly once — it keeps its
+    custom helpers and setup, and every descendant keeps extending it while
+    gaining only lifecycle, HTTP and database conversions;
+  - descendant safety is proven across the whole extends chain (resolvable,
+    inside the processed paths, free of blockers, terminating at the framework
+    base or an already-migrated base); anything unprovable fails closed with a
+    `CLASS_UNSAFE_HIERARCHY` residual instead of a half-migrated hierarchy;
+  - rule configuration is deterministic: re-configuring the shared rule
+    instance can no longer leak a previous `base_classes`/`target_mode`;
+  - multi-property database options split losslessly — sibling properties on
+    the same declaration survive;
+  - residual markers reconcile: changed constructs refresh their reason,
+    resolved constructs lose the marker, unchanged runs stay byte-identical;
+  - the eight residual codes live in one `ResidualCode` catalog and the README
+    documents exactly that catalog (enforced by test);
+  - dry-run residual reports scan the reconstructed new-side content, so
+    markers already on disk are reported and soon-to-disappear markers are not;
+    report lines sort numerically and deduplicate;
+  - `laratesto:migrate-rector` is decomposed into injectable services and fails
+    closed: realpath path containment, Git porcelain `-z` status with checked
+    exit code and a re-check before the Rector process, machine-JSON schema
+    validation, apply-only exit-0 matrix and no scratch files.
+- `DatabaseTransactions` restores and re-caches in-memory connections around
+  the transaction, so a `:memory:` schema no longer vanishes between tests.
+
+### Added
+
+- End-to-end migration gate: the parity fixture corpus is migrated by the real
+  Rector binary, asserted marker-by-marker, verified byte-identical on a second
+  apply and executed green under a real `testo run`.
+- CI workflow: Linux + Windows, PHP 8.3 + 8.4, composer validation, whitespace
+  check and the full test suite including the migration gate.
+
+### Changed
+
+- The rector package is consumed as a symlinked path repository; the duplicate
+  `Laratesto\Rector\` root autoload mapping is gone, and a packaging test pins
+  the standalone package's own autoload contract.
+
 ## [0.6.9] - 2026-08-22
 
 ### Added

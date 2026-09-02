@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / PHP ${{ matrix.php }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        php: ['8.3', '8.4']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: sqlite3, pdo_sqlite
+          coverage: none
+
+      - name: Validate composer files
+        # The rector package's exact Rector pin is deliberate (see the README),
+        # so its validation runs without --strict to tolerate the pin warning.
+        run: |
+          composer validate --strict
+          composer --working-dir=packages/rector validate
+
+      - name: Install locked dependencies
+        run: composer install --no-interaction --no-progress
+
+      - name: Check for whitespace errors
+        run: git diff --check
+
+      - name: Run the test suite (includes the migration end-to-end gate)
+        run: composer test

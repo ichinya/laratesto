@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "71bf4d27fbb9480f4fe9e0bf40fd7ab5",
+    "content-hash": "1fccfbaf6d9d993ef8e4368891c4ee7f",
     "packages": [
         {
             "name": "brick/math",
@@ -6956,7 +6956,7 @@
             "dist": {
                 "type": "path",
                 "url": "packages/rector",
-                "reference": "58ce4c6d1047e7d739ac85a06e94f7182661681d"
+                "reference": "5e8a82f4f5dde2a64eb2ffe5b967748e3a3979cc"
             },
             "require": {
                 "php": "^8.3",
@@ -6970,6 +6970,11 @@
             "extra": {
                 "branch-alias": {
                     "dev-main": "1.x-dev"
+                },
+                "laravel": {
+                    "providers": [
+                        "Laratesto\\Rector\\LaratestoRectorServiceProvider"
+                    ]
                 }
             },
             "autoload": {
@@ -6995,7 +7000,7 @@
                 "testo"
             ],
             "transport-options": {
-                "symlink": false,
+                "symlink": true,
                 "relative": true
             }
         },

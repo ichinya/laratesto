@@ -31,14 +31,13 @@
             "type": "path",
             "url": "packages/rector",
             "options": {
-                "symlink": false
+                "symlink": true
             }
         }
     ],
     "autoload": {
         "psr-4": {
-            "Laratesto\\": "src/",
-            "Laratesto\\Rector\\": "packages/rector/src/"
+            "Laratesto\\": "src/"
         }
     },
     "autoload-dev": {
