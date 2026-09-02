@@ -24,6 +24,10 @@ final class UnifiedDiffNewFileReconstructor
      */
     public function reconstruct(string $originalContent, string $unifiedDiff): string
     {
+        // Rector reprints every file with LF endings no matter what the source had,
+        // so the reconstruction target is the LF-normalized original.
+        $originalContent = \str_replace("\r\n", "\n", $originalContent);
+
         $trailingNewline = true;
 
         if (\str_ends_with($originalContent, "\n")) {

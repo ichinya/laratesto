@@ -80,6 +80,18 @@ final class DryRunReportContractTest
     }
 
     #[Test]
+    public function aCrlfOriginalReconstructsToTheLfNewSide(): void
+    {
+        // Rector reprints with LF even when the source was committed with CRLF.
+        $original = "<?php\r\n\r\nfinal class Demo\r\n{\r\n}\r\n";
+        $diff = "--- Original\n+++ New\n@@ -1,4 +1,4 @@\n <?php\n \n-final class Demo\n+final class Demo\n {\n";
+
+        $reconstructed = $this->reconstructor->reconstruct($original, $diff);
+
+        Assert::same("<?php\n\nfinal class Demo\n{\n}\n", $reconstructed);
+    }
+
+    #[Test]
     public function aMismatchedDiffIsRejected(): void
     {
         try {
