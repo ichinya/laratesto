@@ -7,6 +7,7 @@ namespace Laratesto\Rector\Analysis;
 use PhpParser\Node\Attribute;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Stmt\Property;
+use PhpParser\Node\Stmt\PropertyProperty;
 use PhpParser\Node\Stmt\TraitUse;
 
 /** @internal Immutable result of the database trait all-or-nothing preflight. */
@@ -14,7 +15,9 @@ final readonly class DatabaseConfigurationAnalysis
 {
     /**
      * @param array<non-empty-string, Expr> $options
-     * @param list<Property> $removableProperties
+     * @param list<PropertyProperty> $removableProperties The individual property items
+     *        that move into the attribute — sibling options on the same multi-property
+     *        declaration stay untouched.
      * @param list<Attribute> $removableAttributes
      */
     public function __construct(

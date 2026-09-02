@@ -171,9 +171,19 @@ final class DatabaseConfigurationAnalyzer
             }
 
             $property = $matches[0];
-            $value = $property->props[0]->default;
+            $propertyItem = null;
 
-            if ($property->isStatic() || count($property->props) !== 1 || ! $this->isLiteral($value)) {
+            foreach ($property->props as $item) {
+                if ($item->name->toString() === $propertyName) {
+                    $propertyItem = $item;
+
+                    break;
+                }
+            }
+
+            $value = $propertyItem?->default;
+
+            if ($property->isStatic() || $propertyItem === null || ! $this->isLiteral($value)) {
                 return $this->unsupported($base, sprintf('database option $%s must be a non-static literal', $propertyName));
             }
 
@@ -186,7 +196,7 @@ final class DatabaseConfigurationAnalyzer
             }
 
             $options[$argumentName] = $value;
-            $properties[] = $property;
+            $properties[] = $propertyItem;
         }
 
         $attributes = [];

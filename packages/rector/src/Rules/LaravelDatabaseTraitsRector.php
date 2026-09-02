@@ -14,6 +14,8 @@ use PhpParser\Node\AttributeGroup;
 use PhpParser\Node\Identifier;
 use PhpParser\Node\Name\FullyQualified;
 use PhpParser\Node\Stmt\Class_;
+use PhpParser\Node\Stmt\Property;
+use PhpParser\Node\Stmt\PropertyProperty;
 use PhpParser\Node\Stmt\TraitUse;
 use PhpParser\NodeFinder;
 use Rector\PhpParser\Node\FileNode;
@@ -128,8 +130,16 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
                 }
             }
 
-            foreach ($analysis->removableProperties as $property) {
-                if ($statement === $property) {
+            // Lossless property rewrite: only the converted option items are lifted
+            // into the attribute; sibling declarations, type, flags, attributes and
+            // comments of the statement survive.
+            if ($statement instanceof Property) {
+                $statement->props = array_values(array_filter(
+                    $statement->props,
+                    static fn(PropertyProperty $item): bool => ! in_array($item, $analysis->removableProperties, true),
+                ));
+
+                if ($statement->props === []) {
                     unset($class->stmts[$key]);
                 }
             }
