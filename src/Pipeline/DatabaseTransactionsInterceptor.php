@@ -28,6 +28,11 @@ final readonly class DatabaseTransactionsInterceptor implements TestRunIntercept
     {
         $application = $this->factory->current();
         $connections = DatabaseRuntime::connectionNames($application, $this->attribute->connections);
+
+        // In-memory databases must survive the per-test application rebuilds: restore
+        // the cached connections so the transaction actually wraps migrated data.
+        DatabaseRuntime::restoreInMemoryConnections($application, $connections);
+
         $scope = new DatabaseTransactionScope($application, $connections);
 
         try {
@@ -40,6 +45,8 @@ final readonly class DatabaseTransactionsInterceptor implements TestRunIntercept
             $result = $next($info);
         } catch (\Throwable $pipelineFailure) {
             $scope->closeQuietly();
+            DatabaseRuntime::cacheInMemoryConnections($application, $connections);
+
             throw $pipelineFailure;
         }
 
@@ -48,6 +55,8 @@ final readonly class DatabaseTransactionsInterceptor implements TestRunIntercept
         } catch (\Throwable $failure) {
             return FailureResult::aborted($info, $failure);
         }
+
+        DatabaseRuntime::cacheInMemoryConnections($application, $connections);
 
         return $result;
     }

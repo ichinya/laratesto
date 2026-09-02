@@ -15,6 +15,8 @@ use Tests\TestCase;
  */
 final class DatabaseStrategiesTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_refresh_database_migrates_and_isolates(): void
     {
         \DB::table('things')->insert(['name' => 'isolated']);
