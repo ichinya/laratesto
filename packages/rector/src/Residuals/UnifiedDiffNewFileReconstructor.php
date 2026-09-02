@@ -44,6 +44,13 @@ final class UnifiedDiffNewFileReconstructor
         $lines = \explode("\n", \str_replace("\r\n", "\n", $unifiedDiff));
         $count = \count($lines);
 
+        // The final newline of the diff terminates the last line; it is not an extra
+        // empty context line.
+        if ($count > 0 && $lines[$count - 1] === '') {
+            \array_pop($lines);
+            $count--;
+        }
+
         for ($index = 0; $index < $count; $index++) {
             $line = $lines[$index];
 
