@@ -39,12 +39,12 @@ final class PackageAutoloadTest
             }
 
             $relative = \str_replace('\\', '/', \substr((string) $file->getPathname(), \strlen($packageDir . '/src/')));
-            $expected['src/' . $relative] = 'Laratesto\Rector\' . \str_replace('/', '\', \substr($relative, 0, -4));
+            $expected['src/' . $relative] = 'Laratesto\\Rector\\' . \str_replace('/', '\\', \substr($relative, 0, -4));
         }
 
         Assert::true($expected !== [], 'The package source tree must not be empty.');
 
-        foreach (\array_keys($expected) as $file => $class) {
+        foreach ($expected as $file => $class) {
             Assert::true(\is_file($packageDir . '/' . $file), 'Missing package source file: ' . $file);
             Assert::true(\class_exists($class) || \interface_exists($class) || \trait_exists($class) || \enum_exists($class), 'The class must load through the package autoload: ' . $class);
         }
