@@ -246,6 +246,17 @@ final class MigrateRectorCommandGuardsTest
 
         $runner = new FakeProcessRunner($rector, $gitProbe ?? new ProcessOutcome(0, "true\n", ''), $gitStatus ?? new ProcessOutcome(0, '', ''));
 
+        // Blocked or failed runs legitimately leave the corpus and report behind —
+        // remove them when the process ends, so the fixture tree stays clean.
+        \register_shutdown_function(static function () use ($dir, $report): void {
+            foreach (\glob($dir . '/*.php') ?: [] as $probeFile) {
+                @\unlink($probeFile);
+            }
+
+            @\rmdir($dir);
+            @\unlink($report);
+        });
+
         $this->app()->bind(ProcessRunner::class, static fn(): ProcessRunner => $runner);
         $this->app()->register(LaratestoRectorServiceProvider::class);
 

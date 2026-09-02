@@ -130,7 +130,7 @@ PHP;
 
         // Staging the corpus makes it non-untracked — the guard must refuse.
         // The index entry is always dropped again in the finally block.
-        \exec(\sprintf('git add -- %s 2>&1', \escapeshellarg($file)), $out, $added);
+        \exec(\sprintf('git add -f -- %s 2>&1', \escapeshellarg($file)), $out, $added);
 
         try {
             if ($added !== 0) {
@@ -200,7 +200,7 @@ PHP;
 
         $this->registerProvider();
 
-        \exec(\sprintf('git add -- %s 2>&1', \escapeshellarg($file)), $out, $added);
+        \exec(\sprintf('git add -f -- %s 2>&1', \escapeshellarg($file)), $out, $added);
 
         try {
             if ($added !== 0) {
