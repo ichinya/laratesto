@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Laratesto\Rector\Rules;
 
+use Laratesto\Rector\Residuals\ResidualCode;
 use Laratesto\Rector\Residuals\ResidualMarker;
 use PhpParser\Node;
 use PhpParser\Node\Expr\MethodCall;
@@ -203,7 +204,7 @@ final class LaravelResidualDetectionRector extends AbstractRector
 
         $fakes !== [] and $changed = ResidualMarker::mark(
             $node,
-            'LARAVEL_FAKE_UNSUPPORTED',
+            ResidualCode::LARAVEL_FAKE_UNSUPPORTED,
             static::class,
             \implode(', ', \array_values(\array_unique($fakes)))
                 . ' — no stable Testo-native fakes yet; migrate manually',
@@ -211,7 +212,7 @@ final class LaravelResidualDetectionRector extends AbstractRector
 
         $unsupportedHelpers !== [] and $changed = ResidualMarker::mark(
             $node,
-            'HTTP_UNSUPPORTED_SIGNATURE',
+            ResidualCode::HTTP_UNSUPPORTED_SIGNATURE,
             static::class,
             \implode(', ', \array_values(\array_unique($unsupportedHelpers)))
                 . ' — no automatic helper conversion; migrate manually',
@@ -219,7 +220,7 @@ final class LaravelResidualDetectionRector extends AbstractRector
 
         $unsupportedResponses !== [] and $changed = ResidualMarker::mark(
             $node,
-            'RESPONSE_UNSUPPORTED_API',
+            ResidualCode::RESPONSE_UNSUPPORTED_API,
             static::class,
             \implode(', ', \array_values(\array_unique($unsupportedResponses)))
                 . ' — no automatic conversion; migrate manually',
@@ -268,7 +269,7 @@ final class LaravelResidualDetectionRector extends AbstractRector
 
         ResidualMarker::mark(
             $node,
-            'LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY',
+            ResidualCode::LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY,
             static::class,
             'Laravel constructs outside a convertible hierarchy ('
             . \implode(', ', \array_values(\array_unique($found)))

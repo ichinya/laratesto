@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Laratesto\Rector\Rules;
 
 use Laratesto\Rector\Analysis\HttpCompatibilityAnalyzer;
+use Laratesto\Rector\Residuals\ResidualCode;
 use Laratesto\Rector\Residuals\ResidualMarker;
 use PhpParser\Node;
 use PhpParser\Node\Name;
@@ -147,9 +148,9 @@ final class LaravelSourceCompatibleCallsRector extends AbstractRector
     private function hasStructuralBlockingMarker(Class_ $class): bool
     {
         foreach ([
-            'CLASS_UNSAFE_HIERARCHY',
-            'LIFECYCLE_UNSUPPORTED',
-            'DATABASE_UNSUPPORTED_CONFIGURATION',
+            ResidualCode::CLASS_UNSAFE_HIERARCHY,
+            ResidualCode::LIFECYCLE_UNSUPPORTED,
+            ResidualCode::DATABASE_UNSUPPORTED_CONFIGURATION,
         ] as $code) {
             if (ResidualMarker::isMarked($class, $code)) {
                 return true;

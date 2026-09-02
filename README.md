@@ -157,6 +157,85 @@ After conversion, run the exact Testo scope before removing PHPUnit:
 vendor/bin/testo run --suite=Unit
 ```
 
+## Migrating with Rector
+
+For full Laravel test suites the bridge ships a Rector-based migrator. The
+command wraps the pinned Rector binary with the public
+`Laravel\PhpunitToLaratesto` set, prints the residual table and writes a
+deterministic `laratesto-residuals.json`:
+
+```bash
+# Dry-run (default): sources stay untouched, report is written.
+php artisan laratesto:migrate-rector
+
+# Process specific paths and write to a custom report location.
+php artisan laratesto:migrate-rector --path=tests/Feature --report=storage/residuals.json
+
+# Rewrite the sources in place (refuses dirty processed paths unless --allow-dirty).
+php artisan laratesto:migrate-rector --apply
+
+# Choose the conversion target and additional project base classes.
+php artisan laratesto:migrate-rector --target-mode=trait --base-class=Tests/ApiTestCase
+```
+
+Exit contract: `0` — no manual residuals; `1` — execution, guard or report
+failure; `2` — manual residuals present (Rector's dry-run "changes found" exit
+is a successful execution here).
+
+### Target modes
+
+- `base_class` (default) — the project base `Tests\TestCase` is converted
+  exactly once: it extends `Laratesto\Testing\LaravelTestCase` and keeps all of
+  its custom helpers and setup. Classes extending the Laravel foundation
+  `TestCase` directly are converted the same way. **Descendants of the project
+  base keep their `extends` untouched** — the converted base carries the
+  Laravel binding, and the descendant only receives lifecycle, HTTP and
+  database conversions.
+- `trait` — the project base drops its parent and uses
+  `Laratesto\Testing\InteractsWithLaravel`; concrete classes extending the
+  foundation `TestCase` directly do the same. Descendants keep inheriting from
+  the project base.
+
+### Fail-closed residuals
+
+When the safety of a transformation cannot be proven, the migrator leaves the
+construct untouched and attaches a stable `laratesto-residual(code=…)` marker
+comment. The full catalog:
+
+- `CLASS_UNSAFE_HIERARCHY`
+- `LIFECYCLE_UNSUPPORTED`
+- `DATABASE_UNSUPPORTED_CONFIGURATION`
+- `HTTP_UNSUPPORTED_SIGNATURE`
+- `RESPONSE_UNSUPPORTED_API`
+- `ARTISAN_INTERACTION_UNSUPPORTED`
+- `LARAVEL_FAKE_UNSUPPORTED`
+- `LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY`
+
+Re-running the migrator reconciles the markers: a resolved construct loses its
+marker, a changed construct gets its reason refreshed, and untouched constructs
+keep theirs byte-identical (repeat applies are idempotent).
+
+### Database trait conversion
+
+`RefreshDatabase`, `DatabaseTransactions`, `DatabaseMigrations` and
+`DatabaseTruncation` convert to their Laratesto attributes when the option
+properties are non-static literals with the supported shape, are not read by
+class code, and the class defines no database lifecycle hooks
+(`before/afterRefreshingDatabase`, `before/afterTruncatingDatabase`,
+`migrateFreshUsing`, …). Multi-property declarations keep their unrelated
+siblings (`protected bool $seed = true, $keepMe = false;` loses only `$seed`).
+Everything else fails closed with `DATABASE_UNSUPPORTED_CONFIGURATION`.
+
+### Dry-run report contract
+
+`laratesto-residuals.json` is deterministic: stable schema version, sorted
+residuals (file, line as an integer, code, rule), no timestamps. In a dry-run
+the report is built from the reconstructed new-side content of the machine
+diff, so it contains both freshly added markers and markers already present on
+disk, and never markers a change would remove. The report is only replaced
+after a fully successful run — a Rector, Git or JSON failure preserves the
+previous report.
+
 ## Writing tests
 
 ### Base class

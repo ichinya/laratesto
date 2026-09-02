@@ -6,6 +6,7 @@ namespace Laratesto\Rector\Rules;
 
 use Laratesto\Rector\Analysis\DatabaseConfigurationAnalysis;
 use Laratesto\Rector\Analysis\DatabaseConfigurationAnalyzer;
+use Laratesto\Rector\Residuals\ResidualCode;
 use Laratesto\Rector\Residuals\ResidualMarker;
 use PhpParser\Node;
 use PhpParser\Node\Arg;
@@ -81,7 +82,7 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
         if ($analysis->unsupportedReason !== null) {
             $changed = ResidualMarker::mark(
                 $node,
-                'DATABASE_UNSUPPORTED_CONFIGURATION',
+                ResidualCode::DATABASE_UNSUPPORTED_CONFIGURATION,
                 static::class,
                 $analysis->unsupportedReason,
             );
@@ -172,11 +173,11 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
     private function hasBlockingMarker(Class_ $class): bool
     {
         foreach ([
-            'CLASS_UNSAFE_HIERARCHY',
-            'LIFECYCLE_UNSUPPORTED',
-            'HTTP_UNSUPPORTED_SIGNATURE',
-            'RESPONSE_UNSUPPORTED_API',
-            'ARTISAN_INTERACTION_UNSUPPORTED',
+            ResidualCode::CLASS_UNSAFE_HIERARCHY,
+            ResidualCode::LIFECYCLE_UNSUPPORTED,
+            ResidualCode::HTTP_UNSUPPORTED_SIGNATURE,
+            ResidualCode::RESPONSE_UNSUPPORTED_API,
+            ResidualCode::ARTISAN_INTERACTION_UNSUPPORTED,
         ] as $code) {
             if (ResidualMarker::isMarked($class, $code)) {
                 return true;

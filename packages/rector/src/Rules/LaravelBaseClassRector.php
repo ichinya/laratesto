@@ -7,6 +7,7 @@ namespace Laratesto\Rector\Rules;
 use Laratesto\Rector\Analysis\DatabaseConfigurationAnalyzer;
 use Laratesto\Rector\Analysis\HttpCompatibilityAnalyzer;
 use Laratesto\Rector\Configuration\BaseClassConfiguration;
+use Laratesto\Rector\Residuals\ResidualCode;
 use Laratesto\Rector\Residuals\ResidualMarker;
 use PhpParser\Node;
 use PhpParser\Node\Attribute;
@@ -175,13 +176,13 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         $httpAnalysis = $this->httpAnalyzer->analyze($node);
         $httpFailures = array_values(array_unique([
             ...$appFailures,
-            ...($httpAnalysis->reasonsByCode['HTTP_UNSUPPORTED_SIGNATURE'] ?? []),
+            ...($httpAnalysis->reasonsByCode[ResidualCode::HTTP_UNSUPPORTED_SIGNATURE] ?? []),
         ]));
 
         if ($hierarchyFailures !== []) {
             $changed = ResidualMarker::mark(
                 $node,
-                'CLASS_UNSAFE_HIERARCHY',
+                ResidualCode::CLASS_UNSAFE_HIERARCHY,
                 static::class,
                 implode('; ', $hierarchyFailures),
             ) || $changed;
@@ -190,7 +191,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         if ($lifecycleFailures !== []) {
             $changed = ResidualMarker::mark(
                 $node,
-                'LIFECYCLE_UNSUPPORTED',
+                ResidualCode::LIFECYCLE_UNSUPPORTED,
                 static::class,
                 implode('; ', $lifecycleFailures),
             ) || $changed;
@@ -199,13 +200,13 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         if ($httpFailures !== []) {
             $changed = ResidualMarker::mark(
                 $node,
-                'HTTP_UNSUPPORTED_SIGNATURE',
+                ResidualCode::HTTP_UNSUPPORTED_SIGNATURE,
                 static::class,
                 implode('; ', $httpFailures),
             ) || $changed;
         }
 
-        foreach (['RESPONSE_UNSUPPORTED_API', 'ARTISAN_INTERACTION_UNSUPPORTED'] as $code) {
+        foreach ([ResidualCode::RESPONSE_UNSUPPORTED_API, ResidualCode::ARTISAN_INTERACTION_UNSUPPORTED] as $code) {
             $reasons = $httpAnalysis->reasonsByCode[$code] ?? [];
             if ($reasons !== []) {
                 $changed = ResidualMarker::mark(
@@ -220,7 +221,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         if ($databaseAnalysis->unsupportedReason !== null) {
             $changed = ResidualMarker::mark(
                 $node,
-                'DATABASE_UNSUPPORTED_CONFIGURATION',
+                ResidualCode::DATABASE_UNSUPPORTED_CONFIGURATION,
                 LaravelDatabaseTraitsRector::class,
                 $databaseAnalysis->unsupportedReason,
             ) || $changed;
@@ -731,12 +732,12 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
     private function hasBlockingMarker(Class_ $class): bool
     {
         foreach ([
-            'CLASS_UNSAFE_HIERARCHY',
-            'LIFECYCLE_UNSUPPORTED',
-            'DATABASE_UNSUPPORTED_CONFIGURATION',
-            'HTTP_UNSUPPORTED_SIGNATURE',
-            'RESPONSE_UNSUPPORTED_API',
-            'ARTISAN_INTERACTION_UNSUPPORTED',
+            ResidualCode::CLASS_UNSAFE_HIERARCHY,
+            ResidualCode::LIFECYCLE_UNSUPPORTED,
+            ResidualCode::DATABASE_UNSUPPORTED_CONFIGURATION,
+            ResidualCode::HTTP_UNSUPPORTED_SIGNATURE,
+            ResidualCode::RESPONSE_UNSUPPORTED_API,
+            ResidualCode::ARTISAN_INTERACTION_UNSUPPORTED,
         ] as $code) {
             if (ResidualMarker::isMarked($class, $code)) {
                 return true;
