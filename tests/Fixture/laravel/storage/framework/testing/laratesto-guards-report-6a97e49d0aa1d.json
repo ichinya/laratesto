@@ -1,0 +1,8 @@
+{
+    "schema_version": 1,
+    "mode": "apply",
+    "paths": [
+        "storage/framework/testing/laratesto-guards-6a97e49d0a744"
+    ],
+    "residuals": []
+}

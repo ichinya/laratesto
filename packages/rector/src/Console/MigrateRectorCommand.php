@@ -10,9 +10,7 @@ use Laratesto\Rector\Residuals\ResidualsReport;
 use Laratesto\Rector\Residuals\ResidualsScanner;
 use Laratesto\Rector\Residuals\UnifiedDiffNewFileReconstructor;
 use Laratesto\Rector\Rules\LaravelBaseClassRector;
-use Laratesto\Rector\Set\LaratestoRectorSetList;
 use Symfony\Component\Console\Attribute\AsCommand;
-use Symfony\Component\Process\Process;
 
 /**
  * The primary migration UX (see the core flows): one command wrapping the pinned
@@ -21,7 +19,8 @@ use Symfony\Component\Process\Process;
  *
  * Exit contract: 0 — run succeeded with no manual residuals; 1 — execution, config
  * or report failure; 2 — manual residuals present. Rector's own dry-run exit 2
- * ("changes found") is a successful execution here, not an error.
+ * ("changes found") is a successful execution here, not an error — and apply only
+ * ever accepts exit 0.
  */
 #[AsCommand(name: 'laratesto:migrate-rector', description: 'Migrate Laravel PHPUnit tests to Laratesto via Rector (dry-run by default)')]
 final class MigrateRectorCommand extends Command
@@ -44,12 +43,20 @@ final class MigrateRectorCommand extends Command
         {--allow-dirty : Allow --apply over modified (non-untracked) processed paths}
         {--report= : Residuals report path, relative to the project root (default: laratesto-residuals.json)}';
 
+    private readonly GitWorkTreeInspector $gitInspector;
+
     public function __construct(
+        private readonly ProcessRunner $runner = new SymfonyProcessRunner(),
         private readonly ResidualsScanner $scanner = new ResidualsScanner(),
         private readonly ResidualsReport $report = new ResidualsReport(),
         private readonly UnifiedDiffNewFileReconstructor $reconstructor = new UnifiedDiffNewFileReconstructor(),
+        private readonly RectorJsonResultParser $jsonParser = new RectorJsonResultParser(),
+        private readonly RectorConfigWriter $configWriter = new RectorConfigWriter(),
+        private readonly MigrationPathGuard $pathGuard = new MigrationPathGuard(),
     ) {
         parent::__construct();
+
+        $this->gitInspector = new GitWorkTreeInspector($runner);
     }
 
     public function handle(): int
@@ -57,8 +64,8 @@ final class MigrateRectorCommand extends Command
         $root = (string) $this->laravel->basePath();
         $apply = (bool) $this->option('apply');
 
-        $targetMode = trim((string) $this->option('target-mode'));
-        if (! in_array($targetMode, [
+        $targetMode = \trim((string) $this->option('target-mode'));
+        if (! \in_array($targetMode, [
             LaravelBaseClassRector::TARGET_MODE_BASE_CLASS,
             LaravelBaseClassRector::TARGET_MODE_TRAIT,
         ], true)) {
@@ -67,10 +74,14 @@ final class MigrateRectorCommand extends Command
             return self::EXIT_FAILURE;
         }
 
-        $paths = $this->paths($root);
+        try {
+            $paths = $this->pathGuard->normalizeProcessedPaths($root, $this->givenPaths());
+            $reportFile = $this->pathGuard->resolveReportPath($root, $this->reportPath(), $paths);
+        } catch (\InvalidArgumentException $rejection) {
+            $this->error($rejection->getMessage());
 
-        $report = (string) ($this->option('report') ?: 'laratesto-residuals.json');
-        $reportFile = $this->isAbsolute($report) ? $report : $root . '/' . $this->normalizeRelative($report);
+            return self::EXIT_FAILURE;
+        }
 
         $rectorBinary = $this->rectorBinary($root);
 
@@ -80,73 +91,75 @@ final class MigrateRectorCommand extends Command
             return self::EXIT_FAILURE;
         }
 
-        if ($apply && ! $this->guardCleanPaths($root, $paths)) {
-            return self::EXIT_FAILURE;
-        }
+        $allowDirty = (bool) $this->option('allow-dirty');
 
-        foreach ($paths as $path) {
-            if (! \str_starts_with(\str_replace('\\', '/', $path), \str_replace('\\', '/', $root) . '/')) {
-                $this->error(\sprintf('Refusing to process a path outside the project root: %s', $path));
-
+        if ($apply && $allowDirty) {
+            $this->warn('--allow-dirty: no safe automatic rollback is provided for this apply; make sure your own backup exists.');
+        } elseif ($apply) {
+            if (! $this->guardCleanProcessedPaths($root, $paths)) {
                 return self::EXIT_FAILURE;
             }
         }
 
-        if (\str_ends_with($reportFile, '.php')) {
-            foreach ($paths as $path) {
-                if (\str_starts_with($reportFile, \rtrim($path, '/\\') . '/') || $reportFile === $path) {
-                    $this->error('The report path must not live inside the processed paths.');
+        try {
+            $config = $this->configWriter->write($targetMode, $paths, $this->extraBaseClasses());
+
+            try {
+                // Re-check the work tree immediately before the Rector process: the
+                // window between the first check and here must stay clean too.
+                if ($apply && ! $allowDirty && ! $this->guardCleanProcessedPaths($root, $paths)) {
+                    return self::EXIT_FAILURE;
+                }
+
+                $outcome = $this->runner->run($this->rectorCommand($rectorBinary, $config, $root, $apply), $root);
+
+                if ($outcome->stderr !== '') {
+                    $this->line($outcome->stderr);
+                }
+
+                // Rector: 0 = clean, 2 = dry-run with changes found (expected), anything
+                // else = failure. An apply run must never report "changes found".
+                $acceptableExitCodes = $apply ? [0] : [0, 2];
+
+                if (! \in_array($outcome->exitCode, $acceptableExitCodes, true)) {
+                    $this->error(\sprintf('Rector failed with exit code %d — see the output above. No report was written.', $outcome->exitCode));
 
                     return self::EXIT_FAILURE;
                 }
-            }
-        }
 
-        $config = $this->writeConfig($paths);
+                try {
+                    $parsed = $this->jsonParser->parse($outcome->stdout);
+                } catch (\RuntimeException $failure) {
+                    $this->error($failure->getMessage() . ' No report was written.');
 
-        try {
-            $exitCode = $this->runRector($rectorBinary, $config, $root, $apply);
-        } finally {
-            @\unlink($config);
-        }
+                    return self::EXIT_FAILURE;
+                }
 
-        // Rector: 0 = clean, 2 = dry-run with changes found (expected), anything else = failure.
-        if ($exitCode !== 0 && $exitCode !== 2) {
-            $this->error(\sprintf('Rector failed with exit code %d — see the output above. No report was written.', $exitCode));
+                if ($parsed['errors'] > 0) {
+                    $this->error('Rector reported processing errors — see the output above. No report was written.');
 
-            return self::EXIT_FAILURE;
-        }
+                    return self::EXIT_FAILURE;
+                }
 
-        // Whatever happens below, the machine-JSON scratch file must not outlive the run.
-        try {
-            if ($this->rectorReportedErrors()) {
-                $this->error('Rector reported processing errors — see the output above. No report was written.');
-
-                return self::EXIT_FAILURE;
-            }
-
-            try {
-                $residuals = $this->collectResiduals($apply, $paths);
-            } catch (\RuntimeException $failure) {
-                $this->error($failure->getMessage() . ' The previous report, if any, was NOT replaced.');
-
-                return self::EXIT_FAILURE;
+                $residuals = $this->collectResiduals($apply, $parsed['fileDiffs'], $paths, $root);
+            } finally {
+                @\unlink($config);
             }
 
             $relativePaths = \array_map(
-                fn(string $path): string => $this->normalizeRelative(\substr($path, \strlen($root) + 1)),
+                fn(string $path): string => $this->relativeToRoot($root, $path),
                 $paths,
             );
 
             try {
                 $this->report->write($reportFile, $apply ? 'apply' : 'dry-run', $relativePaths, $residuals);
             } catch (\RuntimeException $failure) {
-                $this->error($failure->getMessage());
+                $this->error($failure->getMessage() . ' The previous report, if any, was NOT replaced.');
 
                 return self::EXIT_FAILURE;
             }
         } finally {
-            @\unlink($this->tempJsonPath());
+            // No scratch files survive the run: the machine JSON is parsed in memory.
         }
 
         $this->line($this->scanner->renderTable($residuals));
@@ -166,56 +179,31 @@ final class MigrateRectorCommand extends Command
      * must still be reported); apply scans the processed paths as they now exist —
      * including files an earlier run already migrated and left carrying markers.
      *
+     * @param list<array{file: string, diff: string}> $fileDiffs
      * @param list<non-empty-string> $paths
      * @return list<Residual>
      */
-    private function collectResiduals(bool $apply, array $paths): array
+    private function collectResiduals(bool $apply, array $fileDiffs, array $paths, string $root): array
     {
-        $root = (string) $this->laravel->basePath();
-
         if ($apply) {
             $residuals = [];
 
             foreach ($this->phpFiles($paths) as $absolute) {
-                $relative = \str_replace('\\', '/', \substr($absolute, \strlen($root) + 1));
-
                 $residuals = [
                     ...$residuals,
-                    ...$this->scanner->scan($relative, (string) \file_get_contents($absolute)),
+                    ...$this->scanner->scan($this->relativeToRoot($root, $absolute), (string) \file_get_contents($absolute)),
                 ];
             }
 
             return $residuals;
         }
 
-        // Dry-run: the last machine-JSON run left its diff in this file by runRector().
-        $jsonFile = $this->tempJsonPath();
-        $contents = \is_file($jsonFile) ? (string) \file_get_contents($jsonFile) : '';
-
-        if ($contents === '') {
-            return [];
-        }
-
-        try {
-            $payload = \json_decode($contents, true, 512, \JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            throw new \RuntimeException('Rector produced an unreadable machine JSON output.');
-        }
-
-        if (! \is_array($payload)) {
-            throw new \RuntimeException('Rector produced an unreadable machine JSON output.');
-        }
-
         $residuals = [];
 
-        foreach ($payload['file_diffs'] ?? [] as $diff) {
-            if (! \is_array($diff) || ! \is_string($diff['file'] ?? null) || ! \is_string($diff['diff'] ?? null)) {
-                continue;
-            }
-
+        foreach ($fileDiffs as $diff) {
             $absolute = $this->isAbsolute($diff['file'])
                 ? $diff['file']
-                : $root . '/' . $this->normalizeRelative($diff['file']);
+                : $root . '/' . $this->toForwardSlashes(\ltrim($diff['file'], '/'));
 
             if (! \is_file($absolute)) {
                 continue;
@@ -235,14 +223,59 @@ final class MigrateRectorCommand extends Command
         return $residuals;
     }
 
-    private function relativeToRoot(string $root, string $absolute): string
+    /**
+     * The apply guard: no Git work tree, a failing Git status, or any modified
+     * processed path blocks the run.
+     *
+     * @param list<non-empty-string> $paths
+     */
+    private function guardCleanProcessedPaths(string $root, array $paths): bool
     {
-        $normalizedRoot = \str_replace('\\', '/', $root) . '/';
-        $normalized = \str_replace('\\', '/', $absolute);
+        if (! $this->gitInspector->isInsideWorkTree($root)) {
+            $this->error('The project is not inside a Git work tree; --apply without --allow-dirty refuses to run.');
 
-        return \str_starts_with($normalized, $normalizedRoot)
-            ? \substr($normalized, \strlen($normalizedRoot))
-            : $normalized;
+            return false;
+        }
+
+        try {
+            $modified = $this->gitInspector->modifiedPaths($root, $paths);
+        } catch (\RuntimeException $failure) {
+            $this->error('Unable to verify a clean state with Git: ' . $failure->getMessage());
+
+            return false;
+        }
+
+        if ($modified !== []) {
+            $this->error(\sprintf(
+                "Refusing --apply: processed paths have modifications (run without --apply to review, or pass --allow-dirty to override):\n  %s",
+                \implode("\n  ", $modified),
+            ));
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function rectorCommand(string $binary, string $config, string $root, bool $apply): array
+    {
+        $command = [
+            \PHP_BINARY,
+            $binary,
+            'process',
+            '--config',
+            $config,
+            '--output-format=json',
+            '--no-ansi',
+            '--no-progress-bar',
+        ];
+
+        $apply or $command[] = '--dry-run';
+
+        return $command;
     }
 
     /**
@@ -262,6 +295,10 @@ final class MigrateRectorCommand extends Command
                 continue;
             }
 
+            if (! \is_dir($path)) {
+                continue;
+            }
+
             $iterator = new \RecursiveIteratorIterator(
                 new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
             );
@@ -271,159 +308,15 @@ final class MigrateRectorCommand extends Command
             }
         }
 
+        \sort($files, \SORT_STRING);
+
         return $files;
-    }
-
-    /**
-     * @param list<non-empty-string> $paths
-     */
-    private function guardCleanPaths(string $root, array $paths): bool
-    {
-        if ((bool) $this->option('allow-dirty')) {
-            $this->warn('--allow-dirty: no safe automatic rollback is provided for this apply; make sure your own backup exists.');
-
-            return true;
-        }
-
-        if (! $this->isInsideGitWorkTree($root)) {
-            $this->error('The project is not inside a Git work tree; --apply without --allow-dirty refuses to run.');
-
-            return false;
-        }
-
-        $status = new Process(['git', '-C', $root, 'status', '--porcelain', '--', ...$paths]);
-        $status->run();
-
-        foreach (\explode("\n", \trim($status->getOutput())) as $line) {
-            // Untracked files are fine (fresh tests to migrate); modifications are not.
-            if ($line !== '' && ! \str_starts_with($line, '??')) {
-                $this->error(\sprintf(
-                    "Refusing --apply: processed paths have modifications (run without --apply to review, or pass --allow-dirty to override):\n  %s",
-                    \substr($line, 3),
-                ));
-
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private function isInsideGitWorkTree(string $root): bool
-    {
-        $probe = new Process(['git', '-C', $root, 'rev-parse', '--is-inside-work-tree']);
-        $probe->run();
-
-        return \trim($probe->getOutput()) === 'true';
-    }
-
-    private function runRector(string $binary, string $config, string $root, bool $apply): int
-    {
-        $command = [
-            \PHP_BINARY,
-            $binary,
-            'process',
-            '--config',
-            $config,
-            '--output-format=json',
-            '--no-ansi',
-            '--no-progress-bar',
-        ];
-
-        $apply or $command[] = '--dry-run';
-
-        $process = new Process($command, $root);
-        $process->setTimeout(null);
-        $process->run();
-
-        // Machine JSON goes to a file for collectResiduals(); human output stays visible.
-        \file_put_contents($this->tempJsonPath(), $process->getOutput());
-
-        if ($process->getErrorOutput() !== '') {
-            $this->line($process->getErrorOutput());
-        }
-
-        return $process->getExitCode() ?? self::EXIT_FAILURE;
-    }
-
-    /**
-     * @param list<non-empty-string> $paths
-     * @return non-empty-string Path to the generated rector config (temp file).
-     */
-    private function writeConfig(array $paths): string
-    {
-        // tempnam() creates an empty placeholder we do not use — drop it right away
-        // instead of leaking one per run; the actual config lives next to it.
-        $base = \tempnam(\sys_get_temp_dir(), 'laratesto-rector-');
-        $config = $base . '.php';
-        @\unlink($base);
-
-        $pathsCode = \implode(', ', \array_map(
-            static fn(string $path): string => \var_export($path, true),
-            $paths,
-        ));
-
-        $setCode = \var_export(LaratestoRectorSetList::LARAVEL_PHPUNIT_TO_LARATESTO, true);
-
-        $extraBases = \array_values(\array_filter(\array_map(
-            static fn(mixed $base): string => \trim((string) $base),
-            (array) $this->option('base-class'),
-        )));
-        $targetMode = \trim((string) $this->option('target-mode'));
-
-        $baseConfiguration = $extraBases === []
-            ? ''
-            : \sprintf(
-                '%s::BASE_CLASSES => [%s],',
-                '\\' . LaravelBaseClassRector::class,
-                \implode(', ', [
-                    \var_export('Tests\TestCase', true),
-                    \var_export('Illuminate\Foundation\Testing\TestCase', true),
-                    ... \array_map(static fn(string $base): string => \var_export($base, true), $extraBases),
-                ]),
-            );
-
-        $overrideCode = \sprintf(
-                <<<'PHP'
-                    // The set already registered the rule; this re-configures the same instance.
-                    $rectorConfig->ruleWithConfiguration(%s::class, [
-                        %s
-                        %s::TARGET_MODE => %s,
-                    ]);
-
-                    PHP,
-                \var_export(LaravelBaseClassRector::class, true),
-                $baseConfiguration,
-                '\\' . LaravelBaseClassRector::class,
-                \var_export($targetMode, true),
-            );
-
-        \file_put_contents($config, <<<PHP
-            <?php
-
-            declare(strict_types=1);
-
-            use Laratesto\\Rector\\Rules\\LaravelBaseClassRector;
-            use Laratesto\\Rector\\Set\\LaratestoRectorSetList;
-            use Rector\\Config\\RectorConfig;
-
-            \$builder = RectorConfig::configure()
-                ->withPaths([{$pathsCode}])
-                ->withSets([{$setCode}]);
-
-            return static function (RectorConfig \$rectorConfig) use (\$builder): void {
-                \$builder(\$rectorConfig);
-            {$overrideCode}};
-
-            PHP);
-
-        return $config;
     }
 
     /**
      * @return list<non-empty-string>
      */
-    private function paths(string $root): array
+    private function givenPaths(): array
     {
         $given = \array_values(\array_filter(\array_map(
             static fn(mixed $path): string => \trim((string) $path),
@@ -434,28 +327,43 @@ final class MigrateRectorCommand extends Command
             $given = ['tests'];
         }
 
-        return \array_map(
-            fn(string $path): string => $this->isAbsolute($path)
-                ? $path
-                : $root . '/' . $this->normalizeRelative($path),
-            $given,
-        );
+        return $given;
+    }
+
+    private function reportPath(): string
+    {
+        return \trim((string) ($this->option('report') ?: 'laratesto-residuals.json'));
     }
 
     /**
-     * POSIX-absolute or Windows drive-absolute.
+     * @return list<non-empty-string>
      */
+    private function extraBaseClasses(): array
+    {
+        return \array_values(\array_filter(\array_map(
+            static fn(mixed $base): string => \trim((string) $base),
+            (array) $this->option('base-class'),
+        )));
+    }
+
+    private function relativeToRoot(string $root, string $absolute): string
+    {
+        $normalizedRoot = $this->toForwardSlashes($root) . '/';
+        $normalized = $this->toForwardSlashes($absolute);
+
+        return \str_starts_with($normalized, $normalizedRoot)
+            ? \substr($normalized, \strlen($normalizedRoot))
+            : $normalized;
+    }
+
+    private function toForwardSlashes(string $path): string
+    {
+        return \str_replace('\\', '/', $path);
+    }
+
     private function isAbsolute(string $path): bool
     {
         return \str_starts_with($path, '/') || \preg_match('#^[A-Za-z]:[/\\\\]#', $path) === 1;
-    }
-
-    /**
-     * Windows-safe relative path: forward slashes, no leading separator.
-     */
-    private function normalizeRelative(string $path): string
-    {
-        return \ltrim(\str_replace('\\', '/', $path), '/');
     }
 
     /**
@@ -483,36 +391,5 @@ final class MigrateRectorCommand extends Command
         }
 
         return null;
-    }
-
-    /**
-     * Whether the last machine-JSON run reported processing errors (see totals.errors
-     * of the pinned Rector output contract).
-     */
-    private function rectorReportedErrors(): bool
-    {
-        $jsonFile = $this->tempJsonPath();
-        $contents = \is_file($jsonFile) ? (string) \file_get_contents($jsonFile) : '';
-
-        if ($contents === '') {
-            return true;
-        }
-
-        try {
-            $payload = \json_decode($contents, true, 512, \JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return true;
-        }
-
-        if (! \is_array($payload)) {
-            return true;
-        }
-
-        return (int) ($payload['totals']['errors'] ?? 0) > 0;
-    }
-
-    private function tempJsonPath(): string
-    {
-        return \sys_get_temp_dir() . '/laratesto-rector-output-' . \getmypid() . '.json';
     }
 }
