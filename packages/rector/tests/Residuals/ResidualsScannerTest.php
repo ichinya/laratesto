@@ -119,4 +119,53 @@ final class ResidualsScannerTest
         Assert::true(str_contains($report, '[HTTP_UNSUPPORTED_SIGNATURE/Rule\A] base class reason'));
         Assert::true(str_contains($report, '[HTTP_UNSUPPORTED_SIGNATURE/Rule\B] detection reason'));
     }
+
+    #[Test]
+    public function ignoresProseThatMerelyMentionsTheMarker(): void
+    {
+        $residuals = $this->scanner->scan('DocsTest.php', <<<'PHP'
+            <?php
+
+            /**
+             * To opt out manually, write: laratesto-residual(code=LIFECYCLE_UNSUPPORTED, rule=Rule\A, severity=manual): example reason
+             */
+            final class DocsTest
+            {
+            }
+
+            // laratesto-residual(code=HTTP_UNSUPPORTED_SIGNATURE, rule=Rule\B, severity=warning): another example
+            final class OtherTest
+            {
+            }
+            PHP);
+
+        Assert::same($residuals, [], 'Prose mentioning the marker substring is user documentation, not a residual.');
+    }
+
+    #[Test]
+    public function aCanonicalMarkerBesideProseIsStillFound(): void
+    {
+        $residuals = $this->scanner->scan('MixedTest.php', <<<'PHP'
+            <?php
+
+            /**
+             * How to mark by hand: see the migration guide.
+             */
+            /* laratesto-residual(code=LARAVEL_FAKE_UNSUPPORTED, rule=Laratesto\Rector\Rules\LaravelResidualDetectionRector, severity=manual): Mail::fake() — migrate manually */
+            final class MixedTest
+            {
+            }
+            PHP);
+
+        Assert::count($residuals, 1, 'Only the standalone canonical comment is a finding.');
+
+        $residual = $residuals[0] ?? null;
+        \assert($residual instanceof Residual);
+
+        Assert::same($residual->line, 6);
+        Assert::same($residual->code, 'LARAVEL_FAKE_UNSUPPORTED');
+        Assert::same($residual->severity, 'manual');
+        Assert::same($residual->rule, 'Laratesto\Rector\Rules\LaravelResidualDetectionRector');
+        Assert::same($residual->reason, 'Mail::fake() — migrate manually');
+    }
 }

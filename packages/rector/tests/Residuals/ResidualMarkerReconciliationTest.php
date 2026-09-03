@@ -17,6 +17,9 @@ use Testo\Test;
  * created once, refreshed when the constructs behind it change, and untouched —
  * byte-identical — when they do not. Several rules failing the same code on one
  * class merge into the single marker comment without losing earlier reasons.
+ * Comments that merely mention the marker substring — docblocks, line comments,
+ * hand-merged multi-code comments — are user documentation: never owned, never
+ * reconciled, never rewritten (M5 hardening).
  */
 final class ResidualMarkerReconciliationTest
 {
@@ -173,6 +176,99 @@ final class ResidualMarkerReconciliationTest
         Assert::string($text)->notContains('detection reason');
     }
 
+    #[Test]
+    public function aDocblockMentioningTheMarkerIsNeverOwned(): void
+    {
+        $class = $this->class(<<<'PHP'
+            /**
+             * Migrator hint: to silence this rule by hand, drop a
+             * laratesto-residual(code=LIFECYCLE_UNSUPPORTED, rule=Rule\A, severity=manual): pretend this is a marker
+             * comment above the class.
+             */
+            final class DemoTest {}
+            PHP);
+
+        $docBefore = $class->getDocComment()?->getText();
+
+        Assert::false(ResidualMarker::isMarked($class, 'LIFECYCLE_UNSUPPORTED'), 'Documentation must not block the rule as an owned marker.');
+
+        Assert::true(ResidualMarker::mark($class, 'LIFECYCLE_UNSUPPORTED', 'Rule\A', 'the real reason'));
+
+        Assert::same($class->getDocComment()?->getText(), $docBefore, 'The user docblock must stay byte-identical.');
+        Assert::count($this->ownedMarkers($class), 1, 'A fresh canonical marker is appended, the docblock is not reused.');
+        Assert::string($this->ownedMarkerText($class))->contains('the real reason');
+        Assert::string($this->ownedMarkerText($class))->notContains('pretend this is a marker');
+        Assert::true(ResidualMarker::isMarked($class, 'LIFECYCLE_UNSUPPORTED'));
+    }
+
+    #[Test]
+    public function anInlineCommentMentioningTheMarkerIsNeverOwned(): void
+    {
+        $class = $this->class(<<<'PHP'
+            // laratesto-residual(code=HTTP_UNSUPPORTED_SIGNATURE, rule=Rule\A, severity=manual): how a marker looks
+            final class DemoTest {}
+            PHP);
+
+        $lineCommentBefore = $class->getComments()[0]?->getText();
+
+        Assert::false(ResidualMarker::isMarked($class, 'HTTP_UNSUPPORTED_SIGNATURE'));
+
+        Assert::true(ResidualMarker::mark($class, 'HTTP_UNSUPPORTED_SIGNATURE', 'Rule\B', 'the real reason'));
+
+        Assert::same($class->getComments()[0]?->getText(), $lineCommentBefore, 'The user line comment must stay byte-identical.');
+        Assert::count($this->ownedMarkers($class), 1);
+        Assert::string($this->ownedMarkerText($class))->contains('Rule\B');
+        Assert::string($this->ownedMarkerText($class))->notContains('how a marker looks');
+    }
+
+    #[Test]
+    public function aHandMergedMultiCodeCommentIsNeverOwned(): void
+    {
+        $class = $this->class(<<<'PHP'
+            /* laratesto-residual(code=LIFECYCLE_UNSUPPORTED, rule=Rule\A, severity=manual): first; laratesto-residual(code=HTTP_UNSUPPORTED_SIGNATURE, rule=Rule\B, severity=manual): second */
+            final class DemoTest {}
+            PHP);
+
+        $mixedBefore = $class->getComments()[0]?->getText();
+
+        Assert::false(ResidualMarker::isMarked($class, 'LIFECYCLE_UNSUPPORTED'), 'The contract never mixes codes, so the hand-merged comment owns neither.');
+        Assert::false(ResidualMarker::isMarked($class, 'HTTP_UNSUPPORTED_SIGNATURE'));
+
+        Assert::true(ResidualMarker::mark($class, 'LIFECYCLE_UNSUPPORTED', 'Rule\A', 'fresh reason'));
+
+        Assert::same($class->getComments()[0]?->getText(), $mixedBefore, 'Reconciliation must append, never rewrite the foreign comment.');
+
+        $fresh = '';
+
+        foreach ($class->getComments() as $comment) {
+            if ($comment->getText() !== $mixedBefore) {
+                $fresh .= $comment->getText();
+            }
+        }
+
+        Assert::string($fresh)->contains('fresh reason', 'A fresh canonical marker is appended for the new contribution.');
+        Assert::string($fresh)->notContains(': first', 'The fresh marker must not absorb the hand-merged contributions.');
+        Assert::true(ResidualMarker::isMarked($class, 'LIFECYCLE_UNSUPPORTED'));
+    }
+
+    #[Test]
+    public function repeatedRunsOverAdversarialCommentsAreByteIdentical(): void
+    {
+        $class = $this->class(<<<'PHP'
+            /**
+             * Docs: laratesto-residual(code=LIFECYCLE_UNSUPPORTED, rule=Rule\A, severity=manual): example
+             */
+            final class DemoTest {}
+            PHP);
+
+        ResidualMarker::mark($class, 'LIFECYCLE_UNSUPPORTED', 'Rule\A', 'the reason');
+
+        $before = $this->allCommentsText($class);
+
+        Assert::false(ResidualMarker::mark($class, 'LIFECYCLE_UNSUPPORTED', 'Rule\A', 'the reason'), 'A repeated run must be a no-op.');
+        Assert::same($this->allCommentsText($class), $before, 'Repeated runs must leave every comment byte-identical.');
+    }
+
     private function class(string $code): Class_
     {
         $parser = (new ParserFactory())->createForNewestSupportedVersion();
@@ -202,5 +298,39 @@ final class ResidualMarkerReconciliationTest
         }
 
         return $text;
+    }
+
+    /**
+     * The comments whose entire text is one canonical marker comment — documentation
+     * that merely mentions the marker substring does not count.
+     *
+     * @return list<string>
+     */
+    private function ownedMarkers(Class_ $class): array
+    {
+        $markers = [];
+
+        foreach ($class->getComments() as $comment) {
+            if (\preg_match(ResidualMarker::MARKER_COMMENT_REGEX, $comment->getText(), $match) === 1
+                && $match[0] === $comment->getText()
+            ) {
+                $markers[] = $comment->getText();
+            }
+        }
+
+        return $markers;
+    }
+
+    private function ownedMarkerText(Class_ $class): string
+    {
+        return \implode("\n", $this->ownedMarkers($class));
+    }
+
+    private function allCommentsText(Class_ $class): string
+    {
+        return \implode("\n", \array_map(
+            static fn($comment): string => $comment->getText(),
+            $class->getComments(),
+        ));
     }
 }

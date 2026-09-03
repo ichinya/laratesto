@@ -11,8 +11,10 @@ namespace Laratesto\Rector\Residuals;
  * no filesystem access, no I/O, so it is trivially testable and reusable from both
  * entry points.
  *
- * Markers parse with the shared {@see ResidualMarker::MARKER_REGEX}; a marker holding
- * several rule contributions yields one {@see Residual} per contribution.
+ * Markers are matched as whole canonical comments ({@see ResidualMarker::MARKER_COMMENT_REGEX});
+ * prose that merely mentions the marker substring inside a docblock or line comment is
+ * never reported. A marker holding several rule contributions yields one {@see Residual}
+ * per contribution.
  */
 final class ResidualsScanner
 {
@@ -25,19 +27,27 @@ final class ResidualsScanner
     {
         $residuals = [];
 
-        if (\preg_match_all(ResidualMarker::MARKER_REGEX, $contents, $matches, \PREG_OFFSET_CAPTURE) === false) {
+        if (\preg_match_all(ResidualMarker::MARKER_COMMENT_REGEX, $contents, $comments, \PREG_OFFSET_CAPTURE) === false) {
             return [];
         }
 
-        foreach ($matches[0] as $index => [$marker, $offset]) {
-            $residuals[] = new Residual(
-                file: $file,
-                line: self::lineAt($contents, (int) $offset),
-                code: \trim($matches['code'][$index][0]),
-                severity: \trim($matches['severity'][$index][0] ?? 'manual'),
-                rule: \trim($matches['rule'][$index][0]),
-                reason: \trim($matches['reason'][$index][0]),
-            );
+        foreach ($comments[0] as [$comment, $offset]) {
+            $line = self::lineAt($contents, (int) $offset);
+
+            if (\preg_match_all(ResidualMarker::MARKER_REGEX, (string) $comment, $matches) === false) {
+                continue;
+            }
+
+            foreach ($matches['rule'] as $index => $rule) {
+                $residuals[] = new Residual(
+                    file: $file,
+                    line: $line,
+                    code: \trim((string) $matches['code'][$index]),
+                    severity: \trim((string) ($matches['severity'][$index] ?? 'manual')),
+                    rule: \trim((string) $rule),
+                    reason: \trim((string) $matches['reason'][$index]),
+                );
+            }
         }
 
         return $residuals;

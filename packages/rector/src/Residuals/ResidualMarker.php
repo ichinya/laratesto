@@ -24,6 +24,11 @@ use Rector\NodeTypeResolver\Node\AttributeKey;
  * A rule's re-mark replaces only its own contribution (reconciliation); a
  * contribution goes away only with the whole comment, which the user deletes
  * together with the fix.
+ *
+ * Ownership: a comment is owned only when its entire text is the canonical marker
+ * form ({@see MARKER_COMMENT_REGEX}) of one code. Documentation that merely mentions
+ * the marker substring — a docblock example, a line comment — is user prose: never
+ * reconciled, never blocking, never rewritten.
  */
 final class ResidualMarker
 {
@@ -33,7 +38,7 @@ final class ResidualMarker
     public const PATTERN = 'laratesto-residual(code=%s, rule=%s, severity=%s): %s';
 
     /**
-     * Canonical marker grammar; the scanner parses with the same expression, so
+     * Canonical contribution grammar; the scanner parses with the same expression, so
      * everything {@see mark()} writes is scanner-readable. A reason ends at the
      * `; ` separator before the next contribution or at the closing comment marker,
      * so parsed reasons never accumulate separator bytes.
@@ -42,12 +47,36 @@ final class ResidualMarker
         '/laratesto-residual\(code=(?<code>[^,)]+),\s*rule=(?<rule>[^,)]+)(?:,\s*severity=(?<severity>[^)]+))?\):\s*(?<reason>[^*]*?)(?=;\s*laratesto-residual\(|\s*\*\/)/';
 
     /**
+     * One canonical contribution, capture-free, so the whole-comment grammar below
+     * can repeat it (PCRE forbids duplicate named groups). Kept in step with
+     * MARKER_REGEX; the reconciliation tests round-trip every rendered marker
+     * through both expressions.
+     */
+    private const CONTRIBUTION_SHAPE =
+        'laratesto-residual\(code=[A-Z0-9_]+,\s*rule=[^,)]+(?:,\s*severity=[^)]+)?\):\s*[^*]*?(?=;\s*laratesto-residual\(|\s*\*\/)';
+
+    /**
+     * The entire canonical marker comment: the opening `/* ` marker plus one or
+     * more contributions of a single code joined by `'; '` plus the closing
+     * comment marker. Ownership requires this form to span the whole comment —
+     * documentation that merely mentions `laratesto-residual(code=…)` inside a
+     * docblock or line comment is prose, never an owned marker.
+     */
+    public const MARKER_COMMENT_REGEX =
+        '/\/\* ' . self::CONTRIBUTION_SHAPE . '(?:; ' . self::CONTRIBUTION_SHAPE . ')* \*\//';
+
+    /**
      * Glue between rule contributions inside one marker comment.
      */
     private const CONTRIBUTION_SEPARATOR = '; ';
 
     /**
      * Marks the class with this code, merging into an existing marker of the same code.
+     *
+     * Only comments created under the contract — a comment whose entire text is the
+     * canonical marker form ({@see MARKER_COMMENT_REGEX}) of this code — are merged
+     * into or reconciled. Prose that merely mentions the marker substring is user
+     * documentation: a fresh canonical marker is appended and the prose stays untouched.
      *
      * One marker comment per code: a second rule failing the same code merges its
      * contribution next to the existing one (canonical order, identical bytes for any
@@ -65,12 +94,10 @@ final class ResidualMarker
      */
     public static function mark(Class_ $class, string $code, string $rule, string $reason, string $severity = 'manual'): bool
     {
-        $needle = \sprintf('laratesto-residual(code=%s,', $code);
-
         $comments = $class->getAttribute(AttributeKey::COMMENTS) ?? [];
 
         foreach ($comments as $index => $comment) {
-            if (! $comment instanceof Comment || ! \str_contains($comment->getText(), $needle)) {
+            if (! $comment instanceof Comment || ! self::owned($comment->getText(), $code)) {
                 continue;
             }
 
@@ -98,19 +125,45 @@ final class ResidualMarker
     }
 
     /**
-     * Whether the node already carries a marker of this code.
+     * Whether the node already carries an owned marker of this code. Documentation
+     * that merely mentions the marker substring never counts — a rule must not be
+     * blocked by the user's own words.
      */
     public static function isMarked(Node $node, string $code): bool
     {
-        $needle = \sprintf('laratesto-residual(code=%s,', $code);
-
         foreach ($node->getComments() as $comment) {
-            if (\str_contains($comment->getText(), $needle)) {
+            if (self::owned($comment->getText(), $code)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * Whether the entire text is one canonical marker comment of exactly this code:
+     * the whole-comment form must match, every contribution must carry the same
+     * code (the contract never mixes codes in one comment), and that code must be
+     * this one. Anything else — docblock examples, line comments, hand-merged
+     * multi-code comments — was not created under the contract.
+     */
+    private static function owned(string $text, string $code): bool
+    {
+        if (\preg_match(self::MARKER_COMMENT_REGEX, $text, $match) !== 1 || $match[0] !== $text) {
+            return false;
+        }
+
+        if (\preg_match_all(self::MARKER_REGEX, $text, $matches) === false) {
+            return false;
+        }
+
+        $codes = [];
+
+        foreach ($matches['code'] as $matchedCode) {
+            $codes[] = \trim((string) $matchedCode);
+        }
+
+        return $codes !== [] && \array_unique($codes) === [$code];
     }
 
     /**
