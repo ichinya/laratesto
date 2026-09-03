@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace Laratesto\Tests\Unit;
 
+use Laratesto\Testing\AssertableJson;
+use Laratesto\Testing\LaravelResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Testo\Assert;
-use Laratesto\Testing\LaravelResponse;
 use Testo\Test;
 
 final class LaravelResponseTest
@@ -364,4 +365,195 @@ final class LaravelResponseTest
 
         Assert::true($failed);
     }
+
+    // ---- Parity with Laravel's AssertableJsonString / TestResponse semantics ----
+
+    #[Test]
+    public function assertExactJsonIsAssociativeKeyOrderInsensitive(): void
+    {
+        // M6: Laravel canonicalizes associative key order before comparing.
+        $response = new LaravelResponse(new Response('{"b":2,"a":1}'));
+        $response->assertExactJson(['a' => 1, 'b' => 2]);
+        $response->assertExactJson(['b' => 2, 'a' => 1]);
+
+        $nested = new LaravelResponse(new Response('{"user":{"name":"Ada","id":42},"meta":[1,2]}'));
+        $nested->assertExactJson(['meta' => [1, 2], 'user' => ['id' => 42, 'name' => 'Ada']]);
+
+        // List order must stay significant.
+        $list = new LaravelResponse(new Response('[1,2]'));
+
+        $failed = false;
+        try {
+            $list->assertExactJson([2, 1]);
+        } catch (\Testo\Assert\State\Assertion\AssertionException) {
+            $failed = true;
+        }
+
+        Assert::true($failed, 'assertExactJson must remain order-sensitive for lists.');
+    }
+
+    #[Test]
+    public function assertJsonSupportsLaravelFluentClosureForm(): void
+    {
+        $response = new LaravelResponse(new Response('{"id":1,"name":"Ada"}'));
+
+        $response->assertJson(static function (AssertableJson $json): void {
+            $json->where('id', 1)
+                ->where('name', 'Ada')
+                ->etc();
+        });
+
+        $response->assertJson(static fn (AssertableJson $json) => $json->has('id')->etc());
+
+        // A failing where() must surface as a Testo assertion failure.
+        $failed = false;
+        try {
+            $response->assertJson(static fn (AssertableJson $json) => $json->where('id', 2));
+        } catch (\Testo\Assert\State\Assertion\AssertionException) {
+            $failed = true;
+        }
+
+        Assert::true($failed, 'Fluent assertJson must fail when a where() assertion does not match.');
+
+        // Without ->etc(), untouched properties on an assoc root must fail the interaction check.
+        $strict = false;
+        try {
+            $response->assertJson(static fn (AssertableJson $json) => $json->where('id', 1));
+        } catch (\Testo\Assert\State\Assertion\AssertionException) {
+            $strict = true;
+        }
+
+        Assert::true($strict, 'Fluent assertJson must require ->etc() or full interaction on assoc roots.');
+    }
+
+    #[Test]
+    public function assertSeeAcceptsArraysAndEscapesLikeLaravelE(): void
+    {
+        $response = new LaravelResponse(new Response('hello <b>world</b> &amp; more'));
+
+        // Laravel accepts arrays of needles.
+        $response->assertSee(['hello', 'world']);
+        $response->assertSee('&amp;', escape: false);
+
+        // A raw "<b>" body must NOT satisfy the pre-escaped needle.
+        $failed = false;
+        try {
+            $response->assertSee('&lt;b&gt;');
+        } catch (\Testo\Assert\State\Assertion\AssertionException) {
+            $failed = true;
+        }
+
+        Assert::true($failed, 'assertSee must keep pre-escaped needles encoded (Laravel e() default).');
+
+        // Laravel's e() double-encodes, so a pre-escaped needle never matches a
+        // body that literally contains the pre-escaped sequence.
+        $escaped = new LaravelResponse(new Response('shows &lt;b&gt; as text'));
+
+        $failed = false;
+        try {
+            $escaped->assertSee('&lt;b&gt;');
+        } catch (\Testo\Assert\State\Assertion\AssertionException) {
+            $failed = true;
+        }
+
+        Assert::true($failed, 'assertSee must double-encode needles (Laravel e() default).');
+    }
+
+    #[Test]
+    public function assertDontSeeEscapesLikeLaravelE(): void
+    {
+        // A body that literally contains the pre-escaped sequence must still satisfy
+        // assertDontSee: Laravel's e() double-encodes the needle before searching.
+        $response = new LaravelResponse(new Response('commit &lt;script&gt; alert'));
+        $response->assertDontSee('&lt;script&gt;');
+
+        // A pre-escaped needle must not be decoded into its raw form either.
+        $raw = new LaravelResponse(new Response('<script>alert(1)</script> safe'));
+        $raw->assertDontSee('&lt;script&gt;');
+
+        $other = new LaravelResponse(new Response('plain text'));
+
+        $failed = false;
+        try {
+            $other->assertDontSee(['plain', 'missing']);
+        } catch (\Testo\Assert\State\Assertion\AssertionException) {
+            $failed = true;
+        }
+
+        Assert::true($failed, 'assertDontSee must fail when any array needle is present.');
+    }
+
+    #[Test]
+    public function assertJsonPathAppliesEnumValueToExpectations(): void
+    {
+        $response = new LaravelResponse(new Response('{"status":"active"}'));
+
+        $response->assertJsonPath('status', ParityStatus::Active);
+
+        $failed = false;
+        try {
+            $response->assertJsonPath('status', ParityStatus::Archived);
+        } catch (\Testo\Assert\State\Assertion\AssertionException) {
+            $failed = true;
+        }
+
+        Assert::true($failed, 'assertJsonPath must fail for a non-matching backed enum expectation.');
+    }
+
+    #[Test]
+    public function assertSessionHasErrorsSupportsErrorBagAndFormat(): void
+    {
+        $store = new \Illuminate\Session\Store('parity', new \Illuminate\Session\ArraySessionHandler(120));
+        $store->start();
+
+        $bag = new \Illuminate\Support\ViewErrorBag();
+        $bag->put('default', new \Illuminate\Support\MessageBag([
+            'email' => ['The email field is required.'],
+        ]));
+        $bag->put('custom', new \Illuminate\Support\MessageBag([
+            'name' => ['The name field is required.'],
+        ]));
+        $store->put('errors', $bag);
+
+        $response = new LaravelResponse(new class($store) extends Response {
+            public function __construct(
+                private readonly \Illuminate\Session\Store $store,
+            ) {
+                parent::__construct('');
+            }
+
+            public function getSession(): \Illuminate\Session\Store
+            {
+                return $this->store;
+            }
+        });
+
+        $response->assertSessionHasErrors(['email']);
+        $response->assertSessionHasErrors(['email' => 'The email field is required.']);
+
+        // Laravel's named-argument form for a non-default bag.
+        $response->assertSessionHasErrors(['name'], errorBag: 'custom');
+
+        // Laravel threads $format through the message comparison.
+        $response->assertSessionHasErrors(
+            ['email' => '<p>The email field is required.</p>'],
+            format: '<p>:message</p>',
+        );
+
+        // The error lives in the "custom" bag, not the default one.
+        $failed = false;
+        try {
+            $response->assertSessionHasErrors(['name']);
+        } catch (\Testo\Assert\State\Assertion\AssertionException) {
+            $failed = true;
+        }
+
+        Assert::true($failed, 'assertSessionHasErrors must only consider the requested error bag.');
+    }
+}
+
+enum ParityStatus: string
+{
+    case Active = 'active';
+    case Archived = 'archived';
 }

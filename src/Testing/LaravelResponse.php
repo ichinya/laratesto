@@ -11,6 +11,8 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\ResponseHeaderBag;
 use Testo\Assert;
 
+use function Illuminate\Support\enum_value;
+
 /**
  * Test-oriented wrapper over an HTTP response returned by the kernel.
  *
@@ -148,16 +150,31 @@ final readonly class LaravelResponse
     /**
      * Assert that the response JSON contains the expected recursive subset.
      *
-     * @param array<array-key, mixed> $expected
+     * Accepts a closure receiving {@see AssertableJson}, matching Laravel's
+     * fluent `assertJson(fn (AssertableJson $json) => ...)` form.
+     *
+     * @param array<array-key, mixed>|callable $expected
      */
-    public function assertJson(array $expected, bool $strict = false): static
+    public function assertJson(array|callable $expected, bool $strict = false): static
     {
-        $actual = $this->json();
+        if (\is_array($expected)) {
+            $actual = $this->json();
 
-        Assert::true(
-            \is_array($actual) && self::jsonContains($expected, $actual, $strict),
-            'The JSON response does not contain the expected subset.',
-        );
+            Assert::true(
+                \is_array($actual) && self::jsonContains($expected, $actual, $strict),
+                'The JSON response does not contain the expected subset.',
+            );
+
+            return $this;
+        }
+
+        $assert = AssertableJson::fromArray((array) $this->json());
+
+        $expected($assert);
+
+        if (Arr::isAssoc($assert->toArray())) {
+            $assert->interacted();
+        }
 
         return $this;
     }
@@ -165,23 +182,40 @@ final readonly class LaravelResponse
     /**
      * Assert that the decoded response body exactly matches the expected JSON.
      *
+     * Both sides are canonicalized like Laravel's
+     * `AssertableJsonString::assertExact()` (`reorderAssocKeys()`), so the
+     * associative key order of either side does not matter; list order does.
+     *
      * @param array<array-key, mixed> $expected
      */
     public function assertExactJson(array $expected): static
     {
-        Assert::same($this->json(), $expected, 'The JSON response does not exactly match the expected value.');
+        Assert::same(
+            self::reorderAssocKeys((array) $this->json()),
+            self::reorderAssocKeys($expected),
+            'The JSON response does not exactly match the expected value.',
+        );
 
         return $this;
     }
 
-    public function assertSee(string $needle, bool $escape = true): static
+    /**
+     * Assert that the response body contains the given text.
+     *
+     * Escaping matches Laravel's `e()` helper (double-encoding enabled).
+     *
+     * @param string|list<string> $text
+     */
+    public function assertSee(string|array $text, bool $escape = true): static
     {
-        $value = $escape ? \htmlspecialchars($needle, \ENT_QUOTES | \ENT_SUBSTITUTE, 'UTF-8', false) : $needle;
+        foreach (Arr::wrap($text) as $needle) {
+            $value = $escape ? \e($needle) : $needle;
 
-        Assert::true(
-            \str_contains($this->body(), $value),
-            \sprintf('The response body does not contain "%s".', $needle),
-        );
+            Assert::true(
+                \str_contains($this->body(), $value),
+                \sprintf('The response body does not contain "%s".', $needle),
+            );
+        }
 
         return $this;
     }
@@ -189,12 +223,14 @@ final readonly class LaravelResponse
     /**
      * Assert that the response body does not contain the given text.
      *
+     * Escaping matches Laravel's `e()` helper (double-encoding enabled).
+     *
      * @param non-empty-string|list<non-empty-string> $text
      */
     public function assertDontSee(string|array $text, bool $escape = true): static
     {
-        foreach (\is_array($text) ? $text : [$text] as $needle) {
-            $value = $escape ? \htmlspecialchars($needle, \ENT_QUOTES | \ENT_SUBSTITUTE, 'UTF-8', false) : $needle;
+        foreach (Arr::wrap($text) as $needle) {
+            $value = $escape ? \e($needle) : $needle;
 
             Assert::false(
                 \str_contains($this->body(), $value),
@@ -250,6 +286,8 @@ final readonly class LaravelResponse
      * Assert that the JSON at the given dot-path matches the expected value.
      *
      * Supports closures as the expectation, matching Laravel's `assertJsonPath`.
+     * Backed-enum expectations are compared via their underlying value, matching
+     * Laravel's `enum_value()` normalization.
      *
      * @param non-empty-string $path
      */
@@ -270,6 +308,8 @@ final readonly class LaravelResponse
             return $this;
         }
 
+        $expected = enum_value($expected);
+
         Assert::same(
             $actual,
             $expected,
@@ -283,28 +323,36 @@ final readonly class LaravelResponse
 
         return $this;
     }
-
     /**
      * Assert that the response has validation errors for the given field names.
      *
-     * Mirrors `TestResponse::assertSessionHasErrors` (reads the session store).
+     * Mirrors `TestResponse::assertSessionHasErrors` (reads the session store),
+     * including Laravel's `$format` and `$errorBag` parameters.
      *
-     * @param non-empty-string|list<non-empty-string> $keys
+     * @param non-empty-string|array<array-key, mixed> $keys
      */
-    public function assertSessionHasErrors(string|array $keys = []): static
-    {
+    public function assertSessionHasErrors(
+        string|array $keys = [],
+        ?string $format = null,
+        string $errorBag = 'default',
+    ): static {
         $errors = $this->session()->get('errors');
 
         Assert::notNull($errors, 'Session is missing expected errors bag.');
 
         // The errors bag may be a ViewErrorBag (validation redirect) or a flat
-        // array (inline flash). Normalise to a common interface.
-        $bag = $errors instanceof \Illuminate\Support\ViewErrorBag
-            ? $errors->getBag('default')
-            : $errors;
+        // array (inline flash). Normalise to the requested error bag.
+        if ($errors instanceof \Illuminate\Support\ViewErrorBag) {
+            Assert::true(
+                $errors->hasBag($errorBag),
+                \sprintf('Session is missing the errors bag [%s].', $errorBag),
+            );
 
-        if (\is_array($bag) && \array_key_exists('default', $bag)) {
-            $bag = $bag['default'];
+            $bag = $errors->getBag($errorBag);
+        } else {
+            $bag = \is_array($errors) && \array_key_exists($errorBag, $errors)
+                ? $errors[$errorBag]
+                : $errors;
         }
 
         if ($bag instanceof \Illuminate\Contracts\Support\MessageBag) {
@@ -329,7 +377,9 @@ final readonly class LaravelResponse
                 continue;
             }
 
-            $messages = (array) ($messagesByField[$field] ?? []);
+            $messages = $bag instanceof \Illuminate\Contracts\Support\MessageBag
+                ? (array) $bag->get((string) $field, $format)
+                : self::formatSessionMessages((array) ($messagesByField[$field] ?? []), $format, (string) $field);
 
             Assert::contains(
                 $messages,
@@ -339,6 +389,27 @@ final readonly class LaravelResponse
         }
 
         return $this;
+    }
+
+    /**
+     * Apply a MessageBag-compatible format string to raw messages, mirroring
+     * `Illuminate\Support\MessageBag::transform()` (`:message` / `:key`).
+     *
+     * @param list<mixed> $messages
+     * @return list<mixed>
+     */
+    private static function formatSessionMessages(array $messages, ?string $format, string $field): array
+    {
+        $format ??= ':message';
+
+        if ($format === ':message') {
+            return $messages;
+        }
+
+        return \array_map(
+            static fn (mixed $message): string => \str_replace([':message', ':key'], [(string) $message, $field], $format),
+            \array_values($messages),
+        );
     }
 
     /**
@@ -669,6 +740,29 @@ final readonly class LaravelResponse
         return \is_scalar($value) || $value === null
             ? \var_export($value, true)
             : (string) \json_encode($value, \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * Canonicalize nested key ordering exactly like Laravel's
+     * `AssertableJsonString::reorderAssocKeys()` (`Arr::dot` + `ksort` + rebuild),
+     * so arrays holding equal key-value pairs compare equal regardless of the
+     * order their associative keys were inserted in. List order is preserved.
+     *
+     * @param array<array-key, mixed> $data
+     * @return array<array-key, mixed>
+     */
+    private static function reorderAssocKeys(array $data): array
+    {
+        $data = Arr::dot($data);
+        ksort($data);
+
+        $result = [];
+
+        foreach ($data as $key => $value) {
+            Arr::set($result, $key, $value);
+        }
+
+        return $result;
     }
 
     /**
