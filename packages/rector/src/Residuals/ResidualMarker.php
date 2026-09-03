@@ -87,13 +87,24 @@ final class ResidualMarker
      * @param non-empty-string $code Stable `[A-Z0-9_]+` residual code (see ResidualCode).
      * @param class-string $rule
      * @param non-empty-string $reason Human-readable reason, no `*` and no
-     *        `laratesto-residual(` substring.
+     *        `laratesto-residual(` substring. mark() enforces the contract: a
+     *        violating reason would render a comment that is never owned
+     *        ({@see owned()}), so every run would append a duplicate — rejected
+     *        with an InvalidArgumentException before the node is touched.
      * @param non-empty-string $severity `manual` or `warning`.
      * @return bool Whether the marker comment changed: created, merged with another
      *         rule's contribution, or this rule's own contribution reconciled.
      */
     public static function mark(Class_ $class, string $code, string $rule, string $reason, string $severity = 'manual'): bool
     {
+        if ($reason === '' || \str_contains($reason, '*') || \str_contains($reason, 'laratesto-residual(')) {
+            throw new \InvalidArgumentException(\sprintf(
+                'Invalid residual reason %s: a reason must be a non-empty string without a "*" or "laratesto-residual("'
+                . ' substring, otherwise the rendered marker comment is never owned and every run appends a duplicate.',
+                \var_export($reason, true),
+            ));
+        }
+
         $comments = $class->getAttribute(AttributeKey::COMMENTS) ?? [];
 
         foreach ($comments as $index => $comment) {
