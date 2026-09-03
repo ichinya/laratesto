@@ -16,6 +16,8 @@ use PhpParser\Node\Identifier;
 use PhpParser\Node\Name\FullyQualified;
 use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\TraitUse;
+use PhpParser\NodeFinder;
+use Rector\PhpParser\AstResolver;
 use Rector\Rector\AbstractRector;
 use Symplify\RuleDocGenerator\ValueObject\CodeSample\CodeSample;
 use Symplify\RuleDocGenerator\ValueObject\RuleDefinition;
@@ -37,8 +39,11 @@ use Testo\Bridge\Rector\Testing\TestRectorFixtures;
  *
  * 2. Outside the convertible hierarchy — a class that is NOT a Laravel test but still
  *    uses Laravel test constructs (`$this->app`, a database trait, a `TestResponse`
- *    typehint). The base-class chain does not resolve, so no conversion rule applies;
- *    the marker reports the constructs so nothing passes silently.
+ *    typehint). The extends chain decides the wording: when it resolves into the
+ *    configured hierarchy through project bases missing from `base_classes`, the
+ *    marker names them with the exact `--base-class`/config fix (fail-closed — this
+ *    rule never converts); when a hop is unresolvable, cyclic, over-deep or dead-ends
+ *    below the configured bases, the conservative manual-migration wording stays.
  *
  * The marker is the canonical `laratesto-residual` comment (see {@see ResidualMarker});
  * the scanner collects it into the table and report. Idempotent: one marker per code
@@ -47,6 +52,13 @@ use Testo\Bridge\Rector\Testing\TestRectorFixtures;
 #[TestRectorFixtures('LaravelResidualDetectionRector')]
 final class LaravelResidualDetectionRector extends AbstractRector
 {
+    /**
+     * Guard against cyclic or pathologically deep extends chains, mirroring
+     * LaravelBaseClassRector::MAX_CHAIN_DEPTH: anything deeper stays on the
+     * conservative "does not resolve" wording instead of a speculative fix.
+     */
+    private const MAX_CHAIN_DEPTH = 10;
+
     /**
      * Facade fakes without a stable Testo-native counterpart yet.
      */
@@ -90,6 +102,7 @@ final class LaravelResidualDetectionRector extends AbstractRector
     ];
 
     public function __construct(
+        private readonly AstResolver $astResolver,
         private readonly ConfiguredHierarchy $hierarchy,
     ) {}
 
@@ -222,7 +235,9 @@ final class LaravelResidualDetectionRector extends AbstractRector
     }
 
     /**
-     * Laravel constructs in a class whose base does not resolve into the hierarchy.
+     * Laravel constructs in a class outside the convertible hierarchy, with the
+     * reason split between an unconfigured-but-resolvable chain and a truly
+     * unresolvable one ({@see outsideHierarchyReason()}).
      */
     private function detectConstructsOutsideHierarchy(Class_ $node): ?Node
     {
@@ -265,9 +280,128 @@ final class LaravelResidualDetectionRector extends AbstractRector
             static::class,
             'Laravel constructs outside a convertible hierarchy ('
             . \implode(', ', \array_values(\array_unique($found)))
-            . ') — base class does not resolve; migrate manually',
+            . ') — ' . $this->outsideHierarchyReason($node),
         );
 
         return $node;
+    }
+
+    /**
+     * Why the constructs sit outside a convertible hierarchy, decided by the extends
+     * chain: a chain that resolves into the configured hierarchy through project
+     * bases missing from `base_classes` is a configuration gap with a mechanical fix.
+     * The marker names every missing base and gives the remediation in the order the
+     * user must perform it — add the repeated `--base-class` CLI options (the
+     * canonical shell-safe forward-slash form, canonicalized by the command) or add
+     * these names to the `base_classes` config, remove this residual marker, then
+     * re-run —
+     * because the stale marker would keep the class visibly residual after the
+     * configuration is fixed. Any chain that cannot be proven to reach the hierarchy
+     * keeps the conservative wording.
+     */
+    private function outsideHierarchyReason(Class_ $node): string
+    {
+        $parentName = $node->extends === null ? null : $this->getName($node->extends);
+
+        $unconfigured = \is_string($parentName) && $parentName !== ''
+            ? $this->resolvableButUnconfiguredBases($parentName)
+            : null;
+
+        if ($unconfigured === null || $unconfigured === []) {
+            return 'base class does not resolve; migrate manually';
+        }
+
+        return \sprintf(
+            'project base(s) %s resolvable but missing from base_classes: add CLI option(s) %s (or add these names to the base_classes config), remove this residual marker, then re-run to convert the whole chain',
+            \implode(', ', $unconfigured),
+            \implode(' ', \array_map(
+                static fn(string $base): string => '--base-class=' . \str_replace('\\', '/', $base),
+                $unconfigured,
+            )),
+        );
+    }
+
+    /**
+     * The project classes between the given direct parent and the first configured
+     * base, nearest first, when every hop resolves and the chain reaches a configured
+     * source base or an already-migrated target form. `null` when the chain cannot be
+     * proven to reach the hierarchy: unresolvable parent, cycle, over-deep chain or a
+     * dead end below the configured bases — never converted on, diagnosis only.
+     *
+     * @return list<non-empty-string>|null
+     */
+    private function resolvableButUnconfiguredBases(string $startName): ?array
+    {
+        if ($this->isConfiguredOrTargetBase($startName)) {
+            return null;
+        }
+
+        $unconfigured = [];
+        $seen = [];
+        $current = $startName;
+
+        for ($depth = 0; $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
+            if ($this->isConfiguredOrTargetBase($current)) {
+                return $unconfigured;
+            }
+
+            if (isset($seen[$current])) {
+                return null;
+            }
+
+            $seen[$current] = true;
+
+            $parent = $this->resolveChainClass($current);
+
+            if (! $parent instanceof Class_) {
+                return null;
+            }
+
+            $unconfigured[] = $current;
+
+            if ($parent->extends === null) {
+                return null;
+            }
+
+            $next = $this->getName($parent->extends);
+
+            if (! \is_string($next) || $next === '') {
+                return null;
+            }
+
+            $current = $next;
+        }
+
+        return null;
+    }
+
+    private function isConfiguredOrTargetBase(string $name): bool
+    {
+        return \in_array($name, $this->hierarchy->hierarchyBaseNames(), true);
+    }
+
+    /**
+     * Same-file lookup first, then reflection — the exact resolution order
+     * LaravelBaseClassRector uses to prove configured chains, so a base defined in
+     * the file currently being processed resolves without autoload.
+     */
+    private function resolveChainClass(string $className): ?Class_
+    {
+        $local = (new NodeFinder())->findFirst(
+            $this->getFile()->getNewStmts(),
+            fn(Node $node): bool => $node instanceof Class_ && $this->isName($node, $className),
+        );
+
+        if ($local instanceof Class_) {
+            return $local;
+        }
+
+        try {
+            $resolved = $this->astResolver->resolveClassFromName($className);
+        } catch (\Throwable) {
+            $resolved = null;
+        }
+
+        return $resolved instanceof Class_ ? $resolved : null;
     }
 }

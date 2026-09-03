@@ -127,6 +127,11 @@ PHP);
             Assert::string($inScope)->contains('extends ProjectTestCase');
             Assert::string($inScope)->notContains('laratesto-residual');
 
+            // A configured custom hierarchy never lands in the outside-hierarchy
+            // diagnosis: the chain reaches the configured bases, so nothing is offered.
+            Assert::string($inScope)->notContains('outside a convertible hierarchy');
+            Assert::string($inScope)->notContains('resolvable but missing from base_classes');
+
             // `Tests\TestCase` was dropped by the override: no rule may partially
             // migrate the class, it only becomes visible as a residual.
             Assert::string($outOfScope)->contains('extends \Tests\TestCase');
@@ -136,6 +141,11 @@ PHP);
             Assert::string($outOfScope)->notContains('LaravelResponse');
             Assert::string($outOfScope)->notContains('#[\Testo\Test]');
             Assert::string($outOfScope)->contains('laratesto-residual(code=LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY');
+
+            // `Tests\TestCase` (dropped by the override) dead-ends below the configured
+            // bases: the conservative wording stays and no --base-class fix is offered.
+            Assert::string($outOfScope)->contains('base class does not resolve; migrate manually');
+            Assert::string($outOfScope)->notContains('resolvable but missing from base_classes');
         } finally {
             self::recursiveRemove($tmpDir);
         }
