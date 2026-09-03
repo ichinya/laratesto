@@ -14,7 +14,9 @@ use PhpParser\Node\Expr\Variable;
 use PhpParser\Node\Name;
 use PhpParser\Node\Scalar;
 use PhpParser\Node\Stmt\Class_;
+use PHPStan\Analyser\Scope;
 use Rector\NodeNameResolver\NodeNameResolver;
+use Rector\NodeTypeResolver\Node\AttributeKey;
 use Rector\PhpParser\AstResolver;
 
 /** @internal Classifies only the statically proven common-path signature matrix. */
@@ -23,6 +25,8 @@ final class HttpCompatibilityAnalyzer
     public const TEST_RESPONSE = 'Illuminate\Testing\TestResponse';
 
     public const LARAVEL_RESPONSE = 'Laratesto\Testing\LaravelResponse';
+
+    public const ASSERTABLE_JSON = 'Laratesto\Testing\AssertableJson';
 
     private const REQUEST_SIGNATURES = [
         'get' => [1, 2, ['string', 'array']],
@@ -82,18 +86,25 @@ final class HttpCompatibilityAnalyzer
      * validated on `$this` but must not turn chained calls (`$this->make($x)->any()`,
      * `$this->app()->bind()`) into classified `$this->` receivers — the pipeline
      * output itself contains such chains, and flagging them would break byte
-     * idempotency on the second run.
+     * idempotency on the second run. `travel()` returns a runtime Wormhole whose
+     * methods (`$this->travel(5)->days()`) are never rewritten and work as-is.
      */
-    private const NON_FLUENT_HELPERS = ['session', 'app', 'make'];
+    private const NON_FLUENT_HELPERS = ['session', 'app', 'make', 'travel'];
 
     /**
      * PHPUnit `$this->` calls the imported testo/bridge-rector
-     * PHPUNIT_TO_TESTO set rewrites later in the same Rector run
-     * (AssertCallToTestoRector, TypedAssertCallToTestoRector,
-     * ExpectExceptionToTestoRector, MarkTestSkippedToTestoRector,
+     * PHPUNIT_TO_TESTO set rewrites unconditionally later in the same Rector run
+     * (AssertCallToTestoRector, the unconditional TypedAssertCallToTestoRector
+     * cases, ExpectExceptionToTestoRector, MarkTestSkippedToTestoRector,
      * MarkTestIncompleteRector). By the time the migrated class runs, none of
-     * them exist anymore, so they must not fail the preflight. PHPUnit
-     * assertions outside this list (assertStringContainsString, assertSeeded,
+     * them exist anymore, so they must not fail the preflight. The invariant is
+     * "upstream provably rewrites THIS call with THESE arguments": calls whose
+     * rewrite fires only for a statically provable argument shape are NOT listed
+     * here — upstream's emptiness() rewrites assertEmpty/assertNotEmpty only when
+     * the subject is statically an array, and a surviving call would fatal on the
+     * converted base, which provides no assert surface. Those are pinned to their
+     * triggering shape by UPSTREAM_SHAPE_CONDITIONAL_CALLS instead. PHPUnit
+     * assertions outside both lists (assertStringContainsString, assertSeeded,
      * ...) are NOT rewritten and stay fail-closed.
      */
     private const UPSTREAM_REWRITTEN_CALLS = [
@@ -116,13 +127,27 @@ final class HttpCompatibilityAnalyzer
         'assertArrayHasKey',
         'assertArrayNotHasKey',
         'assertEqualsCanonicalizing',
-        'assertEmpty',
-        'assertNotEmpty',
         'expectException',
         'expectExceptionMessage',
         'expectExceptionCode',
         'markTestSkipped',
         'markTestIncomplete',
+    ];
+
+    /**
+     * Upstream rewrites that fire only for a statically provable argument shape.
+     * TypedAssertCallToTestoRector::emptiness() rewrites assertEmpty/assertNotEmpty
+     * into Assert::blank()/notBlank() ONLY when the subject is statically an
+     * array; otherwise the call survives onto the converted base, which provides
+     * no assert surface, and fatals at runtime. The preflight cannot reproduce
+     * Rector's type inference, so it exempts only the shape it can prove without
+     * inference — a literal static array subject with a literal string message
+     * (Assert::blank() takes `string $message = ''`) — and fails closed on every
+     * other subject via HTTP_UNSUPPORTED_SIGNATURE.
+     */
+    private const UPSTREAM_SHAPE_CONDITIONAL_CALLS = [
+        'assertEmpty' => [1, 2, ['array', 'string']],
+        'assertNotEmpty' => [1, 2, ['array', 'string']],
     ];
 
     // Mirrors the public assert/accessor surface of Laratesto\Testing\LaravelResponse
@@ -131,7 +156,7 @@ final class HttpCompatibilityAnalyzer
     private const RESPONSE_SIGNATURES = [
         'assertStatus' => [1, 1, ['int']],
         'assertOk' => [0, 0, []],
-        'assertJson' => [1, 2, ['array', 'bool']],
+        'assertJson' => [1, 2, ['array-or-closure', 'bool']],
         'assertJsonPath' => [2, 2, ['string', 'any']],
         'assertHeader' => [1, 2, ['string', 'nullable-string']],
         'assertRedirect' => [0, 1, ['nullable-string']],
@@ -267,13 +292,29 @@ final class HttpCompatibilityAnalyzer
                 // matrices above, and methods declared by the class itself survive
                 // conversion. Every other `$this->` call (unknown helper, Laravel
                 // TestCase leftover such as putJson/seed) has no converted
-                // equivalent and would fatal at runtime. Two carve-outs keep the
+                // equivalent and would fatal at runtime. Three carve-outs keep the
                 // classification aligned with what the pipeline really produces:
-                // calls the upstream PHPUnit-to-Testo set rewrites later in the
-                // same run, and the base helpers the conversion itself emits
-                // (make/app/session) validated by the HELPER matrix above.
-                if (! in_array($method, $declaredMethods, true)
-                    && ! in_array($method, self::UPSTREAM_REWRITTEN_CALLS, true)) {
+                // upstream rewrites that fire for every argument shape, upstream
+                // rewrites pinned to their triggering argument shape, and the base
+                // helpers the conversion itself emits (make/app/session) validated
+                // by the HELPER matrix above.
+                if (in_array($method, $declaredMethods, true)) {
+                    continue;
+                }
+
+                if (isset(self::UPSTREAM_SHAPE_CONDITIONAL_CALLS[$method])) {
+                    $this->validate(
+                        $reasons,
+                        'HTTP_UNSUPPORTED_SIGNATURE',
+                        $method,
+                        $call->args,
+                        self::UPSTREAM_SHAPE_CONDITIONAL_CALLS[$method],
+                    );
+
+                    continue;
+                }
+
+                if (! in_array($method, self::UPSTREAM_REWRITTEN_CALLS, true)) {
                     $this->addReason(
                         $reasons,
                         'HTTP_UNSUPPORTED_SIGNATURE',
@@ -371,6 +412,8 @@ final class HttpCompatibilityAnalyzer
             'int' => $expression instanceof Scalar\Int_,
             'bool' => $this->isConst($expression, 'true') || $this->isConst($expression, 'false'),
             'array' => $expression instanceof Expr\Array_ && $this->arrayIsStatic($expression),
+            'array-or-closure' => ($expression instanceof Expr\Array_ && $this->arrayIsStatic($expression))
+                || $this->isAssertJsonCallable($expression),
             'associative-array' => $expression instanceof Expr\Array_
                 && $this->arrayIsStatic($expression)
                 && ($expression->items === [] || $this->arrayHasOnlyExplicitKeys($expression)),
@@ -379,6 +422,38 @@ final class HttpCompatibilityAnalyzer
                 || ($expression instanceof Expr\Array_ && $this->arrayIsStatic($expression)),
             default => false,
         };
+    }
+
+    /**
+     * Runtime LaravelResponse::assertJson() hands the callable the ported
+     * Laratesto\Testing\AssertableJson. A closure typed against Laravel's fluent
+     * class instead would TypeError at runtime, so only closures without a
+     * first-parameter type — or with that parameter typed as the ported class —
+     * count as supported.
+     */
+    private function isAssertJsonCallable(Expr $expression): bool
+    {
+        if (! $expression instanceof Expr\Closure && ! $expression instanceof Expr\ArrowFunction) {
+            return false;
+        }
+
+        $firstParameter = $expression->params[0] ?? null;
+        if ($firstParameter === null || $firstParameter->type === null) {
+            return true;
+        }
+
+        if (! $firstParameter->type instanceof Name) {
+            return false;
+        }
+
+        return strcasecmp($this->resolveTypeName($firstParameter->type), self::ASSERTABLE_JSON) === 0;
+    }
+
+    private function resolveTypeName(Name $name): string
+    {
+        $scope = $name->getAttribute(AttributeKey::SCOPE);
+
+        return $scope instanceof Scope ? $scope->resolveName($name) : $name->toString();
     }
 
     private function arrayIsStatic(Expr\Array_ $array): bool
