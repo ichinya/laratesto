@@ -73,6 +73,8 @@ final class DatabaseConfigurationAnalyzer
         'shouldDropTypes',
         'beginDatabaseTransaction',
         'runDatabaseMigrations',
+        'refreshDatabase',
+        'refreshInMemoryDatabase',
         'refreshTestDatabase',
         'truncateDatabaseTables',
         'truncateTablesForAllConnections',
@@ -92,22 +94,35 @@ final class DatabaseConfigurationAnalyzer
     public function analyze(Class_ $class): DatabaseConfigurationAnalysis
     {
         $uses = [];
+        $nestedUses = [];
 
-        foreach ($class->stmts as $statement) {
-            if (! $statement instanceof TraitUse) {
-                continue;
-            }
+        // Same recursion depth as the HTTP analyzer: a `use` inside a nested
+        // class-like must not slip through unconverted and unmarked.
+        foreach ($this->nodeFinder->findInstanceOf($class->stmts, TraitUse::class) as $statement) {
+            $direct = in_array($statement, $class->stmts, true);
 
             foreach ($statement->traits as $trait) {
                 $name = $this->resolvedName($trait);
                 if ($name !== null && isset(self::TRAITS[$name])) {
-                    $uses[] = [$name, $statement];
+                    if ($direct) {
+                        $uses[] = [$name, $statement];
+                    } else {
+                        $nestedUses[] = $name;
+                    }
                 }
             }
         }
 
-        if ($uses === []) {
+        if ($uses === [] && $nestedUses === []) {
             return new DatabaseConfigurationAnalysis();
+        }
+
+        if ($nestedUses !== []) {
+            return new DatabaseConfigurationAnalysis(
+                sourceTrait: $nestedUses[0],
+                targetAttribute: self::TRAITS[$nestedUses[0]],
+                unsupportedReason: 'database trait use inside a nested class is not converted automatically',
+            );
         }
 
         if (count($uses) !== 1) {
@@ -365,11 +380,28 @@ final class DatabaseConfigurationAnalyzer
     {
         return $this->nodeFinder->findFirst(
             $class->stmts,
-            static fn(Node $node): bool => $node instanceof Expr\PropertyFetch
-                && $node->var instanceof Expr\Variable
-                && $node->var->name === 'this'
-                && $node->name instanceof Node\Identifier
-                && $node->name->toString() === $propertyName,
+            static function (Node $node) use ($propertyName): bool {
+                if (! $node instanceof Expr\PropertyFetch
+                    && ! $node instanceof Expr\NullsafePropertyFetch) {
+                    return false;
+                }
+
+                if (! $node->var instanceof Expr\Variable || $node->var->name !== 'this') {
+                    return false;
+                }
+
+                if ($node->name instanceof Node\Identifier) {
+                    return $node->name->toString() === $propertyName;
+                }
+
+                if ($node->name instanceof Scalar\String_) {
+                    return $node->name->value === $propertyName;
+                }
+
+                // Dynamic property name ($this->{$opt}): the option may be read,
+                // so fail closed instead of removing a live declaration.
+                return true;
+            },
         ) instanceof Node;
     }
 
