@@ -31,17 +31,21 @@ final class DryRunReportContractTest
     public function hunksAreAppliedToTheOriginalContent(): void
     {
         $original = "<?php\n\nfinal class Demo\n{\n}\n";
-        $diff = <<<'DIFF'
-            --- Original
-            +++ New
-            @@ -2,3 +2,5 @@
-             
-            -final class Demo
-            +/* laratesto-residual(code=LIFECYCLE_UNSUPPORTED, rule=Rule\A, severity=manual): stays */
-            +final class Demo
-            +use RuntimeException;
-             {
-            DIFF;
+        // Built from explicit lines instead of a heredoc: the lone " " entry
+        // is the mandatory context-line marker of an empty line, and a quoted
+        // string keeps that space off the source line, so the strict CI
+        // whitespace gate stays clean without weakening the fixture.
+        $diff = implode("\n", [
+            '--- Original',
+            '+++ New',
+            '@@ -2,3 +2,5 @@',
+            ' ',
+            '-final class Demo',
+            '+/* laratesto-residual(code=LIFECYCLE_UNSUPPORTED, rule=Rule\A, severity=manual): stays */',
+            '+final class Demo',
+            '+use RuntimeException;',
+            ' {',
+        ]);
 
         $reconstructed = $this->reconstructor->reconstruct($original, $diff);
 

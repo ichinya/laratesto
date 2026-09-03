@@ -501,12 +501,15 @@ generation (the fixture-test bridge and the machine-JSON output contract), and
 Rector minor releases routinely rename them. Bump the pin only together with a
 green fixture suite and the parity end-to-end gate.
 
-CI (`.github/workflows/ci.yml`) runs on Linux and Windows, PHP 8.2, 8.3 and 8.4:
-`composer validate --strict`, a locked install, `git diff --check`, the rector
-package's composer validation (non-strict — the deliberate Rector pin triggers
-a warning) and the full `composer test` suite, which includes the migration
-end-to-end gate. The root lock is resolved with Composer's PHP 8.2 platform so
-the same lock remains installable on every supported PHP version.
+CI (`.github/workflows/ci.yml`) runs on Linux and Windows, PHP 8.2, 8.3 and
+8.4: `composer validate --strict`, a locked install, a whitespace check over
+the changed lines of the triggering range (pull requests: merge base to head;
+pushes: the pushed commits, or the whole tree when the previous SHA is
+unavailable), the rector package's composer validation (non-strict — the
+deliberate Rector pin triggers a warning) and the full `composer test` suite,
+which includes the migration end-to-end gate. The root lock is resolved with
+Composer's PHP 8.2 platform so the same lock remains installable on every
+supported PHP version.
 
 ## License
 

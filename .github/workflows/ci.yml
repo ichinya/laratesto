@@ -17,6 +17,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so the whitespace gate can compute merge bases and
+          # resolve github.event.before on push events.
+          fetch-depth: 0
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -35,7 +39,33 @@ jobs:
         run: composer install --no-interaction --no-progress
 
       - name: Check for whitespace errors
-        run: git diff --check
+        # A clean checkout has no worktree delta, so a bare `git diff --check`
+        # is a no-op. Check the changed lines of the triggering range instead:
+        # - pull_request: merge-base(origin/<base branch>, HEAD) .. HEAD, i.e.
+        #   exactly the lines the PR adds on top of its merge base.
+        # - push: github.event.before .. github.sha, i.e. the pushed commits.
+        #   If the previous SHA is unavailable (branch created, or its history
+        #   force-pushed away), fall back to the empty tree, which checks the
+        #   whole pushed tree.
+        # There are no path exemptions: test fixtures are written without
+        # literal trailing whitespace, so every changed line is checked.
+        # Requires full checkout history (fetch-depth: 0 above). The script
+        # runs under Git Bash on both Linux and Windows.
+        env:
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            base="$(git merge-base "origin/$PR_BASE_REF" HEAD)"
+          elif [ -n "$PUSH_BEFORE" ] && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            base="$PUSH_BEFORE"
+          else
+            base="$(git hash-object -t tree /dev/null)"
+          fi
+          echo "Checking whitespace errors in $base..HEAD"
+          git diff --check "$base" HEAD
 
       - name: Run the test suite (includes the migration end-to-end gate)
         run: composer test
