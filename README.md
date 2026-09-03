@@ -211,9 +211,16 @@ comment. The full catalog:
 - `LARAVEL_FAKE_UNSUPPORTED`
 - `LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY`
 
-Re-running the migrator reconciles the markers: a resolved construct loses its
-marker, a changed construct gets its reason refreshed, and untouched constructs
-keep theirs byte-identical (repeat applies are idempotent).
+The marker is keyed by `code`: one class carries at most one marker comment per
+code, and every rule that fails that code contributes its own `rule=…` segment
+into the single comment, sorted by rule class-string. Later rules never overwrite
+or lose earlier reasons, and the scanner reports one finding per contribution.
+
+Re-running the migrator reconciles the markers: a rule refreshes only its own
+segment when its constructs changed, unchanged runs stay byte-identical (repeat
+applies are idempotent), and a fixed construct loses its marker only when you
+delete the marker comment together with the fix — a marker left in place keeps
+being reported.
 
 ### Database trait conversion
 

@@ -86,4 +86,37 @@ final class ResidualsScannerTest
         Assert::true(str_contains($report, '- B.php:2 [TEST_TWO/RuleTwo] second reason'));
         Assert::count(explode("\n", $report), 6);
     }
+
+    #[Test]
+    public function aMergedMarkerReportsOneResidualPerRule(): void
+    {
+        $residuals = $this->scanner->scan('CollisionTest.php', <<<'PHP'
+            <?php
+
+            /* laratesto-residual(code=HTTP_UNSUPPORTED_SIGNATURE, rule=Rule\A, severity=manual): base class reason; laratesto-residual(code=HTTP_UNSUPPORTED_SIGNATURE, rule=Rule\B, severity=warning): detection reason */
+            final class CollisionTest
+            {
+            }
+            PHP);
+
+        Assert::count($residuals, 2, 'One marker comment, one finding per rule contribution.');
+
+        $first = $residuals[0] ?? null;
+        $second = $residuals[1] ?? null;
+        \assert($first instanceof Residual && $second instanceof Residual);
+
+        Assert::same($first->code, 'HTTP_UNSUPPORTED_SIGNATURE');
+        Assert::same($first->rule, 'Rule\A');
+        Assert::same($first->severity, 'manual');
+        Assert::same($first->reason, 'base class reason', 'The separator must not leak into the parsed reason.');
+        Assert::same($second->rule, 'Rule\B');
+        Assert::same($second->severity, 'warning');
+        Assert::same($second->reason, 'detection reason');
+        Assert::same($first->line, $second->line);
+
+        $report = $this->scanner->renderReport($residuals);
+
+        Assert::true(str_contains($report, '[HTTP_UNSUPPORTED_SIGNATURE/Rule\A] base class reason'));
+        Assert::true(str_contains($report, '[HTTP_UNSUPPORTED_SIGNATURE/Rule\B] detection reason'));
+    }
 }

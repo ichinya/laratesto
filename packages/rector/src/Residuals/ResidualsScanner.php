@@ -5,20 +5,16 @@ declare(strict_types=1);
 namespace Laratesto\Rector\Residuals;
 
 /**
- * Collects residual markers from migration output.
- *
  * The scanner reads whatever the caller hands it — file contents after an apply, or
  * processed contents held in memory during a dry run (see the ticket-04 spec: the disk
  * holds no markers in a dry run). Pure string work: no filesystem access, no I/O, so
  * it is trivially testable and reusable from both entry points.
  *
- * @api
+ * Markers parse with the shared {@see ResidualMarker::MARKER_REGEX}; a marker holding
+ * several rule contributions yields one {@see Residual} per contribution.
  */
 final class ResidualsScanner
 {
-    private const MARKER_REGEX =
-        '/laratesto-residual\(code=(?<code>[^,)]+),\s*rule=(?<rule>[^,)]+)(?:,\s*severity=(?<severity>[^)]+))?\):\s*(?<reason>[^*]*)\*/';
-
     /**
      * Scan one file's contents for residual markers.
      *
@@ -28,7 +24,7 @@ final class ResidualsScanner
     {
         $residuals = [];
 
-        if (\preg_match_all(self::MARKER_REGEX, $contents, $matches, \PREG_OFFSET_CAPTURE) === false) {
+        if (\preg_match_all(ResidualMarker::MARKER_REGEX, $contents, $matches, \PREG_OFFSET_CAPTURE) === false) {
             return [];
         }
 

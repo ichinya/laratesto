@@ -72,6 +72,10 @@ Every residual is a comment next to the untouched construct:
 final class SignupTest extends LaravelTestCase { … }
 ```
 
+Several rules can fail the same code on one class: their segments merge into the
+single `laratesto-residual(code=…)` comment, each keeping its own `rule=…` and
+reason, sorted by rule.
+
 | Code | Typical trigger | Manual fix |
 | --- | --- | --- |
 | `LARAVEL_FAKE_UNSUPPORTED` | `Mail::fake()`, `Queue::fake()`, `Http::fake()` … | keep the fake for now and run the test under PHPUnit semantics, or replace with Testo-native doubles |

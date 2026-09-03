@@ -22,6 +22,9 @@ versions follow [Semantic Versioning](https://semver.org/).
     the same declaration survive;
   - residual markers reconcile: changed constructs refresh their reason,
     resolved constructs lose the marker, unchanged runs stay byte-identical;
+  - markers emitted by several rules for the same code merge deterministically:
+    one marker comment per code, one contribution per rule sorted by rule,
+    byte-identical on re-runs — no rule overwrites or loses another rule's reason;
   - the eight residual codes live in one `ResidualCode` catalog and the README
     documents exactly that catalog (enforced by test);
   - dry-run residual reports scan the reconstructed new-side content, so

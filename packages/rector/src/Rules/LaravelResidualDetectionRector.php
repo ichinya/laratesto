@@ -40,8 +40,8 @@ use Testo\Bridge\Rector\Testing\TestRectorFixtures;
  *    the marker reports the constructs so nothing passes silently.
  *
  * The marker is the canonical `laratesto-residual` comment (see {@see ResidualMarker});
- * the scanner collects it into the table and report. Idempotent: one marker per class,
- * replace-or-skip.
+ * the scanner collects it into the table and report. Idempotent: one marker per code
+ * per class, and rules failing the same code merge their contributions.
  */
 #[TestRectorFixtures('LaravelResidualDetectionRector')]
 final class LaravelResidualDetectionRector extends AbstractRector
