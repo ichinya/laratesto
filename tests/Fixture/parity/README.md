@@ -9,6 +9,8 @@ runners.
 - `supported/` — must migrate fully and run green under Testo (no PHPUnit runner):
     - `TestCase.php` — project base with a safe custom bootstrap;
     - `LifecycleCountersTest.php` — exactly-once setup/test/teardown probe;
+    - `TestAnnotationDiscoveryTest.php` — PHPUnit annotation-only discovery probe:
+      non-test names carrying the annotation must run under Testo after conversion;
     - `DatabaseStrategiesTest.php` — RefreshDatabase plain/clean, DatabaseTransactions;
     - `TruncationSelectionTest.php` — two connections, literal table selection;
     - `HttpAndArtisanTest.php` — common HTTP/response/session/Artisan signatures and a supported `TestResponse`

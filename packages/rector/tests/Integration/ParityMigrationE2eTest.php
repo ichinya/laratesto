@@ -32,7 +32,7 @@ final class ParityMigrationE2eTest
             Assert::true(\mkdir($corpus, 0777, true) || \is_dir($corpus));
             Assert::true(\mkdir($unsupported, 0777, true) || \is_dir($unsupported));
 
-            foreach (['TestCase.php', 'LifecycleCountersTest.php', 'DatabaseStrategiesTest.php', 'TruncationSelectionTest.php', 'HttpAndArtisanTest.php'] as $file) {
+            foreach (['TestCase.php', 'LifecycleCountersTest.php', 'TestAnnotationDiscoveryTest.php', 'DatabaseStrategiesTest.php', 'TruncationSelectionTest.php', 'HttpAndArtisanTest.php'] as $file) {
                 Assert::true(\copy($rootDir . '/tests/Fixture/parity/supported/' . $file, $corpus . '/' . $file), 'Missing supported fixture: ' . $file);
             }
 
@@ -67,6 +67,20 @@ final class ParityMigrationE2eTest
             Assert::string($counters)->contains('parent::tearDownLaravel()');
             Assert::string($counters)->notContains('parent::setUp()');
             Assert::string($counters)->notContains('parent::tearDown()');
+
+            // Annotation-based discovery: a public method found only through its
+            // PHPUnit docblock annotation gains the Testo attribute, the annotation
+            // is removed and the surrounding docblock prose survives byte-for-byte.
+            // Neither method name starts with "test", so the migrated attribute is
+            // the only route to Testo discovery.
+            $discovery = (string) \file_get_contents($corpus . '/TestAnnotationDiscoveryTest.php');
+            Assert::string($discovery)->contains('extends TestCase');
+            Assert::string($discovery)->notContains('Laratesto\Testing\LaravelTestCase');
+            Assert::string($discovery)->contains('#[\Testo\Test]');
+            Assert::string($discovery)->contains('it_runs_the_annotated_method');
+            Assert::string($discovery)->notContains('@test');
+            Assert::string($discovery)->contains('The annotation probe keeps the project base alive.');
+            Assert::string($discovery)->notContains('PHPUnit');
 
             // Database strategies became attributes: the plain RefreshDatabase class,
             // the wrapped-transactions class and the literal two-connection truncation.
@@ -159,7 +173,9 @@ final class ParityMigrationE2eTest
                 $exitCode,
                 "The migrated parity corpus must run green under testo.\nSTDOUT:\n{$stdout}\nSTDERR:\n{$stderr}",
             );
-            Assert::string($stdout)->contains('LifecycleCountersTest');
+            Assert::string($stdout)->contains('TestAnnotationDiscoveryTest');
+            Assert::string($stdout)->contains('it_runs_the_annotated_method');
+            Assert::string($stdout)->contains('annotated_and_prefixed');
             Assert::string($stdout)->notContains('FAILED');
         } finally {
             self::recursiveRemove($tmpDir);

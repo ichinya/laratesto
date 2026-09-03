@@ -25,6 +25,11 @@ use PhpParser\Node\Stmt\Expression;
 use PhpParser\Node\Stmt\TraitUse;
 use PhpParser\NodeFinder;
 use PHPStan\Analyser\Scope;
+use PHPStan\PhpDocParser\Ast\PhpDoc\GenericTagValueNode;
+use Rector\BetterPhpDocParser\PhpDocInfo\PhpDocInfo;
+use Rector\BetterPhpDocParser\PhpDocInfo\PhpDocInfoFactory;
+use Rector\BetterPhpDocParser\PhpDocManipulator\PhpDocTagRemover;
+use Rector\Comments\NodeDocBlock\DocBlockUpdater;
 use Rector\Configuration\Option;
 use Rector\Configuration\Parameter\SimpleParameterProvider;
 use Rector\Contract\Rector\ConfigurableRectorInterface;
@@ -105,6 +110,9 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         private readonly AstResolver $astResolver,
         private readonly DatabaseConfigurationAnalyzer $databaseAnalyzer,
         private readonly HttpCompatibilityAnalyzer $httpAnalyzer,
+        private readonly PhpDocInfoFactory $phpDocInfoFactory,
+        private readonly PhpDocTagRemover $phpDocTagRemover,
+        private readonly DocBlockUpdater $docBlockUpdater,
     ) {
         $this->configuration = BaseClassConfiguration::defaults();
     }
@@ -751,6 +759,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             return;
         }
 
+        // Idempotent: a method already carrying #[\Testo\Test] needs nothing.
         foreach ($method->attrGroups as $group) {
             foreach ($group->attrs as $attribute) {
                 if ($this->isName($attribute->name, self::TEST_ATTRIBUTE)) {
@@ -759,21 +768,51 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             }
         }
 
+        // PHPUnit #[Test] attribute is rewritten in place to #[\Testo\Test].
         foreach ($method->attrGroups as $group) {
             foreach ($group->attrs as $attribute) {
                 if ($this->isName($attribute->name, self::PHPUNIT_TEST_ATTRIBUTE)) {
                     $attribute->name = new FullyQualified(self::TEST_ATTRIBUTE);
+
                     return;
                 }
             }
         }
 
+        // A @test docblock annotation is PHPUnit discovery for a non-test name:
+        // drop the tag without damaging the rest of the docblock, then add the
+        // attribute (same semantics as upstream Testo's ExtendsTestCaseToTestoRector).
+        $phpDocInfo = $this->phpDocInfoFactory->createFromNode($method);
+
+        if ($phpDocInfo instanceof PhpDocInfo) {
+            $testTags = $phpDocInfo->getTagsByName('test');
+
+            if ($testTags !== []) {
+                foreach ($testTags as $testTag) {
+                    if ($testTag->value instanceof GenericTagValueNode) {
+                        $this->phpDocTagRemover->removeTagValueFromNode($phpDocInfo, $testTag);
+                    }
+                }
+
+                $this->docBlockUpdater->updateRefactoredNodeWithPhpDocInfo($method);
+                $this->addTestoAttribute($method);
+
+                return;
+            }
+        }
+
+        // A bare `test`-prefixed name with no explicit marker gains the attribute.
         $name = $this->getName($method->name);
         if ($name !== null && str_starts_with($name, 'test')) {
-            $method->attrGroups[] = new AttributeGroup([
-                new Attribute(new FullyQualified(self::TEST_ATTRIBUTE)),
-            ]);
+            $this->addTestoAttribute($method);
         }
+    }
+
+    private function addTestoAttribute(ClassMethod $method): void
+    {
+        $method->attrGroups[] = new AttributeGroup([
+            new Attribute(new FullyQualified(self::TEST_ATTRIBUTE)),
+        ]);
     }
 
     private function convertAppExpression(Node $node): ?Node
