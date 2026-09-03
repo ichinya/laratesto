@@ -38,7 +38,33 @@ final class DatabaseRuntime
                 continue;
             }
 
-            $application['db']->connection($name)->setPdo(RefreshDatabaseState::$inMemoryConnections[$name]);
+            $connection = $application['db']->connection($name);
+            $cached = RefreshDatabaseState::$inMemoryConnections[$name];
+
+            // Re-attaching the same cached PDO resets the transaction depth
+            // counter (setPdo does that) and corrupts an already-open scope.
+            if ($connection->getPdo() === $cached) {
+                continue;
+            }
+
+            $connection->setPdo($cached);
+        }
+    }
+
+    /**
+     * Roll back a transaction stranded on a cached in-memory PDO by a
+     * mid-test disconnect, so the cached database stays reusable.
+     */
+    public static function rollbackCachedTransaction(Application $application, string $name): void
+    {
+        if (! self::isInMemory($application, $name)) {
+            return;
+        }
+
+        $cached = RefreshDatabaseState::$inMemoryConnections[$name] ?? null;
+
+        if ($cached !== null && $cached->inTransaction()) {
+            $cached->rollBack();
         }
     }
 
@@ -46,8 +72,16 @@ final class DatabaseRuntime
     public static function cacheInMemoryConnections(Application $application, array $names): void
     {
         foreach ($names as $name) {
-            if (self::isInMemory($application, $name)) {
-                RefreshDatabaseState::$inMemoryConnections[$name] = $application['db']->connection($name)->getPdo();
+            if (! self::isInMemory($application, $name)) {
+                continue;
+            }
+
+            $pdo = $application['db']->connection($name)->getPdo();
+
+            // A disconnected (null) PDO must not overwrite a healthy cached one:
+            // restoring it later is what keeps the in-memory schema alive.
+            if ($pdo !== null) {
+                RefreshDatabaseState::$inMemoryConnections[$name] = $pdo;
             }
         }
     }

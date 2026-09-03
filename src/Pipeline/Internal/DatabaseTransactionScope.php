@@ -9,10 +9,10 @@ use Illuminate\Database\Connection;
 use Illuminate\Foundation\Testing\DatabaseTransactionsManager;
 use Illuminate\Foundation\Testing\RefreshDatabaseState;
 
-/** @internal Begins and exhaustively cleans a multi-connection test transaction. */
+/** @internal Begins a multi-connection test transaction and unwinds exactly the depth it owns. */
 final class DatabaseTransactionScope
 {
-    /** @var list<Connection> */
+    /** @var list<array{name: non-empty-string, connection: Connection, floor: int}> */
     private array $managed = [];
 
     private bool $closed = false;
@@ -36,8 +36,11 @@ final class DatabaseTransactionScope
             foreach ($this->connections as $name) {
                 /** @var Connection $connection */
                 $connection = $database->connection($name);
+                // The transaction depth this scope owns: close() may only unwind
+                // what it began, so an outer scope's transaction survives.
+                $floor = $connection->transactionLevel();
                 $connection->setTransactionManager($manager);
-                $this->managed[] = $connection;
+                $this->managed[] = ['name' => $name, 'connection' => $connection, 'floor' => $floor];
 
                 $dispatcher = $connection->getEventDispatcher();
                 $connection->unsetEventDispatcher();
@@ -63,18 +66,31 @@ final class DatabaseTransactionScope
         $this->closed = true;
         $firstFailure = null;
 
-        foreach (array_reverse($this->managed) as $connection) {
+        foreach (array_reverse($this->managed) as $owned) {
+            $connection = $owned['connection'];
             $dispatcher = $connection->getEventDispatcher();
             $connection->unsetEventDispatcher();
 
             try {
-                if ($this->guardsRefreshState
-                    && (! $connection->getPdo()->inTransaction() || $connection->transactionLevel() < 1)) {
+                $pdo = $connection->getPdo();
+
+                // Mirror Laravel's null-PDO guard: a disconnected connection
+                // has nothing to roll back and never invalidates the schema.
+                // The transaction it carried survives on the cached in-memory
+                // PDO, so unwind it there to keep the cache reusable.
+                if ($pdo === null) {
+                    DatabaseRuntime::rollbackCachedTransaction($this->application, $owned['name']);
+                    continue;
+                }
+
+                if ($this->guardsRefreshState && ! $pdo->inTransaction()) {
                     RefreshDatabaseState::$migrated = false;
                 }
 
-                if ($connection->transactionLevel() > 0) {
-                    $connection->rollBack(0);
+                // Unwind only the depth this scope owns so stacked scopes never
+                // corrupt the transaction of an outer scope.
+                if ($connection->transactionLevel() > $owned['floor']) {
+                    $connection->rollBack($owned['floor']);
                 }
             } catch (\Throwable $failure) {
                 $firstFailure ??= $failure;
