@@ -107,22 +107,56 @@ final class LaravelSourceCompatibleCallsRector extends AbstractRector
 
     private function removeTestResponseImportWhenUnused(): void
     {
-        $statements = $this->getFile()->getNewStmts();
+        if ($this->containsTestResponseName($this->getFile()->getNewStmts())) {
+            return;
+        }
+
+        $this->pendingTestResponseImportRemovals[$this->getFile()->getFilePath()] = true;
+    }
+
+    /**
+     * The swap rewrites only the recognized class, so any surviving TestResponse
+     * reference elsewhere in the file — plain functions, traits, interfaces,
+     * enums — still resolves through the import. Removing it would leave those
+     * bare names fatally resolving to `<current-namespace>\TestResponse`.
+     *
+     * @param list<Node> $nodes
+     */
+    private function containsTestResponseName(array $nodes): bool
+    {
         $nodeFinder = new NodeFinder();
 
-        /** @var list<Class_> $classes */
-        $classes = $nodeFinder->findInstanceOf($statements, Class_::class);
-        foreach ($classes as $class) {
+        foreach ($nodes as $node) {
+            if ($node instanceof FileNode) {
+                if ($this->containsTestResponseName($node->stmts)) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if ($node instanceof Stmt\Use_ || $node instanceof Stmt\GroupUse) {
+                continue;
+            }
+
+            if ($node instanceof Stmt\Namespace_) {
+                if ($this->containsTestResponseName($node->stmts)) {
+                    return true;
+                }
+
+                continue;
+            }
+
             /** @var list<Name> $names */
-            $names = $nodeFinder->findInstanceOf($class, Name::class);
+            $names = $nodeFinder->findInstanceOf($node, Name::class);
             foreach ($names as $name) {
                 if ($this->isName($name, HttpCompatibilityAnalyzer::TEST_RESPONSE)) {
-                    return;
+                    return true;
                 }
             }
         }
 
-        $this->pendingTestResponseImportRemovals[$this->getFile()->getFilePath()] = true;
+        return false;
     }
 
     private function removeQueuedTestResponseImport(FileNode $fileNode): ?FileNode
