@@ -28,17 +28,24 @@ final class UnifiedDiffNewFileReconstructor
         // so the reconstruction target is the LF-normalized original.
         $originalContent = \str_replace("\r\n", "\n", $originalContent);
 
-        $trailingNewline = true;
+        $originalHasTrailingNewline = true;
 
         if (\str_ends_with($originalContent, "\n")) {
             $originalContent = \substr($originalContent, 0, -1);
         } else {
-            $trailingNewline = false;
+            $originalHasTrailingNewline = false;
         }
 
         $original = $originalContent === '' ? [] : \explode("\n", $originalContent);
         $new = [];
         $position = 0;
+
+        // The "\ No newline at end of file" sentinel describes the side whose
+        // last line it follows, so old-side and new-side EOF state are tracked
+        // independently: after a removed line it only records the ORIGINAL
+        // EOF and must not strip the newline from a newly added last line.
+        $oldEofMissingNewline = false;
+        $newEofMissingNewline = false;
         $sawHunk = false;
 
         $lines = \explode("\n", \str_replace("\r\n", "\n", $unifiedDiff));
@@ -78,7 +85,18 @@ final class UnifiedDiffNewFileReconstructor
                 $body = $lines[$index];
 
                 if ($body === '\\ No newline at end of file') {
-                    $trailingNewline = \str_starts_with($lines[$index - 1] ?? '', ' ');
+                    $previousTag = ($lines[$index - 1] ?? '')[0] ?? '';
+
+                    if ($previousTag === '+') {
+                        $newEofMissingNewline = true;
+                    } elseif ($previousTag === ' ' || $previousTag === '') {
+                        // A context line is shared, so its sentinel applies to both sides.
+                        $oldEofMissingNewline = true;
+                        $newEofMissingNewline = true;
+                    } else {
+                        // After a removed line the sentinel describes only the old side.
+                        $oldEofMissingNewline = true;
+                    }
 
                     continue;
                 }
@@ -123,6 +141,12 @@ final class UnifiedDiffNewFileReconstructor
         }
 
         $content = \implode("\n", $new);
+
+        // A sentinel after a removed line means the old no-newline EOF was
+        // consumed, so the reconstructed tail ends with a fresh newline; an
+        // untouched EOF keeps the original's trailing newline.
+        $trailingNewline = ! $newEofMissingNewline
+            && ($oldEofMissingNewline || $originalHasTrailingNewline);
 
         return $trailingNewline ? $content . "\n" : $content;
     }
