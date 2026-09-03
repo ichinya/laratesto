@@ -7,6 +7,7 @@ namespace Laratesto\Rector\Tests\Console;
 use Laratesto\Rector\Console\MigrationPathGuard;
 use Laratesto\Rector\Console\RectorJsonResultParser;
 use Testo\Assert;
+use Testo\Core\Exception\SkipTest;
 use Testo\Test;
 
 /**
@@ -123,6 +124,217 @@ final class MigrationPathGuardTest
         }
     }
 
+    #[Test]
+    public function anEmptyReportPathIsRejected(): void
+    {
+        $this->assertReportRejected('', 'must not be empty');
+    }
+
+    #[Test]
+    public function aReportWithADotBasenameIsRejected(): void
+    {
+        $this->assertReportRejected('tests/.', 'must name a file, not a directory level');
+    }
+
+    #[Test]
+    public function aReportWithADotDotBasenameIsRejected(): void
+    {
+        $this->assertReportRejected('tests/..', 'must name a file, not a directory level');
+        $this->assertReportRejected('..', 'must name a file, not a directory level');
+    }
+
+    #[Test]
+    public function aReportThatIsADirectoryIsRejected(): void
+    {
+        $this->assertReportRejected('tests', 'is a directory');
+    }
+
+    #[Test]
+    public function anExistingRegularReportFileMayBeReplaced(): void
+    {
+        \file_put_contents($this->root . '/residuals.json', 'stale');
+
+        $report = $this->guard->resolveReportPath($this->root, 'residuals.json', [$this->real('tests')]);
+
+        Assert::same($this->real('') . '/residuals.json', $report);
+    }
+
+    #[Test]
+    public function aSpecialFileReportTargetIsRejected(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            // The NUL device answers in every directory and is never a regular file.
+            $this->assertReportRejected('NUL', 'is not a regular file');
+
+            return;
+        }
+
+        if (! $this->makeFifo($this->root . '/fifo-report.json')) {
+            throw new SkipTest('No FIFO support on this platform.');
+        }
+
+        $this->assertReportRejected('fifo-report.json', 'is not a regular file');
+    }
+
+    #[Test]
+    public function aSymlinkToARegularFileInsideTheRootIsRejected(): void
+    {
+        \file_put_contents($this->root . '/report-source.txt', 'x');
+
+        if (! $this->createLink($this->real('') . '/report-source.txt', $this->root . '/link-report.json')) {
+            throw new SkipTest('Symlinks are not supported on this platform.');
+        }
+
+        $this->assertReportRejected('link-report.json', 'is a symlink or reparse point');
+    }
+
+    #[Test]
+    public function aSymlinkPointingOutsideTheRootIsRejected(): void
+    {
+        $outside = \dirname($this->real('')) . '/laratesto-guard-outside-' . \getmypid() . '.txt';
+        \file_put_contents($outside, 'x');
+
+        try {
+            if (! $this->createLink($outside, $this->root . '/outside-link.json')) {
+                throw new SkipTest('Symlinks are not supported on this platform.');
+            }
+
+            $this->assertReportRejected('outside-link.json', 'is a symlink or reparse point');
+        } finally {
+            @\unlink($outside);
+        }
+    }
+
+    #[Test]
+    public function aSymlinkIntoProcessedPathsIsRejected(): void
+    {
+        \file_put_contents($this->root . '/tests/victim.php', '<?php');
+
+        if (! $this->createLink($this->real('tests/victim.php'), $this->root . '/processed-link.json')) {
+            throw new SkipTest('Symlinks are not supported on this platform.');
+        }
+
+        $this->assertReportRejected('processed-link.json', 'is a symlink or reparse point');
+    }
+
+    #[Test]
+    public function aSymlinkToADirectoryIsRejected(): void
+    {
+        if (! $this->createLink($this->real('tests'), $this->root . '/dir-link.json')) {
+            throw new SkipTest('Symlinks are not supported on this platform.');
+        }
+
+        $this->assertReportRejected('dir-link.json', 'is a symlink or reparse point');
+    }
+
+    #[Test]
+    public function aDanglingSymlinkIsRejected(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            // Windows cannot create a symlink with a missing target.
+            throw new SkipTest('Windows cannot create dangling symlinks.');
+        }
+
+        if (! $this->createLink($this->root . '/gone.json', $this->root . '/dangling-link.json')) {
+            throw new SkipTest('Symlinks are not supported on this platform.');
+        }
+
+        $this->assertReportRejected('dangling-link.json', 'is a symlink or reparse point');
+    }
+
+    #[Test]
+    public function aDanglingJunctionIsRejected(): void
+    {
+        if (PHP_OS_FAMILY !== 'Windows') {
+            throw new SkipTest('Junctions are a Windows reparse point.');
+        }
+
+        \mkdir($this->root . '/junction-target-dir', 0777, true);
+
+        if (! $this->createJunction($this->root . '/dangling-junction.json', $this->root . '/junction-target-dir')) {
+            @\rmdir($this->root . '/junction-target-dir');
+
+            throw new SkipTest('Junction creation failed.');
+        }
+
+        // Leave the reparse point pointing at a deleted directory. Observed on
+        // PHP 8.4 / Windows 11: the dangling junction answers neither file_exists()
+        // nor is_link() — lstat() is what still sees it.
+        \rmdir($this->root . '/junction-target-dir');
+        \clearstatcache(true);
+        Assert::same(false, \file_exists($this->root . '/dangling-junction.json'));
+        Assert::same(false, \is_link($this->root . '/dangling-junction.json'));
+
+        $this->assertReportRejected('dangling-junction.json', 'is a symlink or reparse point');
+    }
+
+    #[Test]
+    public function aJunctionToARegularFileInsideTheRootIsRejected(): void
+    {
+        if (PHP_OS_FAMILY !== 'Windows') {
+            throw new SkipTest('Junctions are a Windows reparse point.');
+        }
+
+        \file_put_contents($this->root . '/report-source.txt', 'x');
+
+        if (! $this->createJunction($this->root . '/junction-report.json', $this->real('') . '/report-source.txt')) {
+            throw new SkipTest('Junction creation failed.');
+        }
+
+        $this->assertReportRejected('junction-report.json', 'is a symlink or reparse point');
+    }
+
+    #[Test]
+    public function aJunctionPointingOutsideTheRootIsRejected(): void
+    {
+        if (PHP_OS_FAMILY !== 'Windows') {
+            throw new SkipTest('Junctions are a Windows reparse point.');
+        }
+
+        $outside = \dirname($this->real('')) . '/laratesto-guard-outside-' . \getmypid() . '.txt';
+        \file_put_contents($outside, 'x');
+
+        try {
+            if (! $this->createJunction($this->root . '/outside-junction.json', $outside)) {
+                throw new SkipTest('Junction creation failed.');
+            }
+
+            $this->assertReportRejected('outside-junction.json', 'is a symlink or reparse point');
+        } finally {
+            @\unlink($outside);
+        }
+    }
+
+    #[Test]
+    public function aJunctionIntoProcessedPathsIsRejected(): void
+    {
+        if (PHP_OS_FAMILY !== 'Windows') {
+            throw new SkipTest('Junctions are a Windows reparse point.');
+        }
+
+        \file_put_contents($this->root . '/tests/victim.php', '<?php');
+
+        if (! $this->createJunction($this->root . '/processed-junction.json', $this->real('tests/victim.php'))) {
+            throw new SkipTest('Junction creation failed.');
+        }
+
+        $this->assertReportRejected('processed-junction.json', 'is a symlink or reparse point');
+    }
+
+    #[Test]
+    public function aJunctionToADirectoryIsRejected(): void
+    {
+        if (PHP_OS_FAMILY !== 'Windows') {
+            throw new SkipTest('Junctions are a Windows reparse point.');
+        }
+
+        if (! $this->createJunction($this->root . '/dir-junction.json', $this->real('tests'))) {
+            throw new SkipTest('Junction creation failed.');
+        }
+
+        $this->assertReportRejected('dir-junction.json', 'is a symlink or reparse point');
+    }
+
     private function assertRejected(array $paths, string $expectedMessage): void
     {
         try {
@@ -148,5 +360,52 @@ final class MigrationPathGuardTest
         \assert(\is_string($real) && $real !== '');
 
         return $real;
+    }
+
+    private function assertReportRejected(string $report, string $expectedMessage): void
+    {
+        try {
+            $this->guard->resolveReportPath($this->root, $report, [$this->real('tests')]);
+
+            Assert::fail('Expected the guard to reject the report path: ' . $report);
+        } catch (\InvalidArgumentException $rejection) {
+            Assert::string($rejection->getMessage())->contains($expectedMessage);
+        }
+    }
+
+    /**
+     * @return bool False when the platform forbids symlink creation (e.g. an
+     *         unprivileged Windows), so the test can skip.
+     */
+    private function createLink(string $target, string $link): bool
+    {
+        \clearstatcache(true);
+
+        return @\symlink($target, $link) && \is_link($link);
+    }
+
+    /**
+     * A Windows junction — a mount-point reparse point is_link() never reports.
+     */
+    private function createJunction(string $link, string $target): bool
+    {
+        \shell_exec(\sprintf('cmd /c mklink /J %s %s', \escapeshellarg($link), \escapeshellarg($target)));
+
+        \clearstatcache(true);
+
+        return \file_exists($link);
+    }
+
+    private function makeFifo(string $path): bool
+    {
+        if (\function_exists('posix_mkfifo')) {
+            @\posix_mkfifo($path, 0644);
+        } else {
+            \shell_exec(\sprintf('mkfifo %s', \escapeshellarg($path)));
+        }
+
+        \clearstatcache(true);
+
+        return \file_exists($path) && ! \is_file($path);
     }
 }

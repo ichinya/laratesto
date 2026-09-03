@@ -83,6 +83,17 @@ class MigrationPathGuard
      * Resolves the report file path and proves it cannot escape the project root and
      * cannot live inside the processed paths (the report must never migrate itself).
      *
+     * An existing target must survive the atomic rename, so it is inspected up front:
+     * a dot/dot-dot basename, a directory or a special file is rejected here instead of
+     * failing the write later, and EVERY symlink/reparse point — dangling or not —
+     * is rejected outright: fail-closed, the report write must never go through or
+     * replace a link, however safe its effective target looks. is_link() misses
+     * Windows junctions, so a realpath that diverges from the given path counts as
+     * a link too, and a DANGLING junction answers neither file_exists() nor
+     * is_link() — lstat() still sees the reparse point, so it joins the existence
+     * oracle. The given final component is returned, so replacement stays atomic
+     * at the requested path.
+     *
      * @param list<non-empty-string> $processedPaths Normalized processed paths.
      * @return non-empty-string Absolute report file path.
      * @throws \InvalidArgumentException With a user-facing message on any rejection.
@@ -91,9 +102,24 @@ class MigrationPathGuard
     {
         $normalizedRoot = $this->normalize($this->mustRealPath($root, 'the project root'));
 
+        if (\trim($report) === '') {
+            throw new \InvalidArgumentException('The report path must not be empty.');
+        }
+
         $absolute = $this->isAbsolute($report)
             ? $report
             : $root . '/' . $this->toForwardSlashes(ltrim($this->toForwardSlashes($report), '/'));
+
+        $basename = \basename($absolute);
+
+        // basename() of `foo/.`, `foo/..` or a bare level is that level itself: the
+        // report must name a file, so rejecting here beats a rename failure later.
+        if ($basename === '.' || $basename === '..') {
+            throw new \InvalidArgumentException(\sprintf(
+                'The report path "%s" must name a file, not a directory level.',
+                $this->display($root, $report),
+            ));
+        }
 
         // Resolve as much of the (possibly not yet existing) report path as possible.
         $directory = \str_replace('\\', '/', \dirname(\str_replace('\\', '/', $absolute)));
@@ -106,7 +132,7 @@ class MigrationPathGuard
             ));
         }
 
-        $reportFile = $resolvedDirectory . '/' . \basename($absolute);
+        $reportFile = $resolvedDirectory . '/' . $basename;
         $normalized = $this->normalize($reportFile);
 
         if (! \str_starts_with($normalized, $normalizedRoot . '/')) {
@@ -116,8 +142,47 @@ class MigrationPathGuard
             ));
         }
 
+        // An existing final component is inspected before the report writer replaces
+        // it: directories and special files can never be atomically replaced, and
+        // any link is rejected outright — fail-closed. is_link() misses Windows
+        // junctions (reparse points), so a realpath that diverges from the given
+        // path counts as a link too, and a dangling junction answers neither
+        // file_exists() nor is_link(): lstat() is what still sees the reparse point.
+        if (\file_exists($reportFile) || \is_link($reportFile) || @\lstat($reportFile) !== false) {
+            $target = \realpath($reportFile);
+
+            if (
+                \is_link($reportFile)
+                || (\is_string($target) && $this->normalize($target) !== $normalized)
+                || $target === false
+            ) {
+                // $target === false here means an unresolvable link: the dangling
+                // junction that only lstat() noticed.
+                throw new \InvalidArgumentException(\sprintf(
+                    'The report path "%s" is a symlink or reparse point; the report must be a plain file path.',
+                    $this->display($root, $reportFile),
+                ));
+            }
+
+            if (\is_dir($reportFile)) {
+                throw new \InvalidArgumentException(\sprintf(
+                    'The report path "%s" is a directory.',
+                    $this->display($root, $reportFile),
+                ));
+            }
+
+            if (! \is_file($reportFile)) {
+                throw new \InvalidArgumentException(\sprintf(
+                    'The report path "%s" is not a regular file.',
+                    $this->display($root, $reportFile),
+                ));
+            }
+        }
+
         foreach ($processedPaths as $processed) {
-            if ($normalized === $this->normalize($processed) || \str_starts_with($normalized, $this->normalize($processed) . '/')) {
+            $processedNormalized = $this->normalize($processed);
+
+            if ($normalized === $processedNormalized || \str_starts_with($normalized, $processedNormalized . '/')) {
                 throw new \InvalidArgumentException(
                     'The report path must not live inside the processed paths.',
                 );
