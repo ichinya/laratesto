@@ -22,6 +22,7 @@ final class ResidualsReport
      *        root, using forward slashes.
      * @param list<Residual> $residuals
      * @return non-empty-string The report body to persist.
+     * @throws \JsonException When the payload cannot be encoded — e.g. invalid UTF-8.
      */
     public function render(string $mode, array $paths, array $residuals): string
     {
@@ -34,7 +35,7 @@ final class ResidualsReport
             'residuals' => \array_map(static fn(Residual $r): array => $r->toArray(), $sorted),
         ];
 
-        return \json_encode($payload, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE)
+        return \json_encode($payload, \JSON_THROW_ON_ERROR | \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE)
             . "\n";
     }
 
@@ -66,10 +67,16 @@ final class ResidualsReport
      * @param list<non-empty-string> $paths
      * @param list<Residual> $residuals
      * @return non-empty-string The rendered body (also persisted).
+     * @throws \RuntimeException When the payload cannot be encoded as JSON, or the
+     *         file cannot be replaced — the existing report, if any, stays intact.
      */
     public function write(string $file, string $mode, array $paths, array $residuals): string
     {
-        $body = $this->render($mode, $paths, $residuals);
+        try {
+            $body = $this->render($mode, $paths, $residuals);
+        } catch (\JsonException $encoding) {
+            throw new \RuntimeException('Unable to encode the residuals report as JSON: ' . $encoding->getMessage(), previous: $encoding);
+        }
 
         $temp = $file . '.tmp-' . \getmypid();
 
