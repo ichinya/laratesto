@@ -17,6 +17,14 @@ final class DatabaseTransactionScope
 
     private bool $closed = false;
 
+    private bool $installed = false;
+
+    /** Whether the container already bound db.transactions before begin() took it over. */
+    private bool $hadPriorBinding = false;
+
+    /** The stored shared instance captured before begin() replaced it, handed back verbatim at close(). */
+    private ?object $priorInstance = null;
+
     /**
      * @param list<non-empty-string> $connections
      */
@@ -29,8 +37,11 @@ final class DatabaseTransactionScope
     public function begin(): void
     {
         $database = $this->application['db'];
+        $this->snapshotPriorManager();
+
         $manager = new DatabaseTransactionsManager($this->connections);
         $this->application->instance('db.transactions', $manager);
+        $this->installed = true;
 
         try {
             foreach ($this->connections as $name) {
@@ -101,8 +112,7 @@ final class DatabaseTransactionScope
             }
         }
 
-        $this->application->forgetInstance('db.transactions');
-        $this->application->offsetUnset('db.transactions');
+        $this->restorePriorManager();
 
         if ($firstFailure instanceof \Throwable) {
             throw $firstFailure;
@@ -116,5 +126,58 @@ final class DatabaseTransactionScope
         } catch (\Throwable) {
             // The original test/pipeline/begin failure remains authoritative.
         }
+    }
+
+    /**
+     * Record, without mutating anything, the db.transactions state the
+     * container holds before this scope replaces it, so close() restores
+     * exactly that instead of destroying a binding owned by an outer scope
+     * or the application itself.
+     */
+    private function snapshotPriorManager(): void
+    {
+        $this->hadPriorBinding = $this->application->bound('db.transactions');
+
+        if (! $this->hadPriorBinding) {
+            return;
+        }
+
+        // Only a stored shared instance — a direct instance() or an already
+        // resolved singleton — has a value worth handing back; make() is a
+        // pure read for it. A shared-but-unresolved singleton stays lazy and
+        // a non-shared factory keeps producing, even when it happens to
+        // return a stable object: re-instancing either would change their
+        // resolution semantics.
+        if ($this->application->isShared('db.transactions') && $this->application->resolved('db.transactions')) {
+            $this->priorInstance = $this->application->make('db.transactions');
+        }
+    }
+
+    private function restorePriorManager(): void
+    {
+        // close() without a begin() owns no container state: never unbind
+        // a manager this scope did not install.
+        if (! $this->installed) {
+            return;
+        }
+
+        $this->application->forgetInstance('db.transactions');
+
+        if (! $this->hadPriorBinding) {
+            // The scope installed the manager into an unbound container:
+            // remove every trace of it, as no earlier state exists.
+            $this->application->offsetUnset('db.transactions');
+
+            return;
+        }
+
+        if ($this->priorInstance !== null) {
+            // A nested scope hands the outer scope's manager back; an
+            // application-owned instance likewise survives the scope.
+            $this->application->instance('db.transactions', $this->priorInstance);
+        }
+
+        // Otherwise only the scope-owned instance is forgotten: the original
+        // binding stays intact and keeps its exact resolution semantics.
     }
 }

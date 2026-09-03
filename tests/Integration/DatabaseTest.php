@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Laratesto\Tests\Integration;
 
 use App\Database\ThingsSeeder;
+use Illuminate\Foundation\Testing\DatabaseTransactionsManager;
 use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -107,7 +108,10 @@ final class DatabaseTest
 
     public function testTransactionScopeCleansAConnectionWhenALaterBeginFails(): void
     {
-        $scope = new DatabaseTransactionScope($this->app(), ['sqlite', 'missing']);
+        $application = $this->app();
+        $frameworkManager = $application->make('db.transactions');
+
+        $scope = new DatabaseTransactionScope($application, ['sqlite', 'missing']);
         $failed = false;
 
         try {
@@ -118,7 +122,113 @@ final class DatabaseTest
 
         Assert::true($failed, 'The deliberately missing second connection must fail.');
         Assert::same($this->make('db')->connection('sqlite')->transactionLevel(), 0);
-        Assert::false($this->app()->bound('db.transactions'));
+
+        // The scope only borrowed the container slot: the framework's own
+        // singleton binding survives even a failed begin.
+        Assert::true($application->bound('db.transactions'));
+        Assert::same($application->make('db.transactions'), $frameworkManager);
+    }
+
+    public function testTransactionScopeRestoresAPreExistingManagerInstance(): void
+    {
+        $application = $this->app();
+        $owned = new DatabaseTransactionsManager(['sqlite']);
+        $application->instance('db.transactions', $owned);
+
+        $scope = new DatabaseTransactionScope($application, ['sqlite']);
+        $scope->begin();
+
+        // The scope swaps in its own manager for the test run only.
+        Assert::notSame($application->make('db.transactions'), $owned);
+
+        $scope->close();
+
+        Assert::true($application->bound('db.transactions'));
+        Assert::same($application->make('db.transactions'), $owned);
+        Assert::same($this->make('db')->connection('sqlite')->transactionLevel(), 0);
+    }
+
+    public function testTransactionScopeKeepsAPreExistingLazyBindingResolvable(): void
+    {
+        $application = $this->app();
+        $application->bind('db.transactions', fn () => new DatabaseTransactionsManager(['sqlite']));
+
+        $scope = new DatabaseTransactionScope($application, ['sqlite']);
+        $scope->begin();
+        $scope->close();
+
+        // The factory binding itself must survive the scope, not just an instance.
+        Assert::true($application->bound('db.transactions'));
+        Assert::instanceOf($application->make('db.transactions'), DatabaseTransactionsManager::class);
+        Assert::same($this->make('db')->connection('sqlite')->transactionLevel(), 0);
+    }
+
+    public function testTransactionScopeKeepsAStableNonSharedFactoryUnfrozen(): void
+    {
+        $application = $this->app();
+        $stable = new DatabaseTransactionsManager(['sqlite']);
+        $resolutions = 0;
+        $application->bind('db.transactions', function () use ($stable, &$resolutions) {
+            $resolutions++;
+
+            return $stable;
+        });
+
+        $scope = new DatabaseTransactionScope($application, ['sqlite']);
+        $scope->begin();
+        $scope->close();
+
+        // The factory deliberately returns one stable object, yet the
+        // binding must never be frozen into a stored instance.
+        Assert::true($application->bound('db.transactions'));
+        Assert::same($application->make('db.transactions'), $stable);
+        Assert::same($resolutions, 1);
+
+        // The next resolution still goes through the factory, not a copy.
+        Assert::same($application->make('db.transactions'), $stable);
+        Assert::same($resolutions, 2);
+        Assert::same($this->make('db')->connection('sqlite')->transactionLevel(), 0);
+    }
+
+    public function testNestedScopesRestoreTheOuterTransactionManager(): void
+    {
+        $application = $this->app();
+
+        $frameworkManager = $application->make('db.transactions');
+
+        $outer = new DatabaseTransactionScope($application, ['sqlite']);
+        $outer->begin();
+        $outerManager = $application->make('db.transactions');
+
+        $inner = new DatabaseTransactionScope($application, ['sqlite']);
+        $inner->begin();
+        Assert::notSame($application->make('db.transactions'), $outerManager);
+
+        $inner->close();
+
+        // The inner scope hands ownership back instead of unbinding the container.
+        Assert::true($application->bound('db.transactions'));
+        Assert::same($application->make('db.transactions'), $outerManager);
+
+        $outer->close();
+
+        // Once the outer scope unwinds, the framework's own singleton is back.
+        Assert::true($application->bound('db.transactions'));
+        Assert::same($application->make('db.transactions'), $frameworkManager);
+        Assert::same($this->make('db')->connection('sqlite')->transactionLevel(), 0);
+    }
+
+    public function testCloseWithoutBeginLeavesTheContainerUntouched(): void
+    {
+        $application = $this->app();
+        $owned = new DatabaseTransactionsManager(['sqlite']);
+        $application->instance('db.transactions', $owned);
+
+        (new DatabaseTransactionScope($application, ['sqlite']))->close();
+
+        // Cleanup may never unbind a manager this scope did not install.
+        Assert::true($application->bound('db.transactions'));
+        Assert::same($application->make('db.transactions'), $owned);
     }
 
     public function testMigratedSchemaDetectionAppliesTheConnectionPrefixOnce(): void

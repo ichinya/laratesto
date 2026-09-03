@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Laratesto\Tests\Integration;
 
+use Illuminate\Foundation\Testing\DatabaseTransactionsManager;
 use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Laratesto\Attribute\DatabaseTransactions;
 use Laratesto\Attribute\RefreshDatabase;
+use Laratesto\Pipeline\Internal\DatabaseTransactionScope;
 use Laratesto\Testing\InteractsWithLaravel;
 use Testo\Assert;
 
@@ -103,5 +105,32 @@ final class DatabaseTransactionCleanupTest
         // The cached in-memory PDO must not be overwritten by a null PDO.
         Assert::true($connection->getSchemaBuilder()->hasTable('things'));
         Assert::same($connection->table('things')->count(), 0);
+    }
+
+    public function testUnresolvedSingletonStaysLazyAcrossAScope(): void
+    {
+        $application = $this->app();
+        $resolutions = 0;
+        $application->singleton('db.transactions', function () use (&$resolutions) {
+            $resolutions++;
+
+            return new DatabaseTransactionsManager(['sqlite']);
+        });
+
+        $scope = new DatabaseTransactionScope($application, ['sqlite']);
+        $scope->begin();
+
+        // Snapshot must classify by container state, never by resolving.
+        Assert::same($resolutions, 0);
+
+        $scope->close();
+
+        // The singleton binding survives unresolved: nothing froze or probed it.
+        Assert::true($application->bound('db.transactions'));
+        Assert::same($resolutions, 0);
+
+        // The first resolution happens only now, through the intact binding.
+        Assert::instanceOf($application->make('db.transactions'), DatabaseTransactionsManager::class);
+        Assert::same($resolutions, 1);
     }
 }
