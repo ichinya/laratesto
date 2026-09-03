@@ -8,8 +8,10 @@ use Laratesto\Rector\Console\ProcessOutcome;
 use Laratesto\Rector\Console\ProcessRunner;
 
 /**
- * Canned {@see ProcessRunner} for the migrate-rector guard tests: Git probes and the
- * Rector process are answered from configured outcomes, every invocation recorded.
+ * Canned {@see ProcessRunner} for the migrate-rector guard tests: every invocation
+ * is recorded, and Git probes/status runs are classified semantically by their
+ * subcommand token (`rev-parse` / `status`), never by a positional argv index —
+ * the remaining invocations are the Rector `process` runs.
  */
 final class FakeProcessRunner implements ProcessRunner
 {
@@ -26,8 +28,12 @@ final class FakeProcessRunner implements ProcessRunner
     {
         $this->invocations[] = ['command' => $command, 'cwd' => $workingDirectory];
 
-        if (($command[0] ?? '') === 'git') {
-            return \str_contains($command[3] ?? '', 'rev-parse') ? $this->gitProbe : $this->gitStatus;
+        if (\in_array('rev-parse', $command, true)) {
+            return $this->gitProbe;
+        }
+
+        if (\in_array('status', $command, true)) {
+            return $this->gitStatus;
         }
 
         return $this->rectorOutcome ?? new ProcessOutcome(0, '', '');
@@ -35,9 +41,24 @@ final class FakeProcessRunner implements ProcessRunner
 
     public function rectorInvocations(): int
     {
+        return $this->classified('process');
+    }
+
+    public function gitProbeInvocations(): int
+    {
+        return $this->classified('rev-parse');
+    }
+
+    public function gitStatusInvocations(): int
+    {
+        return $this->classified('status');
+    }
+
+    private function classified(string $subcommand): int
+    {
         return \count(\array_filter(
             $this->invocations,
-            static fn(array $invocation): bool => ($invocation['command'][2] ?? '') === 'process',
+            static fn(array $invocation): bool => \in_array($subcommand, $invocation['command'], true),
         ));
     }
 }

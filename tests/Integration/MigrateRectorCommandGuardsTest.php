@@ -103,6 +103,30 @@ final class MigrateRectorCommandGuardsTest
         Assert::same(0, $runner->rectorInvocations());
     }
 
+    /**
+     * The user-facing command boundary: when the Rector process cannot start at all
+     * (the {@see \Laratesto\Rector\Console\SymfonyProcessRunner} start-failure shape),
+     * the command surfaces the reason, exits 1 and writes no report.
+     */
+    #[Test]
+    public function aRectorStartFailureFailsFriendlyAtTheCommandBoundary(): void
+    {
+        [$runner, $dir, $report] = $this->probe(
+            rector: new ProcessOutcome(1, '', 'Failed to start php: the pinned rector binary is not executable'),
+        );
+
+        $result = $this->artisan('laratesto:migrate-rector', [
+            '--path' => [$dir],
+            '--report' => $report,
+        ]);
+
+        Assert::same(1, $result->exitCode());
+        Assert::string($result->output())->contains('Failed to start php');
+        Assert::string($result->output())->contains('Rector failed with exit code 1');
+        Assert::false(\is_file($report), 'No report is written when Rector cannot start.');
+        Assert::same(1, $runner->rectorInvocations(), 'The start failure must have reached the runner exactly once.');
+    }
+
     #[Test]
     public function untrackedProcessedPathsAllowApply(): void
     {
@@ -118,6 +142,10 @@ final class MigrateRectorCommandGuardsTest
         ]);
 
         Assert::same(0, $result->exitCode(), 'Untracked files are fresh input, not a rollback hazard.');
+        // Focused guard-pass proof: the initial check AND the pre-Rector recheck each
+        // probe the work tree and consult status once, then exactly one Rector run.
+        Assert::same(2, $runner->gitProbeInvocations(), 'Apply must check the work tree twice (initial guard + pre-Rector recheck).');
+        Assert::same(2, $runner->gitStatusInvocations(), 'Apply must consult status twice (initial guard + pre-Rector recheck).');
         Assert::same(1, $runner->rectorInvocations());
     }
 
@@ -136,6 +164,8 @@ final class MigrateRectorCommandGuardsTest
 
         Assert::same(1, $result->exitCode());
         Assert::string($result->output())->contains('Refusing --apply');
+        Assert::same(1, $runner->gitProbeInvocations(), 'The first guard pass must probe the work tree once.');
+        Assert::same(1, $runner->gitStatusInvocations(), 'The first guard pass must consult status once.');
         Assert::same(0, $runner->rectorInvocations(), 'A blocked run must never start Rector.');
     }
 
@@ -152,6 +182,9 @@ final class MigrateRectorCommandGuardsTest
         ]);
 
         Assert::same(0, $result->exitCode(), 'A dry-run with no residuals exits 0 even when Rector found changes.');
+        Assert::same(0, $runner->gitProbeInvocations(), 'A dry-run never consults the Git guard.');
+        Assert::same(0, $runner->gitStatusInvocations(), 'A dry-run never consults the Git guard.');
+        Assert::same(1, $runner->rectorInvocations());
     }
 
     #[Test]

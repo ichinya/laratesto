@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Laratesto\Rector\Tests\Support;
 
 use Laratesto\Rector\Set\LaratestoRectorSetList;
+use Symfony\Component\Process\Process;
 use Testo\Assert;
 
 /**
@@ -54,29 +55,34 @@ return RectorConfig::configure()
     ->withSets([{$sets}]);
 PHP,
             );
-
-            $runOnce = static function () use ($rectorBin, $tmpDir): void {
-                $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-                $process = \proc_open(
+            // Bounded Symfony Process invocation: both pipes are drained
+            // concurrently, so a huge stderr trace cannot deadlock the harness,
+            // and a hung binary dies on the timeout instead of stalling the suite.
+            $runOnce = static function () use ($rectorBin, $tmpDir, $rootDir): void {
+                $process = new Process(
                     [PHP_BINARY, $rectorBin, 'process', '--config', $tmpDir . '/rector.php', '--no-progress-bar', '--no-ansi'],
-                    $descriptors,
-                    $pipes,
+                    $rootDir,
+                    timeout: 300.0,
                 );
-                Assert::true(\is_resource($process), 'proc_open failed');
-                $stdout = (string) \stream_get_contents($pipes[1]);
-                \fclose($pipes[1]);
-                $stderr = (string) \stream_get_contents($pipes[2]);
-                \fclose($pipes[2]);
-                $exitCode = \proc_close($process);
+                $process->run();
 
-                Assert::same(0, $exitCode, "rector failed.\nSTDOUT:\n{$stdout}\nSTDERR:\n{$stderr}");
+                Assert::same(0, $process->getExitCode(), \sprintf(
+                    "rector failed (exit %d).\nSTDOUT:\n%s\nSTDERR:\n%s",
+                    (int) $process->getExitCode(),
+                    $process->getOutput(),
+                    $process->getErrorOutput(),
+                ));
             };
 
-            // Run 1: allowed to modify. Run 2: strictly forbidden to touch anything.
+            // Run 1: allowed to modify — and must actually change at least one
+            // input file, or the fixture corpus is stale and the idempotency
+            // proof below would pass vacuously. Run 2: strictly forbidden to
+            // touch anything.
             $runOnce();
 
             $snapshot = self::corpus($corpusDir);
             Assert::true($snapshot !== [], 'The corpus disappeared after the first run.');
+            Assert::true($snapshot != $files, 'The first Rector run must change at least one input file.');
 
             $runOnce();
 

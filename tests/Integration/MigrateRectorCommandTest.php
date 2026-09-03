@@ -47,6 +47,33 @@ final class SignupTest extends TestCase
 }
 PHP;
 
+    /**
+     * Lifecycle-only corpus: the `--target-mode` propagation under test is the
+     * base-class wiring, so the corpus isolates it from the database-trait and
+     * HTTP conversion surfaces.
+     */
+    private const TRAIT_CORPUS = <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature;
+
+use Illuminate\Foundation\Testing\TestCase;
+
+final class TraitModeTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+    }
+
+    public function test_trait_mode_works(): void
+    {
+    }
+}
+PHP;
+
     #[Test]
     public function dryRunLeavesSourcesUntouchedAndWritesTheReport(): void
     {
@@ -177,11 +204,14 @@ PHP;
         \exec(\sprintf('git add -f -- %s 2>&1', \escapeshellarg($file)), $out, $added);
 
         try {
-            if ($added !== 0) {
-                // Not inside a usable Git work tree (e.g. an export) — the guard's
-                // other branch covers that; nothing more to assert here.
-                return;
-            }
+            // Staging must work wherever the suite runs: a failure is a harness
+            // bug, so it fails the test with the captured git diagnostics instead
+            // of silently skipping the guard coverage.
+            Assert::same(
+                0,
+                $added,
+                'git add -f failed; unable to stage the corpus. git said: ' . \implode("\n", $out),
+            );
 
             $result = $this->artisan('laratesto:migrate-rector', [
                 '--path' => [$dir],
@@ -325,9 +355,14 @@ PHP;
         \exec(\sprintf('git add -f -- %s 2>&1', \escapeshellarg($file)), $out, $added);
 
         try {
-            if ($added !== 0) {
-                return;
-            }
+            // Staging must work wherever the suite runs: a failure is a harness
+            // bug, so it fails the test with the captured git diagnostics instead
+            // of silently skipping the allow-dirty coverage.
+            Assert::same(
+                0,
+                $added,
+                'git add -f failed; unable to stage the corpus. git said: ' . \implode("\n", $out),
+            );
 
             $result = $this->artisan('laratesto:migrate-rector', [
                 '--path' => [$dir],
@@ -347,6 +382,79 @@ PHP;
 
             self::cleanup($dir, $report);
         }
+    }
+
+    /**
+     * The generated RectorConfig must carry the `--target-mode=trait` override: only
+     * then does Rector drop the framework parent and wire `InteractsWithLaravel` in
+     * as a trait (the default base_class mode rewrites the parent instead, as the
+     * sibling tests prove). Verified end to end over a real Rector run with report
+     * and idempotency semantics.
+     */
+    #[Test]
+    public function traitTargetModeReachesRectorThroughTheGeneratedConfig(): void
+    {
+        [$dir, $file, $report] = $this->traitCorpus();
+
+        $this->registerProvider();
+
+        try {
+            $first = $this->artisan('laratesto:migrate-rector', [
+                '--path' => [$dir],
+                '--report' => $report,
+                '--target-mode' => 'trait',
+                '--apply' => true,
+            ]);
+
+            Assert::same(0, $first->exitCode(), 'A clean corpus must migrate with no residuals. Output: ' . $first->output());
+
+            $applied = (string) \file_get_contents($file);
+
+            // The trait wiring is the observable proof that the generated config
+            // (RectorConfigWriter writes LaravelBaseClassRector::TARGET_MODE => 'trait')
+            // reached Rector: the default mode produces the base-class shape instead.
+            Assert::true(\str_contains($applied, 'use \Laratesto\Testing\InteractsWithLaravel;'), 'The class must use the trait: ' . $applied);
+            Assert::same(1, \substr_count($applied, 'InteractsWithLaravel'), 'The trait must be wired exactly once.');
+            Assert::true(\str_contains($applied, 'function setUpLaravel(): void'), 'The lifecycle hook must be renamed for the trait.');
+            Assert::true(\str_contains($applied, '#[\Testo\Test]'), 'Test methods must be discoverable by Testo.');
+            Assert::false(\str_contains($applied, 'Laratesto\Testing\LaravelTestCase'), 'Trait mode must not rewrite the parent to the base class.');
+            Assert::false(\str_contains($applied, 'extends \Illuminate\Foundation\Testing\TestCase'), 'The framework parent must be dropped.');
+            Assert::false(\str_contains($applied, 'parent::setUp()'), 'The dropped parent takes its call with it.');
+
+            $hash = \md5_file($file);
+
+            $second = $this->artisan('laratesto:migrate-rector', [
+                '--path' => [$dir],
+                '--report' => $report,
+                '--target-mode' => 'trait',
+                '--apply' => true,
+            ]);
+
+            Assert::same(0, $second->exitCode(), 'A second trait-mode apply is a no-op. Output: ' . $second->output());
+            Assert::same($hash, \md5_file($file), 'The second apply must not move a byte.');
+
+            $payload = \json_decode((string) \file_get_contents($report), true);
+            Assert::same($payload['mode'], 'apply');
+            Assert::same($payload['residuals'], []);
+        } finally {
+            self::cleanup($dir, $report);
+        }
+    }
+
+    /**
+     * @return array{non-empty-string, non-empty-string, non-empty-string}
+     */
+    private function traitCorpus(): array
+    {
+        $root = $this->app()->basePath();
+        $dir = $root . '/storage/framework/testing/laratesto-trait-' . \getmypid();
+
+        \mkdir($dir, 0777, true);
+
+        $file = $dir . '/TraitModeTest.php';
+        \file_put_contents($file, self::TRAIT_CORPUS);
+
+        return [$dir, $file, $root . '/storage/framework/testing/laratesto-trait-report.json'];
     }
 
     /**
