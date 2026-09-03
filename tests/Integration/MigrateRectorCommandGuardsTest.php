@@ -281,6 +281,113 @@ final class MigrateRectorCommandGuardsTest
         Assert::false(\is_file($report), 'No report is written for a failed run.');
     }
 
+    #[Test]
+    public function aFailedRunSurfacesTheMachineJsonErrorDiagnostics(): void
+    {
+        [, $dir, $report] = $this->probe(
+            rector: new ProcessOutcome(1, \json_encode([
+                'totals' => ['changed_files' => 0, 'errors' => 1],
+                'errors' => [
+                    ['message' => 'Syntax error, unexpected identifier "strinng" on line 5.', 'file' => 'tests/Feature/BrokenTest.php', 'line' => 5],
+                ],
+            ]), ''),
+        );
+
+        $result = $this->artisan('laratesto:migrate-rector', [
+            '--path' => [$dir],
+            '--report' => $report,
+        ]);
+
+        Assert::same(1, $result->exitCode());
+        // The pinned Rector prints its JSON diagnostics (incl. the per-file
+        // errors[]) to stdout BEFORE resolving the exit code — the failure
+        // path must echo them instead of pointing at an empty "output above".
+        Assert::string($result->output())->contains('Syntax error, unexpected identifier "strinng" on line 5.');
+        Assert::string($result->output())->contains('tests/Feature/BrokenTest.php:5');
+        Assert::string($result->output())->contains('Rector failed with exit code 1');
+        Assert::string($result->output())->notContains('git restore', 'A dry-run never rewrites files, so no rollback hint may appear.');
+        Assert::false(\is_file($report), 'No report is written for a failed run.');
+    }
+
+    #[Test]
+    public function rectorProcessingErrorsSurfaceTheirPerFileDiagnostics(): void
+    {
+        [, $dir, $report] = $this->probe(
+            rector: new ProcessOutcome(0, \json_encode([
+                'totals' => ['changed_files' => 0, 'errors' => 1],
+                'errors' => [
+                    ['message' => 'Could not process the file: unterminated string literal.', 'file' => 'tests/Unit/HalfBrokenTest.php', 'line' => 12],
+                ],
+            ]), ''),
+        );
+
+        $result = $this->artisan('laratesto:migrate-rector', [
+            '--path' => [$dir],
+            '--report' => $report,
+        ]);
+
+        Assert::same(1, $result->exitCode());
+        // The errors>0 abort claims "see the output above" — the errors[] block
+        // must BE that output, not a dangling promise.
+        Assert::string($result->output())->contains('Could not process the file: unterminated string literal.');
+        Assert::string($result->output())->contains('tests/Unit/HalfBrokenTest.php:12');
+        Assert::string($result->output())->contains('reported processing errors');
+        Assert::false(\is_file($report), 'No report is written for a failed run.');
+    }
+
+    #[Test]
+    public function aFailedApplyHintsAtTheScopedRollback(): void
+    {
+        [, $dir, $report] = $this->probe(
+            rector: new ProcessOutcome(1, \json_encode([
+                'totals' => ['changed_files' => 2, 'errors' => 1],
+                'errors' => [
+                    ['message' => 'The process crashed after rewriting files in place.', 'file' => 'tests/Feature/BrokenTest.php', 'line' => 5],
+                ],
+            ]), ''),
+        );
+
+        $result = $this->artisan('laratesto:migrate-rector', [
+            '--path' => [$dir],
+            '--report' => $report,
+            '--apply' => true,
+        ]);
+
+        Assert::same(1, $result->exitCode());
+        // A failed --apply can leave a partially rewritten tree — the failure
+        // path must name the documented scoped rollback for the processed paths.
+        Assert::string($result->output())->contains('git restore --source=HEAD -- storage/framework/testing/laratesto-guards-');
+        Assert::string($result->output())->contains('Rector failed with exit code 1');
+    }
+
+    #[Test]
+    public function anUnapplicableDiffFailsFriendlyInsteadOfEscaping(): void
+    {
+        [, $dir, $report] = $this->probe();
+
+        // The rector outcome depends on the throwaway corpus path, so it is bound
+        // after probe() created it: a machine diff the reconstructor cannot apply
+        // (no hunks) used to let its RuntimeException escape handle() uncaught.
+        $this->app()->bind(ProcessRunner::class, static fn(): ProcessRunner => new FakeProcessRunner(
+            new ProcessOutcome(2, \json_encode([
+                'totals' => ['changed_files' => 1, 'errors' => 0],
+                'file_diffs' => [
+                    ['file' => $dir . '/GuardProbeTest.php', 'diff' => 'not a unified diff'],
+                ],
+            ]), ''),
+        ));
+
+        $result = $this->artisan('laratesto:migrate-rector', [
+            '--path' => [$dir],
+            '--report' => $report,
+        ]);
+
+        Assert::same(1, $result->exitCode());
+        Assert::string($result->output())->contains('The residuals scan failed');
+        Assert::string($result->output())->contains('The diff contains no hunks to apply.');
+        Assert::false(\is_file($report), 'No report is written for a failed run.');
+    }
+
     /**
      * @return array{FakeProcessRunner, non-empty-string, non-empty-string}
      */

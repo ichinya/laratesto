@@ -131,7 +131,9 @@ final class MigrateRectorCommand extends Command
                 $acceptableExitCodes = $apply ? [0] : [0, 2];
 
                 if (! \in_array($outcome->exitCode, $acceptableExitCodes, true)) {
+                    $this->renderRectorDiagnostics($outcome->stdout);
                     $this->error(\sprintf('Rector failed with exit code %d — see the output above. No report was written.', $outcome->exitCode));
+                    $this->warnAboutPartiallyAppliedTree($apply, $root, $paths);
 
                     return self::EXIT_FAILURE;
                 }
@@ -140,17 +142,26 @@ final class MigrateRectorCommand extends Command
                     $parsed = $this->jsonParser->parse($outcome->stdout);
                 } catch (\RuntimeException $failure) {
                     $this->error($failure->getMessage() . ' No report was written.');
+                    $this->warnAboutPartiallyAppliedTree($apply, $root, $paths);
 
                     return self::EXIT_FAILURE;
                 }
 
                 if ($parsed['errors'] > 0) {
+                    $this->renderRectorDiagnostics($outcome->stdout);
                     $this->error('Rector reported processing errors — see the output above. No report was written.');
+                    $this->warnAboutPartiallyAppliedTree($apply, $root, $paths);
 
                     return self::EXIT_FAILURE;
                 }
 
-                $residuals = $this->collectResiduals($apply, $parsed['fileDiffs'], $paths, $root);
+                try {
+                    $residuals = $this->collectResiduals($apply, $parsed['fileDiffs'], $paths, $root);
+                } catch (\RuntimeException $failure) {
+                    $this->error('The residuals scan failed: ' . $failure->getMessage() . ' No report was written.');
+
+                    return self::EXIT_FAILURE;
+                }
             } finally {
                 @\unlink($config);
             }
@@ -233,6 +244,77 @@ final class MigrateRectorCommand extends Command
         }
 
         return $residuals;
+    }
+
+    /**
+     * The pinned Rector prints its machine JSON report — including the per-file
+     * `errors[]` diagnostics — to stdout before resolving the exit code, so a
+     * failed run's only explanation lives in this stdout: render the errors
+     * block readably, falling back to the raw output when the shape is unknown.
+     */
+    private function renderRectorDiagnostics(string $stdout): void
+    {
+        $trimmed = \trim($stdout);
+
+        if ($trimmed === '') {
+            return;
+        }
+
+        $payload = \json_decode($trimmed, true);
+        $errors = \is_array($payload) ? $payload['errors'] ?? null : null;
+
+        if (! \is_array($errors) || $errors === []) {
+            $this->line($trimmed);
+
+            return;
+        }
+
+        foreach ($errors as $error) {
+            $this->line($this->renderRectorError($error));
+        }
+    }
+
+    /**
+     * One `errors[]` entry of the pinned Rector JSON: `message` is guaranteed,
+     * `file` and `line` are best effort.
+     *
+     * @param mixed $error
+     */
+    private function renderRectorError(mixed $error): string
+    {
+        if (! \is_array($error) || ! \is_string($error['message'] ?? null)) {
+            return '  * ' . \json_encode($error);
+        }
+
+        $location = '';
+
+        if (\is_string($error['file'] ?? null)) {
+            $location = $error['file'] . (\is_int($error['line'] ?? null) ? ':' . $error['line'] : '');
+        }
+
+        return $location === ''
+            ? '  * ' . $error['message']
+            : \sprintf('  * %s: %s', $location, $error['message']);
+    }
+
+    /**
+     * An apply run that failed mid-flight may already have rewritten a prefix of
+     * the processed files — Rector writes in place and does not roll its own
+     * partial work back. Point at the documented scoped rollback instead of
+     * leaving the half-migrated tree to be discovered by the next test run.
+     *
+     * @param list<non-empty-string> $paths
+     */
+    private function warnAboutPartiallyAppliedTree(bool $apply, string $root, array $paths): void
+    {
+        if (! $apply) {
+            return;
+        }
+
+        $this->warn(\sprintf(
+            'The failed --apply may have already rewritten some processed files — restore them with `git restore --source=HEAD -- %s`.',
+            \implode(' ', \array_map(fn(string $path): string => $this->relativeToRoot($root, $path), $paths)),
+        ));
     }
 
     /**
