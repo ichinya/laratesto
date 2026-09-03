@@ -64,8 +64,6 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
 
     private const TARGET_BASE = ConfiguredHierarchy::TARGET_BASE;
 
-    private const TARGET_TRAIT = 'Laratesto\Testing\InteractsWithLaravel';
-
     /**
      * Guard against cyclic or pathologically deep extends chains: anything deeper is
      * reported as an unsafe hierarchy instead of being converted.
@@ -334,7 +332,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
                 )];
             }
 
-            if ($this->usesTargetTrait($parentClass)) {
+            if ($this->hierarchy->usesTargetTrait($parentClass)) {
                 return ['descendant', null];
             }
 
@@ -496,23 +494,6 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         }
 
         return [$resolved instanceof Class_ ? $resolved : null, false];
-    }
-
-    private function usesTargetTrait(Class_ $class): bool
-    {
-        foreach ($class->stmts as $stmt) {
-            if (! $stmt instanceof TraitUse) {
-                continue;
-            }
-
-            foreach ($stmt->traits as $trait) {
-                if ($this->isName($trait, self::TARGET_TRAIT)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     private function isWithinProcessedPaths(Class_ $class): bool
@@ -683,19 +664,11 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
 
     private function addTargetTrait(Class_ $class): void
     {
-        foreach ($class->stmts as $stmt) {
-            if (! $stmt instanceof TraitUse) {
-                continue;
-            }
-
-            foreach ($stmt->traits as $trait) {
-                if ($this->isName($trait, self::TARGET_TRAIT)) {
-                    return;
-                }
-            }
+        if ($this->hierarchy->usesTargetTrait($class)) {
+            return;
         }
 
-        array_unshift($class->stmts, new TraitUse([new FullyQualified(self::TARGET_TRAIT)]));
+        array_unshift($class->stmts, new TraitUse([new FullyQualified(ConfiguredHierarchy::TARGET_TRAIT)]));
     }
 
     private function convertLifecycleMethod(ClassMethod $method, string $kind): void

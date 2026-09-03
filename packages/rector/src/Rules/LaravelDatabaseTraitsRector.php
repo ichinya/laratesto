@@ -75,7 +75,7 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
             return $this->removeQueuedImports($node);
         }
 
-        if (! $this->isLaravelTestClass($node) || $this->hasBlockingMarker($node)) {
+        if (! $this->hierarchy->recognizesTestClass($node) || $this->hasBlockingMarker($node)) {
             return null;
         }
 
@@ -160,12 +160,6 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
             }
         }
         $class->attrGroups = array_values($class->attrGroups);
-    }
-
-    private function isLaravelTestClass(Class_ $class): bool
-    {
-        return $class->extends !== null
-            && $this->isNames($class->extends, $this->hierarchy->hierarchyBaseNames());
     }
 
     private function hasBlockingMarker(Class_ $class): bool

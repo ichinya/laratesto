@@ -160,15 +160,9 @@ final class LaravelResidualDetectionRector extends AbstractRector
     #[\Override]
     public function refactor(Node $node): ?Node
     {
-        return $this->isLaravelTestClass($node)
+        return $this->hierarchy->recognizesTestClass($node)
             ? $this->detectUnsupportedInside($node)
             : $this->detectConstructsOutsideHierarchy($node);
-    }
-
-    private function isLaravelTestClass(Class_ $node): bool
-    {
-        return $node->extends !== null
-            && $this->isNames($node->extends, $this->hierarchy->hierarchyBaseNames());
     }
 
     /**

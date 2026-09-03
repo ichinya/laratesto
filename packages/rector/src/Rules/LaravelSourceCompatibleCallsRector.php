@@ -59,7 +59,7 @@ final class LaravelSourceCompatibleCallsRector extends AbstractRector
             return $this->removeQueuedTestResponseImport($node);
         }
 
-        if (! $this->isLaravelTestClass($node)) {
+        if (! $this->hierarchy->recognizesTestClass($node)) {
             return null;
         }
 
@@ -97,7 +97,7 @@ final class LaravelSourceCompatibleCallsRector extends AbstractRector
     private function fileResponsePreflightSafe(): bool
     {
         foreach ($this->topLevelClasses() as $class) {
-            if ($this->isLaravelTestClass($class) && ! $this->analyzer->analyze($class)->safe()) {
+            if ($this->hierarchy->recognizesTestClass($class) && ! $this->analyzer->analyze($class)->safe()) {
                 return false;
             }
         }
@@ -135,12 +135,6 @@ final class LaravelSourceCompatibleCallsRector extends AbstractRector
         unset($this->pendingTestResponseImportRemovals[$filePath]);
 
         return $fileNode->removeImports([HttpCompatibilityAnalyzer::TEST_RESPONSE]) ? $fileNode : null;
-    }
-
-    private function isLaravelTestClass(Class_ $class): bool
-    {
-        return $class->extends !== null
-            && $this->isNames($class->extends, $this->hierarchy->hierarchyBaseNames());
     }
 
     private function hasStructuralBlockingMarker(Class_ $class): bool
