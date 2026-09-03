@@ -659,7 +659,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         // the Laratesto binding, this class only needs the lifecycle/API rewrites.
 
         foreach ($class->getMethods() as $method) {
-            $this->convertLifecycleMethod($method);
+            $this->convertLifecycleMethod($method, $kind);
             $this->markTestMethod($method);
         }
 
@@ -685,7 +685,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         array_unshift($class->stmts, new TraitUse([new FullyQualified(self::TARGET_TRAIT)]));
     }
 
-    private function convertLifecycleMethod(ClassMethod $method): void
+    private function convertLifecycleMethod(ClassMethod $method, string $kind): void
     {
         $name = $this->getName($method->name);
 
@@ -698,6 +698,21 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
 
         if ($method->stmts === null) {
             return;
+        }
+
+        // A project-base parent keeps its place in the hierarchy and gets its hooks
+        // renamed in the same run, so the chain call must follow the rename or the
+        // base lifecycle silently stops executing. Only a direct framework parent is
+        // replaced wholesale, so only that conversion may drop the parent call.
+        if ($kind === 'descendant') {
+            foreach ($method->stmts as $stmt) {
+                if ($stmt instanceof Expression
+                    && $stmt->expr instanceof StaticCall
+                    && $this->isName($stmt->expr->class, 'parent')
+                    && $this->isName($stmt->expr->name, $name)) {
+                    $stmt->expr->name = new Identifier($name . 'Laravel');
+                }
+            }
         }
 
         $method->stmts = array_values(array_filter(

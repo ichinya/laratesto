@@ -15,6 +15,13 @@ abstract class TestCase extends FoundationTestCase
         $this->app->bind('parity.clock', \DateTimeImmutable::class);
     }
 
+    protected function tearDown(): void
+    {
+        \Tests\State::$log[] = 'base.teardown';
+
+        parent::tearDown();
+    }
+
     public function acmeHelper(): string
     {
         return 'acme';
@@ -32,6 +39,13 @@ final class ProjectDescendantTest extends TestCase
         parent::setUp();
 
         $this->app->make('router');
+    }
+
+    protected function tearDown(): void
+    {
+        \Tests\State::$log[] = 'descendant.teardown';
+
+        parent::tearDown();
     }
 
     public function test_descendant_keeps_project_base(): void
@@ -55,6 +69,11 @@ abstract class TestCase extends \Laratesto\Testing\LaravelTestCase
         $this->app()->bind('parity.clock', \DateTimeImmutable::class);
     }
 
+    protected function tearDownLaravel(): void
+    {
+        \Tests\State::$log[] = 'base.teardown';
+    }
+
     public function acmeHelper(): string
     {
         return 'acme';
@@ -69,7 +88,16 @@ final class ProjectDescendantTest extends TestCase
 {
     protected function setUpLaravel(): void
     {
+        parent::setUpLaravel();
+
         $this->make('router');
+    }
+
+    protected function tearDownLaravel(): void
+    {
+        \Tests\State::$log[] = 'descendant.teardown';
+
+        parent::tearDownLaravel();
     }
 
     #[\Testo\Test]

@@ -42,12 +42,16 @@ final class ParityMigrationE2eTest
 
             $this->runRector($rootDir, $tmpDir, [$corpus, $unsupported]);
 
-            // Project base converted exactly once, custom behavior kept.
+            // Project base converted exactly once, custom behavior kept, and the
+            // direct framework parent's lifecycle calls dropped with the parent.
             $base = (string) \file_get_contents($corpus . '/TestCase.php');
             Assert::string($base)->contains('extends \Laratesto\Testing\LaravelTestCase');
             Assert::string($base)->contains('setUpLaravel');
+            Assert::string($base)->contains('tearDownLaravel');
             Assert::string($base)->contains("bind('parity.clock'");
             Assert::string($base)->notContains('extends FoundationTestCase');
+            Assert::string($base)->notContains('parent::setUp()');
+            Assert::string($base)->notContains('parent::tearDown()');
 
             // Descendants keep the project base and gain only the Testo surface.
             $counters = (string) \file_get_contents($corpus . '/LifecycleCountersTest.php');
@@ -56,6 +60,13 @@ final class ParityMigrationE2eTest
             Assert::string($counters)->contains('function setUpLaravel(): void');
             Assert::string($counters)->contains('#[\Testo\Test]');
             Assert::string($counters)->notContains('PHPUnit');
+
+            // The descendant keeps its hierarchy: its parent lifecycle calls follow
+            // the rename so the project base behavior keeps executing exactly once.
+            Assert::string($counters)->contains('parent::setUpLaravel()');
+            Assert::string($counters)->contains('parent::tearDownLaravel()');
+            Assert::string($counters)->notContains('parent::setUp()');
+            Assert::string($counters)->notContains('parent::tearDown()');
 
             // Database strategies became attributes: the plain RefreshDatabase class,
             // the wrapped-transactions class and the literal two-connection truncation.
