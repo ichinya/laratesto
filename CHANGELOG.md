@@ -18,6 +18,12 @@ versions follow [Semantic Versioning](https://semver.org/).
     `CLASS_UNSAFE_HIERARCHY` residual instead of a half-migrated hierarchy;
   - rule configuration is deterministic: re-configuring the shared rule
     instance can no longer leak a previous `base_classes`/`target_mode`;
+  - one configured hierarchy state: a `base_classes` override governs every
+    Laravel rule at once (base class, database traits, HTTP calls, residual
+    detection) through the shared `ConfiguredHierarchy` service, so a base
+    dropped by the override can no longer be partially mutated by a rule that
+    still recognized a hard-coded default, and unknown configuration keys are
+    rejected as documented;
   - multi-property database options split losslessly — sibling properties on
     the same declaration survive;
   - residual markers reconcile: changed constructs refresh their reason,

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Laratesto\Rector\Rules;
 
 use Laratesto\Rector\Analysis\HttpCompatibilityAnalyzer;
+use Laratesto\Rector\Configuration\ConfiguredHierarchy;
 use Laratesto\Rector\Residuals\ResidualCode;
 use Laratesto\Rector\Residuals\ResidualMarker;
 use PhpParser\Node;
@@ -28,6 +29,7 @@ final class LaravelSourceCompatibleCallsRector extends AbstractRector
 
     public function __construct(
         private readonly HttpCompatibilityAnalyzer $analyzer,
+        private readonly ConfiguredHierarchy $hierarchy,
     ) {}
 
     public function getRuleDefinition(): RuleDefinition
@@ -137,12 +139,8 @@ final class LaravelSourceCompatibleCallsRector extends AbstractRector
 
     private function isLaravelTestClass(Class_ $class): bool
     {
-        return $class->extends !== null && $this->isNames($class->extends, [
-            'Laratesto\Testing\LaravelTestCase',
-            'LaravelTestCase',
-            'Tests\TestCase',
-            'Illuminate\Foundation\Testing\TestCase',
-        ]);
+        return $class->extends !== null
+            && $this->isNames($class->extends, $this->hierarchy->hierarchyBaseNames());
     }
 
     private function hasStructuralBlockingMarker(Class_ $class): bool

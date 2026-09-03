@@ -7,6 +7,7 @@ namespace Laratesto\Rector\Rules;
 use Laratesto\Rector\Analysis\DatabaseConfigurationAnalyzer;
 use Laratesto\Rector\Analysis\HttpCompatibilityAnalyzer;
 use Laratesto\Rector\Configuration\BaseClassConfiguration;
+use Laratesto\Rector\Configuration\ConfiguredHierarchy;
 use Laratesto\Rector\Residuals\ResidualCode;
 use Laratesto\Rector\Residuals\ResidualMarker;
 use PhpParser\Node;
@@ -61,7 +62,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
 
     private const FRAMEWORK_BASE = 'Illuminate\Foundation\Testing\TestCase';
 
-    private const TARGET_BASE = 'Laratesto\Testing\LaravelTestCase';
+    private const TARGET_BASE = ConfiguredHierarchy::TARGET_BASE;
 
     private const TARGET_TRAIT = 'Laratesto\Testing\InteractsWithLaravel';
 
@@ -108,6 +109,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
 
     public function __construct(
         private readonly AstResolver $astResolver,
+        private readonly ConfiguredHierarchy $hierarchy,
         private readonly DatabaseConfigurationAnalyzer $databaseAnalyzer,
         private readonly HttpCompatibilityAnalyzer $httpAnalyzer,
         private readonly PhpDocInfoFactory $phpDocInfoFactory,
@@ -158,8 +160,11 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
     {
         // One fresh value object per call: keys absent from $configuration fall back to
         // the defaults, so a previous configuration can never leak through the shared
-        // singleton instance (see BaseClassConfiguration for the contract).
+        // singleton instance (see BaseClassConfiguration for the contract). The fresh
+        // state is also pushed into the shared ConfiguredHierarchy, so the configured
+        // base classes govern every Laravel rule at once, not only this one.
         $this->configuration = BaseClassConfiguration::fromArray($configuration);
+        $this->hierarchy->adopt($this->configuration);
     }
 
     /**
@@ -176,7 +181,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             return null;
         }
 
-        if (! $this->isNames($node->extends, $this->configuration->laravelBases)) {
+        if (! $this->isNames($node->extends, $this->hierarchy->sourceBases())) {
             return null;
         }
 
@@ -352,7 +357,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             if ($next === self::FRAMEWORK_BASE) {
                 // The chain bottom must itself be eligible, or the whole hierarchy
                 // would stay on PHPUnit under this descendant's Laratesto rewrite.
-                if (! in_array(self::FRAMEWORK_BASE, $this->configuration->laravelBases, true)) {
+                if (! in_array(self::FRAMEWORK_BASE, $this->hierarchy->sourceBases(), true)) {
                     return [null, sprintf(
                         'project base %s extends the framework base, which is outside the configured base_classes',
                         $current,
@@ -362,7 +367,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
                 return ['descendant', null];
             }
 
-            if ($next !== self::TARGET_BASE && ! in_array($next, $this->configuration->laravelBases, true)) {
+            if ($next !== self::TARGET_BASE && ! in_array($next, $this->hierarchy->sourceBases(), true)) {
                 return [null, sprintf(
                     'project base %s extends %s, which is outside the configured base_classes',
                     $current,

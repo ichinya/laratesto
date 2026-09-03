@@ -83,6 +83,17 @@ final class BaseClassConfigurationTest
         $this->assertInvalidBaseConfiguration(['base_classes' => []]);
     }
 
+    #[Test]
+    public function anUnknownConfigurationKeyIsRejected(): void
+    {
+        $this->assertInvalidBaseConfiguration(['base_class' => ['Tests\ApiTestCase']]);
+        $this->assertInvalidBaseConfiguration(['base_clases' => ['Tests\ApiTestCase']]);
+        $this->assertInvalidBaseConfiguration([
+            'base_classes' => ['Tests\ApiTestCase'],
+            'targetmode' => 'trait',
+        ]);
+    }
+
     private function assertInvalidBaseConfiguration(array $configuration): void
     {
         try {

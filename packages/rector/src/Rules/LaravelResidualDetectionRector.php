@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Laratesto\Rector\Rules;
 
+use Laratesto\Rector\Configuration\ConfiguredHierarchy;
 use Laratesto\Rector\Residuals\ResidualCode;
 use Laratesto\Rector\Residuals\ResidualMarker;
 use PhpParser\Node;
@@ -46,8 +47,6 @@ use Testo\Bridge\Rector\Testing\TestRectorFixtures;
 #[TestRectorFixtures('LaravelResidualDetectionRector')]
 final class LaravelResidualDetectionRector extends AbstractRector
 {
-    private const TARGET_BASE = 'Laratesto\Testing\LaravelTestCase';
-
     /**
      * Facade fakes without a stable Testo-native counterpart yet.
      */
@@ -89,6 +88,10 @@ final class LaravelResidualDetectionRector extends AbstractRector
         'Illuminate\Foundation\Testing\DatabaseMigrations',
         'Illuminate\Foundation\Testing\DatabaseTruncation',
     ];
+
+    public function __construct(
+        private readonly ConfiguredHierarchy $hierarchy,
+    ) {}
 
     public function getRuleDefinition(): RuleDefinition
     {
@@ -151,19 +154,8 @@ final class LaravelResidualDetectionRector extends AbstractRector
 
     private function isLaravelTestClass(Class_ $node): bool
     {
-        if ($node->extends === null) {
-            return false;
-        }
-
-        // 'LaravelTestCase' short form matters: within one run LaravelBaseClassRector
-        // may already have rewritten extends to an import-style short name whose scope
-        // snapshot cannot resolve it — the literal match keeps us order-independent.
-        return $this->isNames($node->extends, [
-            self::TARGET_BASE,
-            'LaravelTestCase',
-            'Tests\TestCase',
-            'Illuminate\Foundation\Testing\TestCase',
-        ]);
+        return $node->extends !== null
+            && $this->isNames($node->extends, $this->hierarchy->hierarchyBaseNames());
     }
 
     /**

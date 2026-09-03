@@ -46,6 +46,13 @@ final class BaseClassConfiguration
         $laravelBases = self::DEFAULT_BASE_CLASSES;
         $targetMode = self::DEFAULT_TARGET_MODE;
 
+        if ($unknownKeys = array_diff(array_keys($configuration), ['base_classes', 'target_mode'])) {
+            throw new \InvalidArgumentException(sprintf(
+                'Unsupported configuration key(s): %s. Only "base_classes" and "target_mode" are supported.',
+                implode(', ', array_map('strval', $unknownKeys)),
+            ));
+        }
+
         if (array_key_exists('base_classes', $configuration)) {
             $bases = $configuration['base_classes'];
 

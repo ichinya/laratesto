@@ -6,6 +6,7 @@ namespace Laratesto\Rector\Rules;
 
 use Laratesto\Rector\Analysis\DatabaseConfigurationAnalysis;
 use Laratesto\Rector\Analysis\DatabaseConfigurationAnalyzer;
+use Laratesto\Rector\Configuration\ConfiguredHierarchy;
 use Laratesto\Rector\Residuals\ResidualCode;
 use Laratesto\Rector\Residuals\ResidualMarker;
 use PhpParser\Node;
@@ -34,6 +35,7 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
 
     public function __construct(
         private readonly DatabaseConfigurationAnalyzer $analyzer,
+        private readonly ConfiguredHierarchy $hierarchy,
     ) {}
 
     public function getRuleDefinition(): RuleDefinition
@@ -162,12 +164,8 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
 
     private function isLaravelTestClass(Class_ $class): bool
     {
-        return $class->extends !== null && $this->isNames($class->extends, [
-            'Laratesto\Testing\LaravelTestCase',
-            'LaravelTestCase',
-            'Tests\TestCase',
-            'Illuminate\Foundation\Testing\TestCase',
-        ]);
+        return $class->extends !== null
+            && $this->isNames($class->extends, $this->hierarchy->hierarchyBaseNames());
     }
 
     private function hasBlockingMarker(Class_ $class): bool
