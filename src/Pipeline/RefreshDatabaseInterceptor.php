@@ -28,10 +28,10 @@ final readonly class RefreshDatabaseInterceptor implements TestRunInterceptor
     #[\Override]
     public function runTest(TestInfo $info, callable $next): TestResult
     {
-        $application = $this->factory->current();
-        $connections = DatabaseRuntime::connectionNames($application, $this->attribute->connections);
-
         try {
+            $application = $this->factory->current();
+            $connections = DatabaseRuntime::connectionNames($application, $this->attribute->connections);
+
             DatabaseRuntime::restoreInMemoryConnections($application, $connections);
 
             if (! RefreshDatabaseState::$migrated || ! $this->allSchemasMigrated($connections)) {

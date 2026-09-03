@@ -26,16 +26,15 @@ final readonly class DatabaseTransactionsInterceptor implements TestRunIntercept
     #[\Override]
     public function runTest(TestInfo $info, callable $next): TestResult
     {
-        $application = $this->factory->current();
-        $connections = DatabaseRuntime::connectionNames($application, $this->attribute->connections);
-
-        // In-memory databases must survive the per-test application rebuilds: restore
-        // the cached connections so the transaction actually wraps migrated data.
-        DatabaseRuntime::restoreInMemoryConnections($application, $connections);
-
-        $scope = new DatabaseTransactionScope($application, $connections);
-
         try {
+            $application = $this->factory->current();
+            $connections = DatabaseRuntime::connectionNames($application, $this->attribute->connections);
+
+            // In-memory databases must survive the per-test application rebuilds: restore
+            // the cached connections so the transaction actually wraps migrated data.
+            DatabaseRuntime::restoreInMemoryConnections($application, $connections);
+
+            $scope = new DatabaseTransactionScope($application, $connections);
             $scope->begin();
         } catch (\Throwable $failure) {
             return FailureResult::aborted($info, $failure);
@@ -45,7 +44,12 @@ final readonly class DatabaseTransactionsInterceptor implements TestRunIntercept
             $result = $next($info);
         } catch (\Throwable $pipelineFailure) {
             $scope->closeQuietly();
-            DatabaseRuntime::cacheInMemoryConnections($application, $connections);
+
+            try {
+                DatabaseRuntime::cacheInMemoryConnections($application, $connections);
+            } catch (\Throwable) {
+                // The original pipeline failure remains authoritative.
+            }
 
             throw $pipelineFailure;
         }
@@ -56,7 +60,11 @@ final readonly class DatabaseTransactionsInterceptor implements TestRunIntercept
             return FailureResult::aborted($info, $failure);
         }
 
-        DatabaseRuntime::cacheInMemoryConnections($application, $connections);
+        try {
+            DatabaseRuntime::cacheInMemoryConnections($application, $connections);
+        } catch (\Throwable $failure) {
+            return FailureResult::aborted($info, $failure);
+        }
 
         return $result;
     }
