@@ -17,7 +17,9 @@ final class ResidualCode
     /**
      * The class hierarchy cannot be proven safe: unresolvable parent, project base
      * outside the processed paths or outside the configured base_classes, cyclic or
-     * over-deep chain, trait adaptations, unsupported bootstrap hooks.
+     * over-deep chain, or a project base on the chain that carries a blocking
+     * residual marker or would fail its own conversion (trait adaptations,
+     * unsupported bootstrap hooks, lifecycle, `$this->app`, HTTP or database gates).
      */
     public const CLASS_UNSAFE_HIERARCHY = 'CLASS_UNSAFE_HIERARCHY';
 

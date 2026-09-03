@@ -66,6 +66,20 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
      */
     private const MAX_CHAIN_DEPTH = 10;
 
+    /**
+     * Residual codes that make conversion impossible wherever they appear:
+     * refactor() skips any class carrying one of these markers, so a project
+     * base marked with any of them will never convert in any run.
+     */
+    private const BLOCKING_RESIDUAL_CODES = [
+        ResidualCode::CLASS_UNSAFE_HIERARCHY,
+        ResidualCode::LIFECYCLE_UNSUPPORTED,
+        ResidualCode::DATABASE_UNSUPPORTED_CONFIGURATION,
+        ResidualCode::HTTP_UNSUPPORTED_SIGNATURE,
+        ResidualCode::RESPONSE_UNSUPPORTED_API,
+        ResidualCode::ARTISAN_INTERACTION_UNSUPPORTED,
+    ];
+
     private const TEST_ATTRIBUTE = 'Testo\Test';
 
     private const PHPUNIT_TEST_ATTRIBUTE = 'PHPUnit\Framework\Attributes\Test';
@@ -267,10 +281,12 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
     }
 
     /**
-     * Walks the extends chain of a project base and proves three things: every class
-     * on the chain is resolvable, every project class on it is inside the processed
-     * paths and free of conversion blockers, and the chain terminates at the Laravel
-     * framework base (or at an already-migrated Laratesto base).
+     * Walks the extends chain of a project base and proves that the whole
+     * hierarchy converts in this run: every class on the chain is resolvable,
+     * every project class on it is inside the processed paths and would pass
+     * its own conversion gates ({@see baseConversionFailures}), and the chain
+     * terminates at the Laravel framework base (or at an already-migrated
+     * Laratesto base).
      *
      * @return array{('framework'|'descendant')|null, non-empty-string}
      */
@@ -309,11 +325,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
                 return ['descendant', null];
             }
 
-            $failures = [
-                ...$this->traitAdaptationFailures($parentClass),
-                ...$this->bootstrapMethodFailures($parentClass),
-                ...$this->lifecycleFailures($parentClass),
-            ];
+            $failures = $this->baseConversionFailures($parentClass);
 
             if ($failures !== []) {
                 return [null, sprintf('project base %s carries unsupported constructs: %s', $current, implode('; ', $failures))];
@@ -402,6 +414,51 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         }
 
         return $failures;
+    }
+
+    /**
+     * Every reason the given project base would fail its own conversion when
+     * this rule processes its file: a pre-existing blocking residual marker, or
+     * one of the gates the atomic conversion must prove - trait adaptations,
+     * unsupported bootstrap hooks, lifecycle overrides, `$this->app`
+     * expressions, HTTP/response/Artisan signatures and database strategy
+     * configuration.
+     *
+     * A descendant may only be rewritten when every project base on its extends
+     * chain converts in the same run; a base that keeps any of these failures
+     * stays on PHPUnit and would leave the hierarchy half-migrated.
+     *
+     * @return list<non-empty-string>
+     */
+    private function baseConversionFailures(Class_ $class): array
+    {
+        $failures = [];
+
+        foreach (self::BLOCKING_RESIDUAL_CODES as $code) {
+            if (ResidualMarker::isMarked($class, $code)) {
+                $failures[] = sprintf('a blocking %s residual marker is already present', $code);
+            }
+        }
+
+        $failures = [
+            ...$failures,
+            ...$this->traitAdaptationFailures($class),
+            ...$this->bootstrapMethodFailures($class),
+            ...$this->lifecycleFailures($class),
+            ...$this->appFailures($class),
+        ];
+
+        foreach ($this->httpAnalyzer->analyze($class)->reasonsByCode as $reasons) {
+            $failures = [...$failures, ...$reasons];
+        }
+
+        $databaseAnalysis = $this->databaseAnalyzer->analyze($class);
+
+        if ($databaseAnalysis->unsupportedReason !== null) {
+            $failures[] = $databaseAnalysis->unsupportedReason;
+        }
+
+        return array_values(array_unique($failures));
     }
 
     /**
@@ -731,14 +788,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
 
     private function hasBlockingMarker(Class_ $class): bool
     {
-        foreach ([
-            ResidualCode::CLASS_UNSAFE_HIERARCHY,
-            ResidualCode::LIFECYCLE_UNSUPPORTED,
-            ResidualCode::DATABASE_UNSUPPORTED_CONFIGURATION,
-            ResidualCode::HTTP_UNSUPPORTED_SIGNATURE,
-            ResidualCode::RESPONSE_UNSUPPORTED_API,
-            ResidualCode::ARTISAN_INTERACTION_UNSUPPORTED,
-        ] as $code) {
+        foreach (self::BLOCKING_RESIDUAL_CODES as $code) {
             if (ResidualMarker::isMarked($class, $code)) {
                 return true;
             }
