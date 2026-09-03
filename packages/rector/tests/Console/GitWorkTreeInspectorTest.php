@@ -80,4 +80,66 @@ final class GitWorkTreeInspectorTest
             'tests/Staged.php',
         ]);
     }
+
+    #[Test]
+    public function aStagedRenameOriginIsConsumedRatherThanReparsed(): void
+    {
+        // Final-review M1: with -z, `R  New\0Old\0` puts the origin in its own
+        // NUL-separated field; parsing it as an entry mangles it (`ts/OldName.php`)
+        // into a phantom modified path that the apply guard would cite.
+        $inspector = new GitWorkTreeInspector(new FakeProcessRunner(gitStatus: new ProcessOutcome(
+            0,
+            "R  tests/NewTest.php\0tests/OldName.php\0\0",
+            '',
+        )));
+
+        Assert::same($inspector->modifiedPaths('/app', ['tests']), [
+            'tests/NewTest.php',
+        ]);
+    }
+
+    #[Test]
+    public function theRenameOriginSkipConsumesExactlyOneField(): void
+    {
+        // The origin field is exactly one chunk: the entry after it must still be
+        // parsed as itself, and the untracked entry must stay ignored.
+        $inspector = new GitWorkTreeInspector(new FakeProcessRunner(gitStatus: new ProcessOutcome(
+            0,
+            "R  tests/NewTest.php\0tests/OldName.php\0 M tests/Touched.php\0?? tests/Fresh.php\0\0",
+            '',
+        )));
+
+        Assert::same($inspector->modifiedPaths('/app', ['tests']), [
+            'tests/NewTest.php',
+            'tests/Touched.php',
+        ]);
+    }
+
+    #[Test]
+    public function aStagedCopyOriginIsConsumedLikeARename(): void
+    {
+        $inspector = new GitWorkTreeInspector(new FakeProcessRunner(gitStatus: new ProcessOutcome(
+            0,
+            "C  tests/Copy.php\0tests/Original.php\0\0",
+            '',
+        )));
+
+        Assert::same($inspector->modifiedPaths('/app', ['tests']), [
+            'tests/Copy.php',
+        ]);
+    }
+
+    #[Test]
+    public function aRenamedAndWorkTreeModifiedEntryStillSkipsItsOrigin(): void
+    {
+        $inspector = new GitWorkTreeInspector(new FakeProcessRunner(gitStatus: new ProcessOutcome(
+            0,
+            "RM tests/NewTest.php\0tests/OldName.php\0\0",
+            '',
+        )));
+
+        Assert::same($inspector->modifiedPaths('/app', ['tests']), [
+            'tests/NewTest.php',
+        ]);
+    }
 }

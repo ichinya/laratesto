@@ -60,12 +60,16 @@ class GitWorkTreeInspector
             ));
         }
 
-        // Porcelain v1 with NUL delimiters: each entry is XY<space><path>\0 (rename
-        // entries carry a second NUL-separated origin which never matters here).
+        // Porcelain v1 with NUL delimiters: each entry is XY<space><path>\0, and a
+        // rename/copy entry carries its origin path as a second NUL-separated field
+        // immediately after it — that field is consumed as the origin, never parsed
+        // as an entry of its own.
         $entries = \explode("\0", $status->stdout);
         $modified = [];
 
-        foreach ($entries as $entry) {
+        for ($index = 0, $count = \count($entries); $index < $count; $index++) {
+            $entry = $entries[$index];
+
             if (\strlen($entry) < 4) {
                 continue;
             }
@@ -75,6 +79,10 @@ class GitWorkTreeInspector
 
             if ($xy === '??') {
                 continue;
+            }
+
+            if ($xy[0] === 'R' || $xy[0] === 'C' || $xy[1] === 'R' || $xy[1] === 'C') {
+                $index++; // The origin path follows R/C entries as its own field.
             }
 
             $modified[] = \str_replace('\\', '/', $path);
