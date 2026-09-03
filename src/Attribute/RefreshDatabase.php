@@ -36,7 +36,12 @@ final readonly class RefreshDatabase implements Interceptable
         public ?string $seeder = null,
         public bool $dropViews = false,
         public bool $dropTypes = false,
-        /** @var list<non-empty-string|null>|null */
+        /**
+         * Connections to migrate and transact; null selects the default
+         * connection, an empty list selects none.
+         *
+         * @var list<non-empty-string|null>|null
+         */
         public ?array $connections = null,
     ) {}
 }

@@ -34,7 +34,7 @@ final readonly class DatabaseTruncation implements Interceptable
     /**
      * @param bool $seed Run the database seeder after truncating.
      * @param string|null $seeder Use a specific seeder class instead of the default one.
-     * @param list<non-empty-string|null>|null $connections Connections to truncate.
+     * @param list<non-empty-string|null>|null $connections Connections to truncate; null selects the default connection, an empty list selects none.
      * @param list<non-empty-string>|array<string, list<non-empty-string>>|null $tables
      * @param list<non-empty-string>|array<string, list<non-empty-string>>|null $exceptTables
      * @param bool $dropViews Drop views during the initial migrate:fresh, when it runs.

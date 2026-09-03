@@ -96,6 +96,15 @@ final class DatabaseTest
         Assert::same($database->connection('secondary')->table('things')->count(), 0);
     }
 
+    #[RefreshDatabase(connections: [])]
+    public function testRefreshDatabaseWithExplicitlyEmptyConnectionsTouchesNothing(): void
+    {
+        $database = $this->make('db');
+
+        Assert::same($database->connection('sqlite')->transactionLevel(), 0);
+        Assert::same($database->connection('secondary')->transactionLevel(), 0);
+    }
+
     #[DatabaseTransactions(connections: ['sqlite', 'secondary'])]
     public function testDatabaseTransactionsBeginsEverySelectedConnection(): void
     {
@@ -104,6 +113,24 @@ final class DatabaseTest
         Assert::same($database->connection('sqlite')->transactionLevel(), 1);
         Assert::same($database->connection('secondary')->transactionLevel(), 1);
         Assert::true($this->app()->bound('db.transactions'));
+    }
+
+    #[DatabaseTransactions(connections: null)]
+    public function testDatabaseTransactionsWithUnsetConnectionsWrapsOnlyTheDefaultConnection(): void
+    {
+        $database = $this->make('db');
+
+        Assert::same($database->connection('sqlite')->transactionLevel(), 1);
+        Assert::same($database->connection('secondary')->transactionLevel(), 0);
+    }
+
+    #[DatabaseTransactions(connections: [])]
+    public function testDatabaseTransactionsWithExplicitlyEmptyConnectionsTouchesNothing(): void
+    {
+        $database = $this->make('db');
+
+        Assert::same($database->connection('sqlite')->transactionLevel(), 0);
+        Assert::same($database->connection('secondary')->transactionLevel(), 0);
     }
 
     public function testTransactionScopeCleansAConnectionWhenALaterBeginFails(): void

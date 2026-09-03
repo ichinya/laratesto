@@ -11,13 +11,21 @@ use Illuminate\Foundation\Testing\RefreshDatabaseState;
 final class DatabaseRuntime
 {
     /**
+     * Resolves a database attribute's connection selection: null/unset falls
+     * back to the default connection, an explicitly empty list selects no
+     * connections at all (the Laravel traits iterate the selection and touch
+     * nothing), and null/empty-string entries select the default connection.
+     *
      * @param list<string|null>|null $configured
      * @return list<non-empty-string>
      */
     public static function connectionNames(Application $application, ?array $configured): array
     {
         $default = (string) $application['config']->get('database.default');
-        $configured ??= [$default];
+
+        if ($configured === null) {
+            return [$default];
+        }
 
         $names = [];
         foreach ($configured as $name) {
@@ -27,7 +35,7 @@ final class DatabaseRuntime
             }
         }
 
-        return $names === [] ? [$default] : $names;
+        return $names;
     }
 
     /** @param list<non-empty-string> $names */
