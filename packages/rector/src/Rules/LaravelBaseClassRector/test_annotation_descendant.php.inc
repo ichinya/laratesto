@@ -29,13 +29,13 @@ final class AnnotationDescendantTest extends TestCase
      */
     public function it_keeps_the_project_base(): void
     {
-        $this->assertTrue(true);
+        $this->travel(5);
     }
 
     /** @test */
     public function test_prefixed_annotation(): void
     {
-        $this->assertTrue(true);
+        $this->travel(5);
     }
 }
 -----
@@ -67,12 +67,12 @@ final class AnnotationDescendantTest extends TestCase
     #[\Testo\Test]
     public function it_keeps_the_project_base(): void
     {
-        $this->assertTrue(true);
+        $this->travel(5);
     }
 
     #[\Testo\Test]
     public function test_prefixed_annotation(): void
     {
-        $this->assertTrue(true);
+        $this->travel(5);
     }
 }

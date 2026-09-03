@@ -16,6 +16,6 @@ final class AlreadyMigratedAnnotationTest extends LaravelTestCase
      */
     public function it_stays_untouched(): void
     {
-        $this->assertTrue(true);
+        $this->travel(5);
     }
 }

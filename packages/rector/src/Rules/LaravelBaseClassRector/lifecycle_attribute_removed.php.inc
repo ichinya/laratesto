@@ -22,7 +22,7 @@ final class TeardownTest extends TestCase
 
     public function test_something(): void
     {
-        $this->assertTrue(true);
+        $this->travel(5);
     }
 }
 -----
@@ -48,6 +48,6 @@ final class TeardownTest extends \Laratesto\Testing\LaravelTestCase
     #[\Testo\Test]
     public function test_something(): void
     {
-        $this->assertTrue(true);
+        $this->travel(5);
     }
 }

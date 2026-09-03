@@ -34,7 +34,7 @@ final class SafeDescendantTest extends TestCase
 
     public function test_safe_descendant(): void
     {
-        $this->assertSame('acme', $this->acmeHelper());
+        $this->travel(5);
     }
 }
 -----
@@ -76,6 +76,6 @@ final class SafeDescendantTest extends TestCase
 
     public function test_safe_descendant(): void
     {
-        $this->assertSame('acme', $this->acmeHelper());
+        $this->travel(5);
     }
 }

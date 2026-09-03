@@ -63,7 +63,7 @@ final class LaravelSourceCompatibleCallsRector extends AbstractRector
             return null;
         }
 
-        $analysis = $this->analyzer->analyze($node);
+        $analysis = $this->analyzer->analyze($node, $this->topLevelClasses());
         $changed = false;
 
         foreach ($analysis->reasonsByCode as $code => $reasons) {

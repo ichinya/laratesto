@@ -50,7 +50,7 @@ final class ProjectDescendantTest extends TestCase
 
     public function test_descendant_keeps_project_base(): void
     {
-        $this->assertSame('acme', $this->acmeHelper());
+        $this->travel(5);
     }
 }
 -----
@@ -103,6 +103,6 @@ final class ProjectDescendantTest extends TestCase
     #[\Testo\Test]
     public function test_descendant_keeps_project_base(): void
     {
-        $this->assertSame('acme', $this->acmeHelper());
+        $this->travel(5);
     }
 }

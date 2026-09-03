@@ -17,13 +17,13 @@ final class UsersSearchTest extends TestCase
      */
     public function it_finds_active_users(): void
     {
-        $this->assertTrue(true);
+        $this->travel(5);
     }
 
     /** @test */
     public function test_prefixed_and_annotated(): void
     {
-        $this->assertTrue(true);
+        $this->travel(5);
     }
 
     /**
@@ -31,7 +31,7 @@ final class UsersSearchTest extends TestCase
      */
     protected function it_is_ignored_when_not_public(): void
     {
-        $this->assertTrue(true);
+        $this->travel(5);
     }
 
     public function searchPayload(): array
@@ -59,13 +59,13 @@ final class UsersSearchTest extends \Laratesto\Testing\LaravelTestCase
     #[\Testo\Test]
     public function it_finds_active_users(): void
     {
-        $this->assertTrue(true);
+        $this->travel(5);
     }
 
     #[\Testo\Test]
     public function test_prefixed_and_annotated(): void
     {
-        $this->assertTrue(true);
+        $this->travel(5);
     }
 
     /**
@@ -73,7 +73,7 @@ final class UsersSearchTest extends \Laratesto\Testing\LaravelTestCase
      */
     protected function it_is_ignored_when_not_public(): void
     {
-        $this->assertTrue(true);
+        $this->travel(5);
     }
 
     public function searchPayload(): array

@@ -198,7 +198,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         $lifecycleFailures = $this->lifecycleFailures($node);
         $appFailures = $this->appFailures($node);
         $databaseAnalysis = $this->databaseAnalyzer->analyze($node);
-        $httpAnalysis = $this->httpAnalyzer->analyze($node);
+        $httpAnalysis = $this->httpAnalyzer->analyze($node, $this->fileClasses());
         $httpFailures = array_values(array_unique([
             ...$appFailures,
             ...($httpAnalysis->reasonsByCode[ResidualCode::HTTP_UNSUPPORTED_SIGNATURE] ?? []),
@@ -459,7 +459,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             ...$this->appFailures($class),
         ];
 
-        foreach ($this->httpAnalyzer->analyze($class)->reasonsByCode as $reasons) {
+        foreach ($this->httpAnalyzer->analyze($class, $this->fileClasses())->reasonsByCode as $reasons) {
             $failures = [...$failures, ...$reasons];
         }
 
@@ -494,6 +494,15 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         }
 
         return [$resolved instanceof Class_ ? $resolved : null, false];
+    }
+
+    /** @return list<Class_> */
+    private function fileClasses(): array
+    {
+        /** @var list<Class_> $classes */
+        $classes = (new NodeFinder())->findInstanceOf($this->getFile()->getOldStmts(), Class_::class);
+
+        return $classes;
     }
 
     private function isWithinProcessedPaths(Class_ $class): bool

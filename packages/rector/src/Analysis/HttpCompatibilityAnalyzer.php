@@ -15,6 +15,7 @@ use PhpParser\Node\Name;
 use PhpParser\Node\Scalar;
 use PhpParser\Node\Stmt\Class_;
 use Rector\NodeNameResolver\NodeNameResolver;
+use Rector\PhpParser\AstResolver;
 
 /** @internal Classifies only the statically proven common-path signature matrix. */
 final class HttpCompatibilityAnalyzer
@@ -35,6 +36,16 @@ final class HttpCompatibilityAnalyzer
         'call' => [2, 7, ['string', 'string', 'array', 'array', 'array', 'array', 'nullable-string']],
     ];
 
+    // Mirrors the public surface of Laratesto\Testing\InteractsWithLaravel: every
+    // helper the converted base really provides. Anything NOT listed here and not
+    // declared by the test class itself has no converted equivalent and must fail
+    // the preflight (fail-closed), because the migrated class would fatal on it.
+    // Laravel verbs the runtime deliberately does not provide (putJson, patchJson,
+    // options, optionsJson, head, json) are therefore absent on purpose.
+    //
+    // session/app/make return something other than the test case, so fluent calls
+    // chained onto them must not classify as `$this->` receivers — see
+    // NON_FLUENT_HELPERS below.
     private const HELPER_SIGNATURES = [
         'withHeaders' => [1, 1, ['array']],
         'withHeader' => [2, 2, ['string', 'string']],
@@ -60,8 +71,63 @@ final class HttpCompatibilityAnalyzer
         'assertSessionHas' => [1, 2, ['string', 'any']],
         'assertSessionMissing' => [1, 1, ['string']],
         'assertSessionHasErrors' => [0, 1, ['array']],
+        'assertExitCode' => [1, 3, ['int', 'string', 'array']],
+        'session' => [0, 0, []],
+        'app' => [0, 0, []],
+        'make' => [1, 1, ['any']],
     ];
 
+    /**
+     * Helpers whose runtime return value is not the test case itself. They are
+     * validated on `$this` but must not turn chained calls (`$this->make($x)->any()`,
+     * `$this->app()->bind()`) into classified `$this->` receivers — the pipeline
+     * output itself contains such chains, and flagging them would break byte
+     * idempotency on the second run.
+     */
+    private const NON_FLUENT_HELPERS = ['session', 'app', 'make'];
+
+    /**
+     * PHPUnit `$this->` calls the imported testo/bridge-rector
+     * PHPUNIT_TO_TESTO set rewrites later in the same Rector run
+     * (AssertCallToTestoRector, TypedAssertCallToTestoRector,
+     * ExpectExceptionToTestoRector, MarkTestSkippedToTestoRector,
+     * MarkTestIncompleteRector). By the time the migrated class runs, none of
+     * them exist anymore, so they must not fail the preflight. PHPUnit
+     * assertions outside this list (assertStringContainsString, assertSeeded,
+     * ...) are NOT rewritten and stay fail-closed.
+     */
+    private const UPSTREAM_REWRITTEN_CALLS = [
+        'assertSame',
+        'assertNotSame',
+        'assertEquals',
+        'assertNotEquals',
+        'assertTrue',
+        'assertFalse',
+        'assertNull',
+        'assertNotNull',
+        'assertCount',
+        'assertContains',
+        'assertInstanceOf',
+        'fail',
+        'assertGreaterThan',
+        'assertGreaterThanOrEqual',
+        'assertLessThan',
+        'assertLessThanOrEqual',
+        'assertArrayHasKey',
+        'assertArrayNotHasKey',
+        'assertEqualsCanonicalizing',
+        'assertEmpty',
+        'assertNotEmpty',
+        'expectException',
+        'expectExceptionMessage',
+        'expectExceptionCode',
+        'markTestSkipped',
+        'markTestIncomplete',
+    ];
+
+    // Mirrors the public assert/accessor surface of Laratesto\Testing\LaravelResponse
+    // signature-for-signature. Methods the runtime provides must never be blocked
+    // here: over-blocking inflates manual-migration scope without any safety gain.
     private const RESPONSE_SIGNATURES = [
         'assertStatus' => [1, 1, ['int']],
         'assertOk' => [0, 0, []],
@@ -73,6 +139,15 @@ final class HttpCompatibilityAnalyzer
         'status' => [0, 0, []],
         'getStatusCode' => [0, 0, []],
         'getContent' => [0, 0, []],
+        'assertSee' => [1, 2, ['string', 'bool']],
+        'assertExactJson' => [1, 1, ['array']],
+        'assertHeaderMissing' => [1, 1, ['string']],
+        'assertCreated' => [0, 0, []],
+        'assertBadRequest' => [0, 0, []],
+        'assertUnauthorized' => [0, 0, []],
+        'assertForbidden' => [0, 0, []],
+        'assertNotFound' => [0, 0, []],
+        'assertUnprocessable' => [0, 0, []],
     ];
 
     private const PENDING_ARTISAN_SIGNATURES = [
@@ -93,6 +168,15 @@ final class HttpCompatibilityAnalyzer
         'assertJsonPath',
         'assertHeader',
         'assertRedirect',
+        'assertSee',
+        'assertExactJson',
+        'assertHeaderMissing',
+        'assertCreated',
+        'assertBadRequest',
+        'assertUnauthorized',
+        'assertForbidden',
+        'assertNotFound',
+        'assertUnprocessable',
     ];
 
     private const INTERACTIVE_ARTISAN_METHODS = [
@@ -109,11 +193,16 @@ final class HttpCompatibilityAnalyzer
 
     public function __construct(
         private readonly NodeNameResolver $nodeNameResolver,
+        private readonly AstResolver $astResolver,
     ) {
         $this->nodeFinder = new NodeFinder();
     }
 
-    public function analyze(Class_ $class): HttpCompatibilityAnalysis
+    /**
+     * @param list<Class_> $localClasses every class-like declared in the same file
+     *        as $class, used to prove TestResponse subclass receivers locally
+     */
+    public function analyze(Class_ $class, array $localClasses = []): HttpCompatibilityAnalysis
     {
         /** @var array<non-empty-string, list<non-empty-string>> $reasons */
         $reasons = [];
@@ -174,9 +263,17 @@ final class HttpCompatibilityAnalyzer
                     continue;
                 }
 
+                // Fail-closed: the converted Laratesto base provides only the two
+                // matrices above, and methods declared by the class itself survive
+                // conversion. Every other `$this->` call (unknown helper, Laravel
+                // TestCase leftover such as putJson/seed) has no converted
+                // equivalent and would fatal at runtime. Two carve-outs keep the
+                // classification aligned with what the pipeline really produces:
+                // calls the upstream PHPUnit-to-Testo set rewrites later in the
+                // same run, and the base helpers the conversion itself emits
+                // (make/app/session) validated by the HELPER matrix above.
                 if (! in_array($method, $declaredMethods, true)
-                    && (str_starts_with($method, 'with')
-                        || str_starts_with($method, 'without'))) {
+                    && ! in_array($method, self::UPSTREAM_REWRITTEN_CALLS, true)) {
                     $this->addReason(
                         $reasons,
                         'HTTP_UNSUPPORTED_SIGNATURE',
@@ -217,6 +314,15 @@ final class HttpCompatibilityAnalyzer
                 );
             }
         }
+        foreach ($this->testResponseSubclasses($class, $localClasses) as $subclass) {
+            $this->addReason(
+                $reasons,
+                'RESPONSE_UNSUPPORTED_API',
+                sprintf('%s extends TestResponse, but the Laratesto runtime never produces TestResponse subclasses; migrate the receiver manually', $subclass),
+            );
+        }
+
+        $this->markPendingArtisanExecutionGaps($reasons, $class, $artisanVariables);
 
         foreach ($reasons as $code => $messages) {
             $reasons[$code] = array_values(array_unique($messages));
@@ -470,6 +576,181 @@ final class HttpCompatibilityAnalyzer
         return false;
     }
 
+    /**
+     * TestResponse subclasses used in receiver type positions (properties, method
+     * return types, method parameters). The conversion pipeline only swaps the
+     * exact TestResponse type, and the runtime `get()`/`post()`-style helpers only
+     * ever produce the final Laratesto response object - a subclass-typed receiver
+     * can therefore never bind at runtime, and its calls must not pass silently.
+     *
+     * @param list<Class_> $localClasses
+     * @return list<string>
+     */
+    private function testResponseSubclasses(Class_ $class, array $localClasses): array
+    {
+        $types = [];
+        foreach ($class->getProperties() as $property) {
+            $types[] = $property->type;
+        }
+        foreach ($class->getMethods() as $method) {
+            $types[] = $method->returnType;
+            foreach ($method->params as $parameter) {
+                $types[] = $parameter->type;
+            }
+        }
+
+        $subclasses = [];
+        foreach ($types as $type) {
+            foreach ($this->namesInType($type) as $name) {
+                $resolved = $this->nodeNameResolver->getName($name);
+                if ($resolved === null
+                    || $this->nodeNameResolver->isName($name, self::TEST_RESPONSE)
+                    || ! $this->extendsTestResponse($resolved, $localClasses)) {
+                    continue;
+                }
+
+                $subclasses[] = $resolved;
+            }
+        }
+
+        return array_values(array_unique($subclasses));
+    }
+
+    /** @return list<Name> */
+    private function namesInType(Node|null $type): array
+    {
+        if ($type instanceof Name) {
+            return [$type];
+        }
+
+        if ($type instanceof Node\NullableType) {
+            return $this->namesInType($type->type);
+        }
+
+        if ($type instanceof Node\UnionType || $type instanceof Node\IntersectionType) {
+            $names = [];
+            foreach ($type->types as $member) {
+                foreach ($this->namesInType($member) as $name) {
+                    $names[] = $name;
+                }
+            }
+
+            return $names;
+        }
+
+        return [];
+    }
+
+    /**
+     * Walks the extends chain through locally declared classes first, then through
+     * AstResolver (processed-file classes and vendor classes). Unresolvable names
+     * are not flagged: the classification stays exactly as provable as before.
+     *
+     * @param list<Class_> $localClasses
+     */
+    private function extendsTestResponse(string $className, array $localClasses): bool
+    {
+        $seen = [];
+        $current = $className;
+        while ($current !== null && ! isset($seen[$current])) {
+            $seen[$current] = true;
+
+            if (strcasecmp($current, self::TEST_RESPONSE) === 0) {
+                return true;
+            }
+
+            $parent = null;
+            foreach ($localClasses as $local) {
+                if ($local->namespacedName !== null
+                    && $local->namespacedName->toString() === $current
+                    && $local->extends instanceof Name) {
+                    $parent = $local->extends;
+                    break;
+                }
+            }
+
+            if ($parent === null) {
+                try {
+                    $resolved = $this->astResolver->resolveClassFromName($current);
+                } catch (\Throwable) {
+                    $resolved = null;
+                }
+
+                $parent = $resolved instanceof Class_ ? $resolved->extends : null;
+            }
+
+            if (! $parent instanceof Name) {
+                return false;
+            }
+
+            $current = $this->nodeNameResolver->getName($parent);
+        }
+
+        return false;
+    }
+
+    /**
+     * Pending Artisan parity: Laravel's PendingCommand is lazy and runs the command
+     * on the first assertion (or scope-end), while PendingArtisanCommand executes
+     * eagerly in its constructor. Statements between `$pending = $this->artisan()`
+     * and the first use of $pending therefore already observe the command's side
+     * effects, unlike the Laravel original. Immediate use stays marker-free.
+     *
+     * @param array<non-empty-string, list<non-empty-string>> $reasons
+     * @param list<non-empty-string> $artisanVariables
+     */
+    private function markPendingArtisanExecutionGaps(
+        array &$reasons,
+        Class_ $class,
+        array $artisanVariables,
+    ): void
+    {
+        if ($artisanVariables === []) {
+            return;
+        }
+
+        foreach ($class->getMethods() as $method) {
+            $awaiting = null;
+            foreach ($method->stmts ?? [] as $statement) {
+                if ($awaiting !== null) {
+                    if (! $this->statementUsesVariable($statement, $awaiting)) {
+                        $this->addReason(
+                            $reasons,
+                            'ARTISAN_INTERACTION_UNSUPPORTED',
+                            sprintf('$%s holds an eagerly executed Pending Artisan command; the statements before its first use already observe the command side effects (Laravel PendingCommand runs lazily)', $awaiting),
+                        );
+                    }
+
+                    $awaiting = null;
+                }
+
+                if (! $statement instanceof Node\Stmt\Expression
+                    || ! $statement->expr instanceof Expr\Assign
+                    || ! $statement->expr->var instanceof Variable
+                    || ! is_string($statement->expr->var->name)) {
+                    continue;
+                }
+
+                if ($this->isArtisanProducingExpression($statement->expr->expr, $artisanVariables)) {
+                    $awaiting = $statement->expr->var->name;
+                }
+            }
+        }
+    }
+
+    private function statementUsesVariable(Node\Stmt $statement, string $name): bool
+    {
+        /** @var list<Variable> $variables */
+        $variables = $this->nodeFinder->findInstanceOf($statement, Variable::class);
+        foreach ($variables as $variable) {
+            if ($variable->name === $name) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /** @return list<non-empty-string> */
     private function artisanVariables(Class_ $class): array
     {
@@ -546,9 +827,15 @@ final class HttpCompatibilityAnalyzer
 
         $method = $this->nodeNameResolver->getName($expression->name);
 
-        return $method !== null
-            && isset(self::HELPER_SIGNATURES[$method])
-            && $this->isThisReceiver($expression->var);
+        if ($method === null || ! isset(self::HELPER_SIGNATURES[$method])) {
+            return false;
+        }
+
+        if (in_array($method, self::NON_FLUENT_HELPERS, true)) {
+            return false;
+        }
+
+        return $this->isThisReceiver($expression->var);
     }
 
     private function classContainsName(Class_ $class, string $name): bool
