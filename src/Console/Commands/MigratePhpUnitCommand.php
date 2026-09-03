@@ -39,7 +39,7 @@ final class MigratePhpUnitCommand extends Command
         $this->components->warn(
             'laratesto:migrate-phpunit is deprecated and will be removed in a future release; '
             . 'use the Rector-based migration instead: php artisan laratesto:migrate-rector '
-            . '(see packages/rector/README.md).',
+            . '(package ichinya/laratesto-rector; --help lists its options).',
         );
 
         $basePath = \realpath(\base_path());

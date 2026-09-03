@@ -10,8 +10,10 @@ use Testo\Assert;
 use Testo\Test;
 
 /**
- * Ticket 05 acceptance: the deprecated string-based migrator prints exactly one
- * deprecation warning per run and keeps doing its former job.
+ * The deprecated string-based migrator prints exactly one deprecation warning per
+ * run, keeps doing its former job and points only at stable references: the
+ * replacement command, its --help and the published package name — never a
+ * repository-only path an installed package cannot resolve.
  */
 final class MigratePhpUnitCommandDeprecationTest
 {
@@ -65,6 +67,18 @@ final class MigratePhpUnitCommandDeprecationTest
             Assert::true(
                 \str_contains($output, 'laratesto:migrate-rector'),
                 'The warning must point at the Rector-based replacement.',
+            );
+            Assert::false(
+                \str_contains($output, 'packages/rector/README.md'),
+                'The warning must not reference the repository-only packages/rector/README.md. Output: ' . $output,
+            );
+            Assert::true(
+                \str_contains($output, 'ichinya/laratesto-rector'),
+                'The warning must name the package that ships the replacement. Output: ' . $output,
+            );
+            Assert::true(
+                \str_contains($output, '--help'),
+                'The warning must point at the replacement command help. Output: ' . $output,
             );
 
             // The former job still runs: a dry-run analysis happened, not a crash.
