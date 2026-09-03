@@ -121,6 +121,50 @@ PHP;
         }
     }
 
+    /**
+     * PR #8 review point 6: over an already-migrated tree the second dry-run is a
+     * real Rector no-op (no file diffs at all) — the residual marker lives only on
+     * disk, and the dry-run must still exit 2 and report it, exactly like apply.
+     */
+    #[Test]
+    public function dryRunOverAnAlreadyMigratedTreeStillReportsTheResiduals(): void
+    {
+        [$dir, $file, $report] = $this->corpus('dry-after-apply');
+
+        $this->registerProvider();
+
+        try {
+            $apply = $this->artisan('laratesto:migrate-rector', [
+                '--path' => [$dir],
+                '--report' => $report,
+                '--apply' => true,
+            ]);
+
+            Assert::same($apply->exitCode(), 2, 'The first apply must leave a manual residual behind. Output: ' . $apply->output());
+
+            $applied = (string) \file_get_contents($file);
+            $markerLine = \substr_count($applied, "\n", 0, (int) \strpos($applied, 'laratesto-residual(code=')) + 1;
+            $hash = \md5_file($file);
+
+            $dry = $this->artisan('laratesto:migrate-rector', [
+                '--path' => [$dir],
+                '--report' => $report,
+            ]);
+
+            Assert::same($dry->exitCode(), 2, 'A no-op dry-run over an already-migrated tree must exit 2 like apply. Output: ' . $dry->output());
+            Assert::same($hash, \md5_file($file), 'The dry-run must not modify the already-migrated source.');
+
+            $payload = \json_decode((string) \file_get_contents($report), true);
+
+            Assert::same($payload['mode'], 'dry-run');
+            Assert::same(\count($payload['residuals']), 1);
+            Assert::same($payload['residuals'][0]['code'], 'LARAVEL_FAKE_UNSUPPORTED');
+            Assert::same($payload['residuals'][0]['line'], $markerLine, 'The on-disk marker line must be reported.');
+        } finally {
+            self::cleanup($dir, $report);
+        }
+    }
+
     #[Test]
     public function applyRefusesDirtyProcessedPaths(): void
     {

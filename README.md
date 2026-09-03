@@ -236,10 +236,12 @@ Everything else fails closed with `DATABASE_UNSUPPORTED_CONFIGURATION`.
 ### Dry-run report contract
 
 `laratesto-residuals.json` is deterministic: stable schema version, sorted
-residuals (file, line as an integer, code, rule), no timestamps. In a dry-run
-the report is built from the reconstructed new-side content of the machine
-diff, so it contains both freshly added markers and markers already present on
-disk, and never markers a change would remove. The report is only replaced
+residuals (file, line as an integer, code, rule), no timestamps. Dry-run and
+apply report residuals identically: every processed PHP file is scanned exactly
+once, and in a dry-run a machine-JSON diff overlays the reconstructed new-side
+content for its file — freshly added markers are reported, markers a change
+would remove are not, and markers already on disk (from an earlier apply) stay
+reported even when the second run is a no-op. The report is only replaced
 after a fully successful run — a Rector, Git or JSON failure preserves the
 previous report.
 

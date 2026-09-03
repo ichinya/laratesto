@@ -6,9 +6,10 @@ namespace Laratesto\Rector\Residuals;
 
 /**
  * The scanner reads whatever the caller hands it — file contents after an apply, or
- * processed contents held in memory during a dry run (see the ticket-04 spec: the disk
- * holds no markers in a dry run). Pure string work: no filesystem access, no I/O, so
- * it is trivially testable and reusable from both entry points.
+ * the content representing each file during a dry run: the on-disk text, overlaid
+ * where a machine-JSON diff exists by the reconstructed new side. Pure string work:
+ * no filesystem access, no I/O, so it is trivially testable and reusable from both
+ * entry points.
  *
  * Markers parse with the shared {@see ResidualMarker::MARKER_REGEX}; a marker holding
  * several rule contributions yields one {@see Residual} per contribution.

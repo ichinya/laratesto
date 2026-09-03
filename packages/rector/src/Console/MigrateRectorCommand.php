@@ -174,10 +174,14 @@ final class MigrateRectorCommand extends Command
     }
 
     /**
-     * Residuals of the run: dry-run scans the RECONSTRUCTED new-side content of each
-     * machine-JSON diff (the disk holds no markers yet, but markers already on disk
-     * must still be reported); apply scans the processed paths as they now exist —
-     * including files an earlier run already migrated and left carrying markers.
+     * Residuals of the run — the same walk for both modes so their reports can
+     * never disagree: every processed PHP file on disk is scanned exactly once,
+     * and in a dry-run a machine-JSON diff OVERLAYS the reconstructed new-side
+     * content for its file (freshly added markers appear, markers a hunk removes
+     * disappear, markers the new side keeps are reported once with new-side line
+     * numbers). Apply reads the files as Rector wrote them — including files an
+     * earlier run already migrated and left carrying markers — so a no-op
+     * dry-run over an already-migrated tree reports the same residuals as apply.
      *
      * @param list<array{file: string, diff: string}> $fileDiffs
      * @param list<non-empty-string> $paths
@@ -185,38 +189,37 @@ final class MigrateRectorCommand extends Command
      */
     private function collectResiduals(bool $apply, array $fileDiffs, array $paths, string $root): array
     {
-        if ($apply) {
-            $residuals = [];
+        // Forward-slashed absolute path => reconstructed new-side content. Only
+        // meaningful for a dry-run: after an apply the disk IS the new side.
+        $virtual = [];
 
-            foreach ($this->phpFiles($paths) as $absolute) {
-                $residuals = [
-                    ...$residuals,
-                    ...$this->scanner->scan($this->relativeToRoot($root, $absolute), (string) \file_get_contents($absolute)),
-                ];
+        if (! $apply) {
+            foreach ($fileDiffs as $diff) {
+                $absolute = $this->isAbsolute($diff['file'])
+                    ? $diff['file']
+                    : $root . '/' . $this->toForwardSlashes(\ltrim($diff['file'], '/'));
+
+                if (! \is_file($absolute)) {
+                    continue;
+                }
+
+                $original = (string) \file_get_contents($absolute);
+
+                $virtual[$this->toForwardSlashes($absolute)] = $diff['diff'] === ''
+                    ? $original
+                    : $this->reconstructor->reconstruct($original, $diff['diff']);
             }
-
-            return $residuals;
         }
 
         $residuals = [];
 
-        foreach ($fileDiffs as $diff) {
-            $absolute = $this->isAbsolute($diff['file'])
-                ? $diff['file']
-                : $root . '/' . $this->toForwardSlashes(\ltrim($diff['file'], '/'));
-
-            if (! \is_file($absolute)) {
-                continue;
-            }
-
-            $original = (string) \file_get_contents($absolute);
-            $virtual = $diff['diff'] === ''
-                ? $original
-                : $this->reconstructor->reconstruct($original, $diff['diff']);
+        foreach ($this->phpFiles($paths) as $absolute) {
+            $contents = $virtual[$this->toForwardSlashes($absolute)]
+                ?? (string) \file_get_contents($absolute);
 
             $residuals = [
                 ...$residuals,
-                ...$this->scanner->scan($this->relativeToRoot($root, $absolute), $virtual),
+                ...$this->scanner->scan($this->relativeToRoot($root, $absolute), $contents),
             ];
         }
 
