@@ -39,4 +39,39 @@ final class ResidualCodeContractTest
 
         Assert::same($documented, ResidualCode::all(), 'The README residual catalog must match ResidualCode::all() exactly.');
     }
+
+    #[Test]
+    public function migratingTableDocumentsExactlyTheCatalog(): void
+    {
+        $migrating = (string) \file_get_contents(dirname(__DIR__, 2) . '/MIGRATING.md');
+
+        $documented = [];
+        foreach (\explode("\n", $migrating) as $line) {
+            if (!\str_starts_with($line, '| `')) {
+                continue;
+            }
+
+            \preg_match_all('/`([A-Z][A-Z0-9_]+)`/', $line, $matches);
+            foreach ($matches[1] as $code) {
+                $documented[] = $code;
+            }
+        }
+
+        Assert::same(
+            \count($documented),
+            \count(\array_unique($documented)),
+            'The MIGRATING residual table must document each code exactly once.'
+        );
+
+        $sorted = $documented;
+        \sort($sorted);
+        $catalog = ResidualCode::all();
+        \sort($catalog);
+
+        Assert::same(
+            $sorted,
+            $catalog,
+            'The MIGRATING residual table must document every catalog code — no more, no fewer.'
+        );
+    }
 }

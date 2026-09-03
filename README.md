@@ -161,8 +161,8 @@ vendor/bin/testo run --suite=Unit
 
 For full Laravel test suites the bridge ships a Rector-based migrator. The
 command wraps the pinned Rector binary with the public
-`Laravel\PhpunitToLaratesto` set, prints the residual table and writes a
-deterministic `laratesto-residuals.json`:
+`Laratesto\Rector\Set\LaratestoRectorSetList::LARAVEL_PHPUNIT_TO_LARATESTO`
+set, prints the residual table and writes a deterministic `laratesto-residuals.json`:
 
 ```bash
 # Dry-run (default): sources stay untouched, report is written.

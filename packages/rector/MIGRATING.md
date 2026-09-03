@@ -8,7 +8,11 @@ with.
 
 - A Git work tree with the processed paths clean (`git status -- <paths>`): the
   Artisan `--apply` refuses modified paths by default.
-- `testo/testo`, `ichinya/laratesto` and `ichinya/laratesto-rector` installed.
+- `testo/testo`, `ichinya/laratesto` and `ichinya/laratesto-rector` installed. The
+  `ichinya/laratesto` runtime must ship the multi-connection database attributes
+  (`connections`/`tables`/`exceptTables` on `DatabaseTruncation` and
+  `RefreshDatabase`) — use `dev-main` until that release: the generated
+  attributes do not exist in the released runtime 0.6.9.
 - The project's test classes autoloadable (a standard Laravel `Tests\` namespace is).
 
 ## 1. Artisan (recommended)
@@ -83,8 +87,9 @@ reason, sorted by rule.
 | Code | Typical trigger | Manual fix |
 | --- | --- | --- |
 | `LARAVEL_FAKE_UNSUPPORTED` | `Mail::fake()`, `Queue::fake()`, `Http::fake()` … | keep the fake for now and run the test under PHPUnit semantics, or replace with Testo-native doubles |
-| `RESPONSE_UNSUPPORTED_API` | `assertJsonFragment()`, `withoutExceptionHandling()` | use a supported assert (`assertJson`, `assertJsonStructure`, …) or assert manually on `->json()` |
+| `RESPONSE_UNSUPPORTED_API` | `assertJsonFragment()` | use a supported assert (`assertJson`, `assertJsonStructure`, …) or assert manually on `->json()` |
 | `DATABASE_UNSUPPORTED_CONFIGURATION` | custom `beforeRefreshingDatabase()` hooks, dynamic `$connectionsToTruncate` | move the hook body into the test or `setUpLaravel()`, express options as literal attribute arguments |
+| `HTTP_UNSUPPORTED_SIGNATURE` | `$this->postJson()` with extra, unpacked or named arguments, dynamic helper calls like `$this->withoutExceptionHandling()` | simplify the call to the supported signature (literal URL, plain positional arguments) or migrate it by hand |
 | `CLASS_UNSAFE_HIERARCHY` / `LIFECYCLE_UNSUPPORTED` | custom parent with its own `setUp`, parameterized lifecycle | convert the base class explicitly (add it via `--base-class`), or restructure |
 | `LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY` | helper class using `$this->app` or a database trait | decide whether the class should become a Laratesto test or drop the test constructs |
 | `ARTISAN_INTERACTION_UNSUPPORTED` | `expectsQuestion()`, choice/search prompts | split the command test or fake the interaction manually |
