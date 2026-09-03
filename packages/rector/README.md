@@ -116,14 +116,21 @@ Unsupported constructions stay semantically untouched and receive
 
 ## Compatibility baseline
 
-The current package intentionally pins Rector to `2.6.2` and supports
-`testo/bridge-rector` `0.2.4`. Bridge `0.2.4` still uses Rector's former
-`Container::tagged()` integration, which is absent from newer Rector versions tested
-for this release. Remove or widen the pin only after the public-set, configured-rule,
-and double-run corpus tests pass against the candidate Rector version.
+This package requires PHP `>=8.2` — the same minimum as Testo and the runtime. It
+intentionally pins Rector to `2.6.2` and supports `testo/bridge-rector` `0.2.4`.
+Bridge `0.2.4` still uses Rector's former `Container::tagged()` integration, which
+is absent from newer Rector versions tested for this release. Remove or widen the
+pin only after the public-set, configured-rule, and double-run corpus tests pass
+against the candidate Rector version.
 
-The repository's locked runtime baseline is PHP `^8.3`, Laravel `^13.0`, Testo
-`^0.10.42`, and the Laratesto runtime API declared by this adapter (`^0.6.9`).
+The Laratesto runtime these rules migrate to supports PHP `>=8.2`,
+Laravel `^12.0 || ^13.0` and Testo `^0.10.42`. This package declares no Composer
+dependency on the runtime and only suggests it: the rules rewrite database traits
+into the multi-connection attributes (`connections`, `tables`, `exceptTables` on
+`#[DatabaseTruncation]`; `connections` on `#[RefreshDatabase]`), which the released
+runtime `0.6.9` does not ship. Install `ichinya/laratesto` `dev-main` — or the first
+release that includes those attributes — before running migrated tests; against
+`0.6.9` the generated code cannot run.
 
 ## Autoloading
 

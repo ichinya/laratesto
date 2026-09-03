@@ -79,4 +79,87 @@ final class PackageAutoloadTest
 
         Assert::same($source, $installed, 'vendor/ichinya/laratesto-rector must be the repo source (path repository in symlink mode).');
     }
+
+    #[Test]
+    public function compatibilityBaselineMatchesComposerJson(): void
+    {
+        // PR #8 review point 8: the documented compatibility baseline is the
+        // composer.json baseline — PHP >=8.2, the deliberate Rector pin, the
+        // supported bridge — and the runtime boundary names dev-main, not 0.6.9.
+        $packageDir = \dirname(__DIR__, 2);
+        $packageComposer = \json_decode((string) \file_get_contents($packageDir . '/composer.json'), true, flags: JSON_THROW_ON_ERROR);
+        $readme = (string) \file_get_contents($packageDir . '/README.md');
+
+        Assert::same('>=8.2', $packageComposer['require']['php'] ?? null, 'The package must keep Testo\'s PHP minimum.');
+        Assert::same('2.6.2', $packageComposer['require']['rector/rector'] ?? null, 'The Rector pin is deliberate; bumping it needs the corpus gates.');
+        Assert::same('^0.2.4', $packageComposer['require']['testo/bridge-rector'] ?? null, 'The supported bridge version must stay documented.');
+
+        $suggest = $packageComposer['suggest']['ichinya/laratesto'] ?? '';
+        Assert::true(\str_contains($suggest, 'dev-main'), 'The suggest must point at dev-main until the multi-connection database release.');
+        Assert::true(\str_contains($suggest, '0.6.9'), 'The suggest must state the truthful incompatibility boundary (runtime 0.6.9).');
+
+        foreach (['PHP `^8.3`', 'Laravel `^13.0`', '(`^0.6.9`)'] as $falseClaim) {
+            Assert::true(!\str_contains($readme, $falseClaim), 'The README must not claim: ' . $falseClaim);
+        }
+
+        foreach (['>=8.2', '^12.0 || ^13.0', 'dev-main', '0.6.9'] as $fact) {
+            Assert::true(\str_contains($readme, $fact), 'The README compatibility baseline must state: ' . $fact);
+        }
+    }
+
+    #[Test]
+    public function composerLockMetadataMatchesThePathPackage(): void
+    {
+        // PR #8 review point 8: the path-package lock entry must never drift from
+        // the package composer.json — an edit without `composer update` fails here.
+        $rootDir = \dirname(__DIR__, 4);
+        $packageDir = \dirname(__DIR__, 2);
+
+        $packageComposer = \json_decode((string) \file_get_contents($packageDir . '/composer.json'), true, flags: JSON_THROW_ON_ERROR);
+        $lock = \json_decode((string) \file_get_contents($rootDir . '/composer.lock'), true, flags: JSON_THROW_ON_ERROR);
+
+        $entry = null;
+        foreach (['packages', 'packages-dev'] as $section) {
+            foreach ($lock[$section] ?? [] as $locked) {
+                if (($locked['name'] ?? null) === $packageComposer['name']) {
+                    $entry = $locked;
+                    break 2;
+                }
+            }
+        }
+
+        Assert::true($entry !== null, 'composer.lock must contain the ichinya/laratesto-rector path package.');
+        Assert::true(($entry['dist']['type'] ?? null) === 'path', 'The locked rector package must come from the path repository.');
+        Assert::same('dev-main', $entry['version'] ?? null, 'The path package must be locked from its dev branch.');
+
+        $expected = [
+            'keywords' => $packageComposer['keywords'] ?? [],
+            'type' => $packageComposer['type'],
+            'description' => $packageComposer['description'],
+            // Composer accepts a scalar license in composer.json but stores the
+            // normalized list form in the lock.
+            'license' => (array) ($packageComposer['license'] ?? []),
+            'authors' => $packageComposer['authors'],
+            'require' => $packageComposer['require'],
+            'suggest' => $packageComposer['suggest'] ?? [],
+            'extra' => $packageComposer['extra'],
+            'autoload' => $packageComposer['autoload'],
+        ];
+        \sort($expected['keywords']);
+
+        $actual = [
+            'keywords' => $entry['keywords'] ?? [],
+            'type' => $entry['type'] ?? null,
+            'description' => $entry['description'] ?? null,
+            'license' => $entry['license'] ?? null,
+            'authors' => $entry['authors'] ?? null,
+            'require' => $entry['require'] ?? null,
+            'suggest' => $entry['suggest'] ?? [],
+            'extra' => $entry['extra'] ?? null,
+            'autoload' => $entry['autoload'] ?? null,
+        ];
+        \sort($actual['keywords']);
+
+        Assert::same($expected, $actual, 'composer.lock path-package metadata must match packages/rector/composer.json.');
+    }
 }
