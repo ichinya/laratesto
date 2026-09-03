@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Laratesto\Rector\Console;
 
 use Illuminate\Console\Command;
+use Laratesto\Rector\Configuration\BaseClassConfiguration;
 use Laratesto\Rector\Residuals\Residual;
 use Laratesto\Rector\Residuals\ResidualsReport;
 use Laratesto\Rector\Residuals\ResidualsScanner;
@@ -75,6 +76,14 @@ final class MigrateRectorCommand extends Command
         }
 
         try {
+            $extraBases = $this->extraBaseClasses();
+        } catch (\InvalidArgumentException $rejection) {
+            $this->error('--base-class: ' . $rejection->getMessage());
+
+            return self::EXIT_FAILURE;
+        }
+
+        try {
             $paths = $this->pathGuard->normalizeProcessedPaths($root, $this->givenPaths());
             $reportFile = $this->pathGuard->resolveReportPath($root, $this->reportPath(), $paths);
         } catch (\InvalidArgumentException $rejection) {
@@ -102,7 +111,7 @@ final class MigrateRectorCommand extends Command
         }
 
         try {
-            $config = $this->configWriter->write($targetMode, $paths, $this->extraBaseClasses());
+            $config = $this->configWriter->write($targetMode, $paths, $extraBases);
 
             try {
                 // Re-check the work tree immediately before the Rector process: the
@@ -339,14 +348,21 @@ final class MigrateRectorCommand extends Command
     }
 
     /**
+     * Extra `--base-class` values in canonical `Tests\ApiTestCase` form: the
+     * documented forward-slash spelling, surrounding whitespace and one leading
+     * separator are accepted, duplicates are removed, and malformed or empty
+     * values are rejected before anything runs.
+     *
      * @return list<non-empty-string>
+     * @throws \InvalidArgumentException On any malformed or empty value.
      */
     private function extraBaseClasses(): array
     {
-        return \array_values(\array_filter(\array_map(
-            static fn(mixed $base): string => \trim((string) $base),
-            (array) $this->option('base-class'),
-        )));
+        $given = \array_values((array) $this->option('base-class'));
+
+        return $given === []
+            ? []
+            : BaseClassConfiguration::canonicalBaseClasses($given);
     }
 
     private function relativeToRoot(string $root, string $absolute): string

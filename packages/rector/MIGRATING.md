@@ -38,8 +38,12 @@ git commit
 ```
 
 Useful flags: `--path` (repeatable, default `tests`), `--base-class` (add a project
-base), `--target-mode=base_class|trait`, `--report=<file>`, `--allow-dirty`
+base; `Tests/ApiTestCase`, a leading separator and surrounding whitespace are
+canonicalized to `Tests\ApiTestCase`, empty or malformed names are rejected),
+`--target-mode=base_class|trait`, `--report=<file>`, `--allow-dirty`
 (overrides the clean-paths guard — no automatic rollback is promised for that run).
+On POSIX shells quote the backslash form — an unquoted `Tests\ApiTestCase` silently
+loses the backslash.
 
 ## 2. Raw Rector
 

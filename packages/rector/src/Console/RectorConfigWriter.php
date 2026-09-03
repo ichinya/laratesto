@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace Laratesto\Rector\Console;
 
+use Laratesto\Rector\Configuration\BaseClassConfiguration;
 use Laratesto\Rector\Rules\LaravelBaseClassRector;
 use Laratesto\Rector\Set\LaratestoRectorSetList;
 
 /**
  * Generates the throwaway Rector configuration for one migration run: the public
  * set, the processed paths and the explicit target-mode/base-class overrides.
+ * Base class names are written in canonical `Tests\ApiTestCase` form — defaults
+ * first, extras canonicalized through
+ * {@see BaseClassConfiguration::canonicalBaseClasses()}, duplicates removed.
  */
 final class RectorConfigWriter
 {
@@ -18,6 +22,7 @@ final class RectorConfigWriter
      * @param list<non-empty-string> $extraBaseClasses
      * @return non-empty-string Path to the generated config (a unique temp file).
      * @throws \RuntimeException When the config cannot be written.
+     * @throws \InvalidArgumentException When an extra base class is empty or malformed.
      */
     public function write(string $targetMode, array $absolutePaths, array $extraBaseClasses): string
     {
@@ -44,11 +49,13 @@ final class RectorConfigWriter
             : \sprintf(
                 '%s::BASE_CLASSES => [%s],',
                 '\\' . LaravelBaseClassRector::class,
-                \implode(', ', [
-                    \var_export('Tests\TestCase', true),
-                    \var_export('Illuminate\Foundation\Testing\TestCase', true),
-                    ... \array_map(static fn(string $base): string => \var_export($base, true), $extraBaseClasses),
-                ]),
+                \implode(', ', \array_map(
+                    static fn(string $base): string => \var_export($base, true),
+                    BaseClassConfiguration::canonicalBaseClasses([
+                        ...BaseClassConfiguration::DEFAULT_BASE_CLASSES,
+                        ...$extraBaseClasses,
+                    ]),
+                )),
             );
 
         $overrideCode = \sprintf(

@@ -175,8 +175,20 @@ php artisan laratesto:migrate-rector --path=tests/Feature --report=storage/resid
 php artisan laratesto:migrate-rector --apply
 
 # Choose the conversion target and additional project base classes.
+# Forward slashes are accepted everywhere; quote the backslash form on POSIX shells.
 php artisan laratesto:migrate-rector --target-mode=trait --base-class=Tests/ApiTestCase
 ```
+
+`--base-class` values are canonicalized before use: surrounding whitespace is
+trimmed, forward slashes become backslashes, and a leading separator is accepted
+zero or exactly one time — `Tests/ApiTestCase`, `\Tests\ApiTestCase`,
+`/Tests/ApiTestCase` and `' Tests\ApiTestCase '` all become `Tests\ApiTestCase` —
+duplicates are removed. Anything that cannot be a PHP class name is rejected
+with exit `1`: an empty value, repeated or mixed leading separators (`//Tests`,
+`\\Tests`), an empty internal segment such as the double backslash of a wrongly
+escaped `Tests\\\\ApiTestCase`, a trailing separator, dots, colons or embedded
+whitespace. Pass forward slashes, or quote the backslash form: in POSIX shells
+an unquoted `Tests\ApiTestCase` silently loses the backslash.
 
 Exit contract: `0` — no manual residuals; `1` — execution, guard or report
 failure; `2` — manual residuals present (Rector's dry-run "changes found" exit

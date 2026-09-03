@@ -47,6 +47,14 @@ versions follow [Semantic Versioning](https://semver.org/).
     command answers with a friendly error and exit 1 instead of a raw Symfony
     Process exception; the explicit missing-Rector-binary check and the stderr
     diagnostics stay in place.
+  - `laratesto:migrate-rector --base-class` and rule `base_classes` values are
+    canonicalized safely: the documented forward-slash spelling
+    (`Tests/ApiTestCase`), a single leading separator and surrounding whitespace
+    normalize to the canonical `Tests\ApiTestCase`, canonical duplicates are
+    removed, and empty or malformed names (an empty segment, a trailing
+    separator, an invalid label character) fail the run with a friendly error
+    and exit 1 before anything executes; the README examples are unambiguous
+    across POSIX and Windows shells.
 - `DatabaseTransactions` restores and re-caches in-memory connections around
   the transaction, so a `:memory:` schema no longer vanishes between tests.
 

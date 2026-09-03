@@ -237,6 +237,84 @@ PHP;
         }
     }
 
+    /**
+     * PR #8 review point 9: the documented README spelling with forward slashes
+     * must reach the rule as the canonical `Tests\ApiTestCase` and convert the
+     * corpus exactly like the backslash form.
+     */
+    #[Test]
+    public function documentedForwardSlashBaseClassIsCanonicalizedAndConverts(): void
+    {
+        [$root, $dir, $file, $report] = $this->customCorpus();
+
+        try {
+            $this->registerProvider();
+
+            $result = $this->artisan('laratesto:migrate-rector', [
+                '--path' => [$dir],
+                '--report' => $report,
+                '--base-class' => ['Tests/ApiTestCase'],
+                '--apply' => true,
+            ]);
+
+            Assert::same(
+                0,
+                $result->exitCode(),
+                'The documented forward-slash spelling must convert like Tests\ApiTestCase. Output: ' . $result->output(),
+            );
+            Assert::true(
+                \str_contains((string) \file_get_contents($file), 'Laratesto\\Testing\\LaravelTestCase'),
+                'The custom base class must be converted through the canonicalized override.',
+            );
+        } finally {
+            @\unlink($file);
+            @\rmdir($dir);
+            @\unlink($report);
+        }
+    }
+
+    /**
+     * PR #8 review point 9: malformed or empty values are rejected with exit 1
+     * before any Git check, Rector run or report write happens.
+     */
+    #[Test]
+    public function malformedAndEmptyBaseClassValuesAreRejectedBeforeAnyRun(): void
+    {
+        [$root, $dir, $file, $report] = $this->customCorpus();
+
+        try {
+            $this->registerProvider();
+
+            $before = \md5_file($file);
+
+            // The double backslash a POSIX shell leaves behind: an empty segment.
+            $malformed = $this->artisan('laratesto:migrate-rector', [
+                '--path' => [$dir],
+                '--report' => $report,
+                '--base-class' => ['Tests\\\\ApiTestCase'],
+            ]);
+
+            Assert::same(1, $malformed->exitCode(), 'Malformed input must fail the run. Output: ' . $malformed->output());
+            Assert::true(\str_contains($malformed->output(), '--base-class'), 'The failing option must be named.');
+            Assert::true(\str_contains($malformed->output(), 'Invalid base class'), 'The offending value must be named.');
+            Assert::false(\is_file($report), 'No report may be written for rejected input.');
+
+            $empty = $this->artisan('laratesto:migrate-rector', [
+                '--path' => [$dir],
+                '--report' => $report,
+                '--base-class' => ['   '],
+            ]);
+
+            Assert::same(1, $empty->exitCode(), 'Whitespace-only input must fail the run. Output: ' . $empty->output());
+            Assert::false(\is_file($report), 'Still no report for rejected input.');
+            Assert::same($before, \md5_file($file), 'Rejected input must leave the sources untouched.');
+        } finally {
+            @\unlink($file);
+            @\rmdir($dir);
+            @\unlink($report);
+        }
+    }
+
     #[Test]
     public function allowDirtyOverridesTheGuardWithAWarning(): void
     {

@@ -51,7 +51,10 @@ testo run
 ```
 
 Options: repeatable `--path` (default `tests`), `--base-class` (adds a project base to
-the defaults), `--target-mode=base_class|trait`, `--report=<file>`, `--allow-dirty`.
+the defaults; accepted spellings `Tests/ApiTestCase`, `'\Tests\ApiTestCase'` and
+`' Tests\ApiTestCase '` are canonicalized to `Tests\ApiTestCase`, duplicates are
+removed, empty or malformed names are rejected), `--target-mode=base_class|trait`,
+`--report=<file>`, `--allow-dirty`.
 
 **Exit codes**: `0` — success, no manual residuals; `1` — config/process/JSON/report
 or safety failure; `2` — success, manual residuals present. Rector's native dry-run
