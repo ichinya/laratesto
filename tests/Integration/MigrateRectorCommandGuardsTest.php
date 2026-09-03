@@ -79,7 +79,27 @@ final class MigrateRectorCommandGuardsTest
         ]);
 
         Assert::same(1, $result->exitCode());
-        Assert::string($result->output())->contains('not inside a Git work tree');
+        Assert::string($result->output())->contains('Unable to verify a clean state with Git');
+        Assert::string($result->output())->contains('fatal: not a git repository');
+        Assert::same(0, $runner->rectorInvocations());
+    }
+
+    #[Test]
+    public function anUnavailableGitBinaryFailsApplyFriendly(): void
+    {
+        [$runner, $dir, $report] = $this->probe(
+            gitProbe: new ProcessOutcome(1, '', 'Failed to start git: git: command not found'),
+        );
+
+        $result = $this->artisan('laratesto:migrate-rector', [
+            '--path' => [$dir],
+            '--report' => $report,
+            '--apply' => true,
+        ]);
+
+        Assert::same(1, $result->exitCode());
+        Assert::string($result->output())->contains('Unable to verify a clean state with Git');
+        Assert::string($result->output())->contains('Failed to start git');
         Assert::same(0, $runner->rectorInvocations());
     }
 

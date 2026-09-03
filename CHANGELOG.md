@@ -34,6 +34,13 @@ versions follow [Semantic Versioning](https://semver.org/).
     closed: realpath path containment, Git porcelain `-z` status with checked
     exit code and a re-check before the Rector process, machine-JSON schema
     validation, apply-only exit-0 matrix and no scratch files.
+  - external processes are bounded and fail friendly: a hung Git guard call or
+    Rector run is killed after 10 minutes and reported as a failure; a process
+    that cannot start (a missing Git binary, a missing working directory) or a
+    timed-out child becomes a failed outcome with the reason in stderr, so the
+    command answers with a friendly error and exit 1 instead of a raw Symfony
+    Process exception; the explicit missing-Rector-binary check and the stderr
+    diagnostics stay in place.
 - `DatabaseTransactions` restores and re-caches in-memory connections around
   the transaction, so a `:memory:` schema no longer vanishes between tests.
 

@@ -182,6 +182,14 @@ Exit contract: `0` — no manual residuals; `1` — execution, guard or report
 failure; `2` — manual residuals present (Rector's dry-run "changes found" exit
 is a successful execution here).
 
+Every external process is bounded: Git guard calls and the Rector run must
+finish within 10 minutes (`SymfonyProcessRunner::DEFAULT_TIMEOUT_SECONDS`),
+after which the process is killed and the run fails with exit `1` — never an
+unbounded hang. A process that cannot start (e.g. Git is not installed for the
+`--apply` guard, or the pinned Rector binary is missing — the binary is checked
+explicitly first) fails the command with exit `1` and its stderr diagnostics
+instead of a raw exception trace.
+
 ### Target modes
 
 - `base_class` (default) — the project base `Tests\TestCase` is converted

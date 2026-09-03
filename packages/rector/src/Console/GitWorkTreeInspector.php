@@ -7,7 +7,9 @@ namespace Laratesto\Rector\Console;
 /**
  * Git work-tree facts the apply guard relies on. Every Git invocation goes through
  * the injected {@see ProcessRunner}, its exit code and stderr are checked, and a Git
- * failure fails the caller closed — apply never proceeds on unknown state.
+ * failure fails the caller closed — apply never proceeds on unknown state. A Git
+ * invocation that cannot run at all (e.g. Git is not installed) throws with the
+ * stderr diagnostics instead of degrading into a misleading "not a work tree".
  */
 class GitWorkTreeInspector
 {
@@ -15,12 +17,20 @@ class GitWorkTreeInspector
         private readonly ProcessRunner $runner,
     ) {}
 
+    /**
+     * @throws \RuntimeException When the Git call itself fails (non-zero exit; a
+     *         missing Git binary arrives as exit 1 with the start failure in stderr).
+     */
     public function isInsideWorkTree(string $root): bool
     {
         $outcome = $this->runner->run(['git', '-C', $root, 'rev-parse', '--is-inside-work-tree'], $root);
 
         if ($outcome->exitCode !== 0) {
-            return false;
+            throw new \RuntimeException(\sprintf(
+                'git rev-parse failed (exit %d): %s',
+                $outcome->exitCode,
+                \trim($outcome->stderr) !== '' ? \trim($outcome->stderr) : 'no stderr output',
+            ));
         }
 
         return \trim($outcome->stdout) === 'true';

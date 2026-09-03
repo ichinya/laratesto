@@ -227,20 +227,20 @@ final class MigrateRectorCommand extends Command
     }
 
     /**
-     * The apply guard: no Git work tree, a failing Git status, or any modified
-     * processed path blocks the run.
+     * The apply guard: no Git work tree, a failing Git call (including a missing Git
+     * binary), or any modified processed path blocks the run.
      *
      * @param list<non-empty-string> $paths
      */
     private function guardCleanProcessedPaths(string $root, array $paths): bool
     {
-        if (! $this->gitInspector->isInsideWorkTree($root)) {
-            $this->error('The project is not inside a Git work tree; --apply without --allow-dirty refuses to run.');
-
-            return false;
-        }
-
         try {
+            if (! $this->gitInspector->isInsideWorkTree($root)) {
+                $this->error('The project is not inside a Git work tree; --apply without --allow-dirty refuses to run.');
+
+                return false;
+            }
+
             $modified = $this->gitInspector->modifiedPaths($root, $paths);
         } catch (\RuntimeException $failure) {
             $this->error('Unable to verify a clean state with Git: ' . $failure->getMessage());
