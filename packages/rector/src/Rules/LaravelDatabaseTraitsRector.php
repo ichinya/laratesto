@@ -16,6 +16,7 @@ use PhpParser\Node\AttributeGroup;
 use PhpParser\Node\Identifier;
 use PhpParser\Node\Name\FullyQualified;
 use PhpParser\Node\Stmt\Class_;
+use PhpParser\Node\Stmt\ClassLike;
 use PhpParser\Node\Stmt\Property;
 use PhpParser\Node\Stmt\PropertyProperty;
 use PhpParser\Node\Stmt\TraitUse;
@@ -179,23 +180,30 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
         return false;
     }
 
-    /** @param list<non-empty-string> $symbols */
+    /**
+     * Queues each symbol's import for removal unless a remaining class-like still resolves
+     * the bare name. Traits, enums and interfaces share the file's import table, so a
+     * same-file `trait ReusableSetup { use RefreshDatabase; }` keeps the import alive even
+     * after the converted class drops its trait use.
+     *
+     * @param list<non-empty-string> $symbols
+     */
     private function queueImportsWithoutRemainingUses(array $symbols): void
     {
         $statements = $this->getFile()->getNewStmts();
         $nodeFinder = new NodeFinder();
 
-        foreach ($symbols as $key => $symbol) {
-            /** @var list<Class_> $classes */
-            $classes = $nodeFinder->findInstanceOf($statements, Class_::class);
+        /** @var list<ClassLike> $classLikes */
+        $classLikes = $nodeFinder->findInstanceOf($statements, ClassLike::class);
 
-            foreach ($classes as $class) {
+        foreach ($symbols as $key => $symbol) {
+            foreach ($classLikes as $classLike) {
                 /** @var list<Node\Name> $names */
-                $names = $nodeFinder->findInstanceOf($class, Node\Name::class);
+                $names = $nodeFinder->findInstanceOf($classLike, Node\Name::class);
                 foreach ($names as $name) {
                     if ($this->analyzer->resolvedName($name) === $symbol) {
                         unset($symbols[$key]);
-                        continue 3;
+                        continue 2;
                     }
                 }
             }
