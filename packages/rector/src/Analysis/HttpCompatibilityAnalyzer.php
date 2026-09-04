@@ -165,6 +165,7 @@ final class HttpCompatibilityAnalyzer
         'getStatusCode' => [0, 0, []],
         'getContent' => [0, 0, []],
         'assertSee' => [1, 2, ['string', 'bool']],
+        'assertDontSee' => [1, 2, ['string-or-array', 'bool']],
         'assertExactJson' => [1, 1, ['array']],
         'assertHeaderMissing' => [1, 1, ['string']],
         'assertCreated' => [0, 0, []],
@@ -194,6 +195,7 @@ final class HttpCompatibilityAnalyzer
         'assertHeader',
         'assertRedirect',
         'assertSee',
+        'assertDontSee',
         'assertExactJson',
         'assertHeaderMissing',
         'assertCreated',
@@ -412,6 +414,8 @@ final class HttpCompatibilityAnalyzer
             'int' => $expression instanceof Scalar\Int_,
             'bool' => $this->isConst($expression, 'true') || $this->isConst($expression, 'false'),
             'array' => $expression instanceof Expr\Array_ && $this->arrayIsStatic($expression),
+            'string-or-array' => $expression instanceof Scalar\String_
+                || ($expression instanceof Expr\Array_ && $this->arrayIsStatic($expression)),
             'array-or-closure' => ($expression instanceof Expr\Array_ && $this->arrayIsStatic($expression))
                 || $this->isAssertJsonCallable($expression),
             'associative-array' => $expression instanceof Expr\Array_
