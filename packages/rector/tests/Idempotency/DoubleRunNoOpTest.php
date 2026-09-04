@@ -91,6 +91,36 @@ final class MixedUnsafeResponseTest extends TestCase
 }
 PHP;
 
+    /**
+     * GLM cold-review finding: the analyzer scanned MethodCall only, so a PHPUnit
+     * assertion written as self::/static:: (self::assertStringContainsString())
+     * survived the upstream bridge-rector, bypassed the residual preflight, and the
+     * class still migrated to LaravelTestCase — fataling at runtime on the converted
+     * base, which provides no assert surface. The full pipeline must keep the class
+     * on PHPUnit with an actionable residual naming the static call, and the second
+     * run must not touch anything.
+     */
+    private const STATIC_ASSERT_CORPUS = <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature;
+
+use Illuminate\Foundation\Testing\TestCase;
+
+final class StaticAssertBlockTest extends TestCase
+{
+    public function test_haystack(): void
+    {
+        $this->assertSame('acme', 'acme');
+
+        self::assertStringContainsString('acme', 'acme label');
+    }
+}
+PHP;
+
+
     #[Test]
     public function mixedFileGateMarksSafeClassAndStaysIdempotent(): void
     {
@@ -113,6 +143,29 @@ PHP;
         // The unsafe sibling keeps its own marker and stays un-migrated.
         $migrated->contains('TestResponse::assertDownload() is outside the supported response matrix');
         $migrated->contains('extends TestCase');
+    }
+
+    #[Test]
+    public function staticAssertBlockMarksResidualAndStaysIdempotent(): void
+    {
+        $snapshot = RectorRun::twiceWithByteIdenticalSecondRun([
+            'StaticAssertBlockTest.php' => self::STATIC_ASSERT_CORPUS,
+        ]);
+
+        $blocked = Assert::string($snapshot['StaticAssertBlockTest.php']);
+
+        // The unsupported self:: assert keeps the class on PHPUnit.
+        $blocked->contains('extends TestCase');
+        $blocked->contains('self::assertStringContainsString() is outside the supported helper matrix');
+
+        // Both preflight rules fail the same code and merge into one marker comment.
+        $blocked->contains(
+            'laratesto-residual(code=HTTP_UNSUPPORTED_SIGNATURE, '
+            . 'rule=Laratesto\Rector\Rules\LaravelBaseClassRector, severity=manual)',
+        );
+        $blocked->contains(
+            'rule=Laratesto\Rector\Rules\LaravelSourceCompatibleCallsRector, severity=manual)',
+        );
     }
 
     #[Test]

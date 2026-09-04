@@ -10,7 +10,9 @@ use PhpParser\Node\Arg;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Expr\MethodCall;
 use PhpParser\Node\Expr\PropertyFetch;
+use PhpParser\Node\Expr\StaticCall;
 use PhpParser\Node\Expr\Variable;
+use PhpParser\Node\Identifier;
 use PhpParser\Node\Name;
 use PhpParser\Node\Scalar;
 use PhpParser\Node\Stmt\Class_;
@@ -329,35 +331,10 @@ final class HttpCompatibilityAnalyzer
                 // matrices above, and methods declared by the class itself survive
                 // conversion. Every other `$this->` call (unknown helper, Laravel
                 // TestCase leftover such as putJson/seed) has no converted
-                // equivalent and would fatal at runtime. Three carve-outs keep the
-                // classification aligned with what the pipeline really produces:
-                // upstream rewrites that fire for every argument shape, upstream
-                // rewrites pinned to their triggering argument shape, and the base
-                // helpers the conversion itself emits (make/app/session) validated
-                // by the HELPER matrix above.
-                if (in_array($method, $declaredMethods, true)) {
-                    continue;
-                }
-
-                if (isset(self::UPSTREAM_SHAPE_CONDITIONAL_CALLS[$method])) {
-                    $this->validate(
-                        $reasons,
-                        'HTTP_UNSUPPORTED_SIGNATURE',
-                        $method,
-                        $call->args,
-                        self::UPSTREAM_SHAPE_CONDITIONAL_CALLS[$method],
-                    );
-
-                    continue;
-                }
-
-                if (! in_array($method, self::UPSTREAM_REWRITTEN_CALLS, true)) {
-                    $this->addReason(
-                        $reasons,
-                        'HTTP_UNSUPPORTED_SIGNATURE',
-                        sprintf('$this->%s() is outside the supported helper matrix', $method),
-                    );
-                }
+                // equivalent and would fatal at runtime. The carve-outs shared with
+                // the self::/static:: classification live in
+                // classifyAgainstUpstreamRewrites().
+                $this->classifyAgainstUpstreamRewrites($reasons, '$this->', $method, $call->args, $declaredMethods);
 
                 continue;
             }
@@ -374,6 +351,42 @@ final class HttpCompatibilityAnalyzer
 
                 $this->validate($reasons, 'RESPONSE_UNSUPPORTED_API', $method, $call->args, self::RESPONSE_SIGNATURES[$method]);
             }
+        }
+
+        // PHPUnit assertions written as self::/static:: (self::assertStringContainsString())
+        // never reach the $this-> pass above, yet the upstream bridge-rector rewrites exactly
+        // its matrix for them: a supported call converts, an unsupported one survives onto the
+        // converted base and fatals at runtime. Classify them through the same carve-outs, and
+        // leave every other receiver (FQCN, imported, relative, parent::) alone - external
+        // static calls never touch the converted base.
+        /** @var list<StaticCall> $staticCalls */
+        $staticCalls = $this->nodeFinder->findInstanceOf($class->stmts, StaticCall::class);
+        foreach ($staticCalls as $staticCall) {
+            if (! $this->nodeNameResolver->isName($staticCall->class, 'self')
+                && ! $this->nodeNameResolver->isName($staticCall->class, 'static')) {
+                continue;
+            }
+
+            $staticMethod = $staticCall->name instanceof Identifier
+                ? $staticCall->name->toString()
+                : null;
+            if ($staticMethod === null) {
+                $this->addReason(
+                    $reasons,
+                    'HTTP_UNSUPPORTED_SIGNATURE',
+                    'dynamic self/static method cannot be classified',
+                );
+
+                continue;
+            }
+
+            $this->classifyAgainstUpstreamRewrites(
+                $reasons,
+                $this->nodeNameResolver->isName($staticCall->class, 'static') ? 'static::' : 'self::',
+                $staticMethod,
+                $staticCall->args,
+                $declaredMethods,
+            );
         }
 
         /** @var list<PropertyFetch> $properties */
@@ -437,6 +450,54 @@ final class HttpCompatibilityAnalyzer
                     sprintf('%s() argument %d is not a statically supported %s', $method, $position + 1, $types[$position] ?? 'value'),
                 );
             }
+        }
+    }
+
+    /**
+     * Fail-closed classification shared by the `$this->` and `self::`/`static::`
+     * receivers: the converted Laratesto base provides no assert surface, so any
+     * call the upstream bridge-rector leaves untouched would fatal at runtime.
+     * Three carve-outs keep the classification aligned with what the pipeline
+     * really produces: methods the class itself declares survive conversion,
+     * upstream rewrites that fire for every argument shape pass
+     * (UPSTREAM_REWRITTEN_CALLS), and the shape-conditional emptiness rewrites
+     * stay pinned to their provably-static-array triggering shape
+     * (UPSTREAM_SHAPE_CONDITIONAL_CALLS).
+     *
+     * @param array<non-empty-string, list<non-empty-string>> $reasons
+     * @param non-empty-string $receiver `$this->`, `self::` or `static::`
+     * @param list<Arg> $arguments
+     * @param list<non-empty-string> $declaredMethods
+     */
+    private function classifyAgainstUpstreamRewrites(
+        array &$reasons,
+        string $receiver,
+        string $method,
+        array $arguments,
+        array $declaredMethods,
+    ): void {
+        if (in_array($method, $declaredMethods, true)) {
+            return;
+        }
+
+        if (isset(self::UPSTREAM_SHAPE_CONDITIONAL_CALLS[$method])) {
+            $this->validate(
+                $reasons,
+                'HTTP_UNSUPPORTED_SIGNATURE',
+                $method,
+                $arguments,
+                self::UPSTREAM_SHAPE_CONDITIONAL_CALLS[$method],
+            );
+
+            return;
+        }
+
+        if (! in_array($method, self::UPSTREAM_REWRITTEN_CALLS, true)) {
+            $this->addReason(
+                $reasons,
+                'HTTP_UNSUPPORTED_SIGNATURE',
+                sprintf('%s%s() is outside the supported helper matrix', $receiver, $method),
+            );
         }
     }
 
