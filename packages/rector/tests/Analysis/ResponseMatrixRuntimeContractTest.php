@@ -25,7 +25,10 @@ use Testo\Test;
  *    assertDontSee / status-shortcut / session-view-json matrix fixes;
  * 3. every listed assert is genuinely shared with Laravel's TestResponse;
  * 4. the fluent list stays in exact lockstep with static-returning entries;
- * 5. argument bounds match the real runtime parameter counts.
+ * 5. argument bounds match the real runtime parameter counts;
+ * 6. the README documents every public runtime method, and its
+ *    `LaravelResponse` block names only methods the runtime really
+ *    implements — the omission class behind the stale README method list.
  */
 final class ResponseMatrixRuntimeContractTest
 {
@@ -129,6 +132,41 @@ final class ResponseMatrixRuntimeContractTest
         }
     }
 
+    #[Test]
+    public function readmeDocumentsEveryRuntimeResponseMethod(): void
+    {
+        $readme = (string) \file_get_contents(dirname(__DIR__, 4) . '/README.md');
+
+        foreach ($this->runtimeMethods() as $method) {
+            Assert::true(
+                \str_contains($readme, '`' . $method . '('),
+                \sprintf('README must document the runtime method %s() of Laratesto\Testing\LaravelResponse.', $method),
+            );
+        }
+    }
+
+    #[Test]
+    public function readmeResponseBlockNamesOnlyRuntimeMethods(): void
+    {
+        $readme = (string) \file_get_contents(dirname(__DIR__, 4) . '/README.md');
+
+        Assert::true(
+            \preg_match('/`LaravelResponse` methods:\r?\n(.+?)\r?\n\r?\n/s', $readme, $block) === 1,
+            'README must keep a `LaravelResponse` methods block.',
+        );
+
+        \preg_match_all('/`([A-Za-z]+)\(/', $block[1], $matches);
+
+        $runtimeMethods = $this->runtimeMethods();
+
+        foreach (\array_unique($matches[1]) as $method) {
+            Assert::true(
+                \in_array($method, $runtimeMethods, true),
+                \sprintf('README documents %s(), which Laratesto\Testing\LaravelResponse does not implement.', $method),
+            );
+        }
+    }
+
     /**
      * @return array<string, array{int, int, list<non-empty-string>}>
      */
@@ -153,9 +191,11 @@ final class ResponseMatrixRuntimeContractTest
         $methods = [];
 
         foreach ((new ReflectionClass(LaravelResponse::class))->getMethods() as $method) {
-            if (! $method->isConstructor()) {
-                $methods[] = $method->getName();
+            if (! $method->isPublic() || $method->isConstructor()) {
+                continue;
             }
+
+            $methods[] = $method->getName();
         }
 
         return $methods;

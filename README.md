@@ -407,12 +407,13 @@ Available via `LaravelTestCase` or the `InteractsWithLaravel` trait:
 | `$this->assertExitCode($code, $command, $params)`   | Assert an Artisan command exit code.     |
 
 `LaravelResponse` methods:
-`status()`, `header()`, `headers()`, `body()`, `json()`,
-`assertOk()`, `assertStatus()`, `assertCreated()`, `assertBadRequest()`, `assertUnauthorized()`, `assertForbidden()`, `assertNotFound()`, `assertUnprocessable()`,
-`assertHeader()`, `assertHeaderMissing()`,
-`assertSee()`, `assertDontSee()`,
-`assertJson()`, `assertJsonPath()` (dot-path, closure support), `assertJsonStructure()` (`'*'` wildcard),
-`assertRedirect(?string $uri)`, `response()`.
+`status()`, `getStatusCode()`, `headers()`, `header()`, `body()`, `getContent()`, `json()`, `response()`, `getSession()`,
+`assertOk()`, `assertStatus()`, `assertCreated()`, `assertBadRequest()`, `assertUnauthorized()`, `assertForbidden()`, `assertNotFound()`,
+`assertUnprocessable()`, `assertFound()`, `assertMethodNotAllowed()`, `assertConflict()`, `assertGone()`, `assertInternalServerError()`,
+`assertTooManyRequests()`, `assertServiceUnavailable()`, `assertHeader()`, `assertHeaderMissing()`, `assertSee()`, `assertDontSee()`, `assertContent()`,
+`assertJson()`, `assertExactJson()`, `assertJsonPath()` (dot-path, closure support), `assertJsonStructure()` (`'*'` wildcard; array structure required),
+`assertJsonMissingPath()`, `assertJsonValidationErrors()`, `assertRedirect(?string $uri)`, `assertViewHas()` (closure support),
+`assertSessionHas()`, `assertSessionMissing()`, `assertSessionHasErrors()`.
 
 ## Mockery
 
