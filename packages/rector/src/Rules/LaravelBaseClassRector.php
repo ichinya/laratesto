@@ -197,7 +197,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
 
         $lifecycleFailures = $this->lifecycleFailures($node);
         $appFailures = $this->appFailures($node);
-        $databaseAnalysis = $this->databaseAnalyzer->analyze($node);
+        $databaseAnalysis = $this->databaseAnalyzer->analyze($node, $this->fileClasses());
         $httpAnalysis = $this->httpAnalyzer->analyze($node, $this->fileClasses());
         $httpFailures = array_values(array_unique([
             ...$appFailures,
@@ -463,7 +463,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             $failures = [...$failures, ...$reasons];
         }
 
-        $databaseAnalysis = $this->databaseAnalyzer->analyze($class);
+        $databaseAnalysis = $this->databaseAnalyzer->analyze($class, $this->fileClasses());
 
         if ($databaseAnalysis->unsupportedReason !== null) {
             $failures[] = $databaseAnalysis->unsupportedReason;

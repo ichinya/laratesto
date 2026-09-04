@@ -14,8 +14,9 @@ use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\Property;
 use PhpParser\Node\Stmt\TraitUse;
 use Rector\NodeNameResolver\NodeNameResolver;
+use Rector\PhpParser\AstResolver;
 
-/** @internal Pure whole-class preflight for Laravel database strategy conversion. */
+/** @internal Whole-hierarchy preflight for Laravel database strategy conversion. */
 final class DatabaseConfigurationAnalyzer
 {
     public const TRAITS = [
@@ -82,16 +83,37 @@ final class DatabaseConfigurationAnalyzer
         'getAllTablesForConnection',
     ];
 
+    /**
+     * The walk stops at the framework base and the already-migrated target base:
+     * below them no project code can declare database machinery.
+     */
+    private const FRAMEWORK_BASE = 'Illuminate\Foundation\Testing\TestCase';
+
+    private const TARGET_BASE = 'Laratesto\Testing\LaravelTestCase';
+
+    /**
+     * Guard against cyclic or pathologically deep extends chains, mirroring
+     * LaravelBaseClassRector::MAX_CHAIN_DEPTH: an over-deep walk is not provable
+     * and therefore not flagged.
+     */
+    private const MAX_CHAIN_DEPTH = 10;
+
     private NodeFinder $nodeFinder;
 
     public function __construct(
         private readonly NodeNameResolver $nodeNameResolver,
+        private readonly AstResolver $astResolver,
     )
     {
         $this->nodeFinder = new NodeFinder();
     }
 
-    public function analyze(Class_ $class): DatabaseConfigurationAnalysis
+    /**
+     * @param list<Class_> $localClasses The class nodes declared in the file under
+     *        analysis (old statements), used to resolve the extends chain without
+     *        autoload before AstResolver is consulted.
+     */
+    public function analyze(Class_ $class, array $localClasses = []): DatabaseConfigurationAnalysis
     {
         $uses = [];
         $nestedUses = [];
@@ -246,6 +268,12 @@ final class DatabaseConfigurationAnalyzer
             }
         }
 
+        $ancestorReason = $this->ancestorConflictReason($class, $localClasses, $sourceTrait);
+
+        if ($ancestorReason !== null) {
+            return $this->unsupported($base, $ancestorReason);
+        }
+
         return new DatabaseConfigurationAnalysis(
             sourceTrait: $sourceTrait,
             targetAttribute: self::TRAITS[$sourceTrait],
@@ -261,6 +289,132 @@ final class DatabaseConfigurationAnalyzer
         $resolved = $this->nodeNameResolver->getName($name);
 
         return $resolved === null ? null : ltrim($resolved, '\\');
+    }
+
+    /**
+     * Why converting this class's database trait would silently drop an option
+     * property declared on a resolved project ancestor, or null when the conversion
+     * is hierarchy-safe. The Laravel traits define no option properties; they read
+     * them through `property_exists($this, ...)`, which sees inherited public and
+     * protected declarations — so an ancestor's option is live for the trait-carrying
+     * class today and its value would vanish into the class-level attribute the
+     * conversion adds. (Trait machinery METHODS declared on an ancestor are not
+     * scanned: a trait import in the child overrides same-named inherited methods, so
+     * such an override never executed and nothing live is lost.)
+     *
+     * A class without a database trait never reaches this scan: without the trait the
+     * machinery never ran, so unrelated ancestor members are not flagged.
+     *
+     * Walks the extends chain through the file's own classes first, then through
+     * AstResolver — the exact resolution order the other hierarchy walks use.
+     * Unresolvable names are not flagged: the classification stays exactly as
+     * provable as before, cycles and over-deep chains terminate the walk (the
+     * hierarchy rule owns their diagnosis).
+     *
+     * @param list<Class_> $localClasses
+     */
+    private function ancestorConflictReason(Class_ $class, array $localClasses, string $sourceTrait): ?string
+    {
+        $current = $class->extends === null ? null : $this->resolvedName($class->extends);
+
+        if ($current === null) {
+            return null;
+        }
+
+        $optionProperties = self::PROPERTY_OPTIONS[$sourceTrait];
+        $seen = [];
+
+        for ($depth = 0; $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
+            if ($current === self::FRAMEWORK_BASE || $current === self::TARGET_BASE) {
+                return null;
+            }
+
+            if (isset($seen[$current])) {
+                return null;
+            }
+
+            $seen[$current] = true;
+
+            $ancestor = $this->resolveAncestor($current, $localClasses);
+
+            if (! $ancestor instanceof Class_) {
+                return null;
+            }
+
+            $reason = $this->ancestorPropertyConflict($ancestor, $current, $optionProperties);
+
+            if ($reason !== null) {
+                return $reason;
+            }
+
+            if ($ancestor->extends === null) {
+                return null;
+            }
+
+            $current = $this->resolvedName($ancestor->extends);
+
+            if ($current === null) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Same-file lookup first, then reflection — the resolution order
+     * LaravelBaseClassRector::resolveClassNode() uses, so a base defined in the file
+     * currently being processed resolves without autoload.
+     *
+     * @param list<Class_> $localClasses
+     */
+    private function resolveAncestor(string $className, array $localClasses): ?Class_
+    {
+        foreach ($localClasses as $local) {
+            if ($local->namespacedName !== null
+                && $local->namespacedName->toString() === $className) {
+                return $local;
+            }
+        }
+
+        try {
+            $resolved = $this->astResolver->resolveClassFromName($className);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $resolved instanceof Class_ ? $resolved : null;
+    }
+
+    /**
+     * The first live option declaration the ancestor carries, as a fail-closed
+     * reason. Private members are skipped: `property_exists()` may see them, but the
+     * trait-scope read `$this->option` cannot reach them, so they never carried
+     * behavior. Static properties are skipped for the same reason: the traits read
+     * their options through `$this`, which never resolves to a static declaration.
+     *
+     * @param array<non-empty-string, non-empty-string> $optionProperties
+     */
+    private function ancestorPropertyConflict(
+        Class_ $ancestor,
+        string $ancestorName,
+        array $optionProperties,
+    ): ?string {
+        foreach ($ancestor->getProperties() as $property) {
+            if ($property->isPrivate() || $property->isStatic()) {
+                continue;
+            }
+
+            foreach ($property->props as $item) {
+                $name = $item->name->toString();
+
+                if (isset($optionProperties[$name])) {
+                    return sprintf('database option $%s on ancestor %s requires manual migration', $name, $ancestorName);
+                }
+            }
+        }
+
+        return null;
     }
 
     private function unsupported(DatabaseConfigurationAnalysis $analysis, string $reason): DatabaseConfigurationAnalysis

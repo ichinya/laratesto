@@ -252,6 +252,14 @@ class code, and the class defines no database lifecycle hooks
 `migrateFreshUsing`, …). Multi-property declarations keep their unrelated
 siblings (`protected bool $seed = true, $keepMe = false;` loses only `$seed`).
 Everything else fails closed with `DATABASE_UNSUPPORTED_CONFIGURATION`.
+An option property declared on a resolved project ancestor (a configured base
+such as `Tests\TestCase`, or any resolvable class between it and the trait) stays
+live for the trait machinery through `property_exists()`, so a descendant's
+conversion fails closed with `DATABASE_UNSUPPORTED_CONFIGURATION` instead of
+dropping it; move the option into a literal attribute argument on the class that
+carries the trait. Trait machinery methods on the same ancestor are deliberately
+not flagged: a trait import in the child overrides same-named inherited methods,
+so such an override never executed.
 
 ### Dry-run report contract
 

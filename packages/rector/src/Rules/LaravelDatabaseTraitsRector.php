@@ -80,7 +80,7 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
             return null;
         }
 
-        $analysis = $this->analyzer->analyze($node);
+        $analysis = $this->analyzer->analyze($node, $this->fileClasses());
 
         if ($analysis->unsupportedReason !== null) {
             $changed = ResidualMarker::mark(
@@ -227,5 +227,14 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
         unset($this->pendingImportRemovals[$filePath]);
 
         return $symbols !== [] && $fileNode->removeImports($symbols) ? $fileNode : null;
+    }
+
+    /** @return list<Class_> */
+    private function fileClasses(): array
+    {
+        /** @var list<Class_> $classes */
+        $classes = (new NodeFinder())->findInstanceOf($this->getFile()->getOldStmts(), Class_::class);
+
+        return $classes;
     }
 }
