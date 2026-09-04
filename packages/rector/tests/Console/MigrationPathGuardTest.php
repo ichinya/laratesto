@@ -257,13 +257,17 @@ final class MigrationPathGuardTest
             throw new SkipTest('Junction creation failed.');
         }
 
-        // Leave the reparse point pointing at a deleted directory. Observed on
-        // PHP 8.4 / Windows 11: the dangling junction answers neither file_exists()
-        // nor is_link() — lstat() is what still sees it.
+        // Leave the reparse point pointing at a deleted directory. Which builtins
+        // see a dangling junction is build-specific: is_link() answers false on
+        // every observed PHP/Windows build, while file_exists() and lstat()
+        // disagree across them (PHP 8.4 / Windows 11 vs the CI runner). Assert
+        // only what the guard's detection depends on: its union oracle must see
+        // the junction, and it must never present as a plain regular file.
         \rmdir($this->root . '/junction-target-dir');
         \clearstatcache(true);
-        Assert::same(false, \file_exists($this->root . '/dangling-junction.json'));
-        Assert::same(false, \is_link($this->root . '/dangling-junction.json'));
+        $junction = $this->root . '/dangling-junction.json';
+        Assert::same(true, \file_exists($junction) || \is_link($junction) || @\lstat($junction) !== false);
+        Assert::same(false, \is_file($junction));
 
         $this->assertReportRejected('dangling-junction.json', 'is a symlink or reparse point');
     }

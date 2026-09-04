@@ -89,8 +89,9 @@ class MigrationPathGuard
      * is rejected outright: fail-closed, the report write must never go through or
      * replace a link, however safe its effective target looks. is_link() misses
      * Windows junctions, so a realpath that diverges from the given path counts as
-     * a link too, and a DANGLING junction answers neither file_exists() nor
-     * is_link() — lstat() still sees the reparse point, so it joins the existence
+     * a link too, and a DANGLING junction is seen by different builtins on
+     * different PHP/Windows builds (is_link() always false; file_exists() and
+     * lstat() disagree), so all three join the existence
      * oracle. The given final component is returned, so replacement stays atomic
      * at the requested path.
      *
@@ -146,8 +147,9 @@ class MigrationPathGuard
         // it: directories and special files can never be atomically replaced, and
         // any link is rejected outright — fail-closed. is_link() misses Windows
         // junctions (reparse points), so a realpath that diverges from the given
-        // path counts as a link too, and a dangling junction answers neither
-        // file_exists() nor is_link(): lstat() is what still sees the reparse point.
+        // path counts as a link too, and which builtins see a dangling junction
+        // varies by PHP/Windows build, so file_exists(), is_link() and lstat()
+        // all join the existence oracle: every build sees the reparse point.
         if (\file_exists($reportFile) || \is_link($reportFile) || @\lstat($reportFile) !== false) {
             $target = \realpath($reportFile);
 
@@ -157,7 +159,7 @@ class MigrationPathGuard
                 || $target === false
             ) {
                 // $target === false here means an unresolvable link: the dangling
-                // junction that only lstat() noticed.
+                // junction, which no oracle can resolve to a real path.
                 throw new \InvalidArgumentException(\sprintf(
                     'The report path "%s" is a symlink or reparse point; the report must be a plain file path.',
                     $this->display($root, $reportFile),
