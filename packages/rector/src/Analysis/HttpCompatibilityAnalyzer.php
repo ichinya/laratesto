@@ -153,6 +153,11 @@ final class HttpCompatibilityAnalyzer
     // Mirrors the public assert/accessor surface of Laratesto\Testing\LaravelResponse
     // signature-for-signature. Methods the runtime provides must never be blocked
     // here: over-blocking inflates manual-migration scope without any safety gain.
+    // Laravel-only forms the runtime cannot accept stay fail-closed on purpose
+    // (assertJsonStructure() with no structure or with Laravel's second
+    // $responseData argument), and so do runtime-only accessors that Laravel's
+    // TestResponse never declared (response(), headers(), header(), body(),
+    // getSession()).
     private const RESPONSE_SIGNATURES = [
         'assertStatus' => [1, 1, ['int']],
         'assertOk' => [0, 0, []],
@@ -174,6 +179,21 @@ final class HttpCompatibilityAnalyzer
         'assertForbidden' => [0, 0, []],
         'assertNotFound' => [0, 0, []],
         'assertUnprocessable' => [0, 0, []],
+        'assertFound' => [0, 0, []],
+        'assertMethodNotAllowed' => [0, 0, []],
+        'assertConflict' => [0, 0, []],
+        'assertGone' => [0, 0, []],
+        'assertInternalServerError' => [0, 0, []],
+        'assertTooManyRequests' => [0, 0, []],
+        'assertServiceUnavailable' => [0, 0, []],
+        'assertContent' => [1, 1, ['string']],
+        'assertSessionHas' => [1, 2, ['string-or-array', 'any']],
+        'assertSessionMissing' => [1, 2, ['string-or-array', 'any']],
+        'assertSessionHasErrors' => [0, 3, ['string-or-array', 'nullable-string', 'string']],
+        'assertJsonMissingPath' => [1, 1, ['string']],
+        'assertJsonStructure' => [1, 1, ['array']],
+        'assertJsonValidationErrors' => [1, 2, ['string-or-array', 'string']],
+        'assertViewHas' => [1, 2, ['string-or-array', 'any']],
     ];
 
     private const PENDING_ARTISAN_SIGNATURES = [
@@ -204,6 +224,21 @@ final class HttpCompatibilityAnalyzer
         'assertForbidden',
         'assertNotFound',
         'assertUnprocessable',
+        'assertFound',
+        'assertMethodNotAllowed',
+        'assertConflict',
+        'assertGone',
+        'assertInternalServerError',
+        'assertTooManyRequests',
+        'assertServiceUnavailable',
+        'assertContent',
+        'assertSessionHas',
+        'assertSessionMissing',
+        'assertSessionHasErrors',
+        'assertJsonMissingPath',
+        'assertJsonStructure',
+        'assertJsonValidationErrors',
+        'assertViewHas',
     ];
 
     private const INTERACTIVE_ARTISAN_METHODS = [
