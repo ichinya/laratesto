@@ -28,6 +28,11 @@ versions follow [Semantic Versioning](https://semver.org/).
     the same declaration survive;
   - residual markers reconcile: changed constructs refresh their reason,
     resolved constructs lose the marker, unchanged runs stay byte-identical;
+  - a file-level response-gate block no longer strands an otherwise convertible
+    class: when an unsafe sibling blocks the file-wide `TestResponse` swap, the
+    safe class is marked with a `RESPONSE_UNSUPPORTED_API` residual naming the
+    blocker instead of silently keeping `TestResponse` declarations that would
+    TypeError against the runtime `Laratesto\Testing\LaravelResponse`;
   - markers emitted by several rules for the same code merge deterministically:
     one marker comment per code, one contribution per rule sorted by rule,
     byte-identical on re-runs — no rule overwrites or loses another rule's reason;

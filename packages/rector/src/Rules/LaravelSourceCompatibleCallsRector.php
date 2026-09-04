@@ -75,10 +75,32 @@ final class LaravelSourceCompatibleCallsRector extends AbstractRector
             ) || $changed;
         }
 
+        $preflightBlockers = $this->responsePreflightBlockers();
+
         if (! $analysis->safe()
-            || ! $this->fileResponsePreflightSafe()
+            || $preflightBlockers !== []
             || $this->hasStructuralBlockingMarker($node)
             || ! $analysis->hasTestResponseType) {
+            // Fail closed: the swap is file-wide, so an unsafe sibling blocks it
+            // for an otherwise fully convertible class. The pipeline still
+            // migrates that class onto the Laratesto base, whose helpers return
+            // Laratesto\Testing\LaravelResponse — not a TestResponse subtype — so
+            // the surviving TestResponse declarations would TypeError at runtime.
+            // Leave an actionable residual naming the blocker instead of silently
+            // shipping a guaranteed crash; a class kept un-migrated by its own
+            // structural marker stays on the Laravel runtime and needs no swap.
+            if ($analysis->safe()
+                && $analysis->hasTestResponseType
+                && ! $this->hasStructuralBlockingMarker($node)
+                && $preflightBlockers !== []) {
+                $changed = ResidualMarker::mark(
+                    $node,
+                    ResidualCode::RESPONSE_UNSUPPORTED_API,
+                    static::class,
+                    $this->fileGateBlockedReason($preflightBlockers),
+                ) || $changed;
+            }
+
             return $changed ? $node : null;
         }
 
@@ -94,15 +116,40 @@ final class LaravelSourceCompatibleCallsRector extends AbstractRector
         return $node;
     }
 
-    private function fileResponsePreflightSafe(): bool
+    /**
+     * Recognized classes in this file whose own analysis is unsafe. The response
+     * type swap is file-wide, so any one of them blocks the swap for the safe
+     * siblings too — refactor() marks those siblings with an actionable residual
+     * instead of swapping.
+     *
+     * @return list<non-empty-string> blocker descriptions in file order
+     */
+    private function responsePreflightBlockers(): array
     {
+        $blockers = [];
+
         foreach ($this->topLevelClasses() as $class) {
-            if ($this->hierarchy->recognizesTestClass($class) && ! $this->analyzer->analyze($class)->safe()) {
-                return false;
+            if (! $this->hierarchy->recognizesTestClass($class) || $this->analyzer->analyze($class)->safe()) {
+                continue;
             }
+
+            $name = $this->getName($class);
+            $blockers[] = $name === null ? 'an anonymous sibling class' : sprintf('sibling class %s', $name);
         }
 
-        return true;
+        return $blockers;
+    }
+
+    /**
+     * @param list<non-empty-string> $blockers
+     */
+    private function fileGateBlockedReason(array $blockers): string
+    {
+        return sprintf(
+            'the file-wide TestResponse to Laratesto\Testing\LaravelResponse swap was blocked by %s;'
+            . ' migrate TestResponse types to Laratesto\Testing\LaravelResponse manually',
+            implode(', ', $blockers),
+        );
     }
 
     private function removeTestResponseImportWhenUnused(): void
