@@ -10,9 +10,11 @@ use Testo\Test;
 
 /**
  * The bounded process runner (PR #8 review M2): normal exits stay plain outcomes,
- * a missing executable becomes a failed outcome (friendly exit 1) instead of a raw
- * Symfony Process exception, and a run exceeding the documented timeout is killed
- * and reported with its partial output — never an unbounded hang.
+ * a missing executable becomes a failed outcome naming the binary instead of a raw
+ * Symfony Process exception (the exact exit code is platform-shaped: the Windows
+ * start failure reports 1, the POSIX shell reports its "command not found" 127),
+ * and a run exceeding the documented timeout is killed and reported with its
+ * partial output — never an unbounded hang.
  */
 final class SymfonyProcessRunnerTest
 {
@@ -42,12 +44,37 @@ final class SymfonyProcessRunnerTest
 
         $outcome = $runner->run(['laratesto-not-a-real-binary-xyz', '--version'], __DIR__);
 
-        // Windows resolves the command through cmd.exe (exit 1 with a message naming
-        // the binary); POSIX fails proc_open and Symfony throws a start failure —
-        // both routes must end in the same friendly failed outcome, never a throw.
-        Assert::same($outcome->exitCode, 1);
+        // The exit code is platform-shaped, not part of the contract: Windows fails
+        // proc_open and Symfony throws a start failure the runner maps to exit 1;
+        // POSIX re-runs the array command through /bin/sh ("exec ...") whose shell
+        // reports the missing binary itself with exit 127 and a diagnostic on stderr.
+        // The cross-platform contract is: failed non-zero outcome, no stdout, and the
+        // missing binary named in stderr — never a raw Symfony exception.
+        Assert::notSame(0, $outcome->exitCode, "a missing binary must produce a failed outcome, got exit code {$outcome->exitCode}");
         Assert::same($outcome->stdout, '');
         Assert::true(\str_contains($outcome->stderr, 'laratesto-not-a-real-binary-xyz'), $outcome->stderr);
+    }
+
+    #[Test]
+    public function aChildThatRunsAndChoosesExit127KeepsItsOwnOutput(): void
+    {
+        $runner = new SymfonyProcessRunner();
+
+        // A raw child exit code is the caller's information: a child that really ran
+        // and chose the shell's "command not found" code passes its code and both
+        // streams through untouched — the runner never rewrites genuine results.
+        $outcome = $runner->run(
+            [
+                \PHP_BINARY,
+                '-r',
+                'fwrite(STDOUT, "out"); fwrite(STDERR, "err"); exit(127);',
+            ],
+            __DIR__,
+        );
+
+        Assert::same($outcome->exitCode, 127);
+        Assert::same($outcome->stdout, 'out');
+        Assert::same($outcome->stderr, 'err');
     }
 
     #[Test]
