@@ -164,7 +164,7 @@ final class HttpCompatibilityAnalyzer
         'status' => [0, 0, []],
         'getStatusCode' => [0, 0, []],
         'getContent' => [0, 0, []],
-        'assertSee' => [1, 2, ['string', 'bool']],
+        'assertSee' => [1, 2, ['string-or-array', 'bool']],
         'assertDontSee' => [1, 2, ['string-or-array', 'bool']],
         'assertExactJson' => [1, 1, ['array']],
         'assertHeaderMissing' => [1, 1, ['string']],
