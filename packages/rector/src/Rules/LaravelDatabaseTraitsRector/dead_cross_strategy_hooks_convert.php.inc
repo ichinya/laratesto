@@ -14,7 +14,7 @@ final class TruncationWithRefreshHooksTest extends TestCase
 {
     use DatabaseTruncation;
 
-    protected array $connectionsToTruncate = ['archive'];
+    protected array $connectionsToTruncate = [null];
 
     protected function beforeRefreshingDatabase(): void
     {
@@ -99,7 +99,7 @@ namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\TestCase;
 
-#[\Laratesto\Attribute\DatabaseTruncation(connections: ['archive'])]
+#[\Laratesto\Attribute\DatabaseTruncation]
 final class TruncationWithRefreshHooksTest extends TestCase
 {
     protected function beforeRefreshingDatabase(): void

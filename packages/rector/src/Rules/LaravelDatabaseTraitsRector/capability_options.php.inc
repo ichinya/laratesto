@@ -48,6 +48,7 @@ namespace Tests\Feature;
 use App\Database\DemoSeeder;
 use Illuminate\Foundation\Testing\Attributes\Seed;
 use Illuminate\Foundation\Testing\Attributes\Seeder;
+use Illuminate\Foundation\Testing\DatabaseTruncation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase;
 
@@ -68,7 +69,12 @@ final class TransactionOptionsTest extends TestCase
 {
 }
 
-#[\Laratesto\Attribute\DatabaseTruncation(connections: ['sqlite', 'secondary'], tables: ['sqlite' => ['things'], 'secondary' => ['audit_entries']], exceptTables: ['sqlite' => ['audit_entries']])]
+/* laratesto-residual(code=DATABASE_UNSUPPORTED_CONFIGURATION, rule=Laratesto\Rector\Rules\LaravelDatabaseTraitsRector, severity=manual): database option $connectionsToTruncate changes the migration and seeding scope: the trait only truncates the selected connections while its first migrate:fresh and every later db:seed run on the default connection, but the attribute would migrate and seed every selected connection - migrate it manually */
 final class TruncationSelectionTest extends TestCase
 {
+    use DatabaseTruncation;
+
+    protected array $connectionsToTruncate = ['sqlite', 'secondary'];
+    protected array $tablesToTruncate = ['sqlite' => ['things'], 'secondary' => ['audit_entries']];
+    protected array $exceptTables = ['sqlite' => ['audit_entries']];
 }

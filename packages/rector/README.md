@@ -142,6 +142,14 @@ default-only migration and transaction scope. Named, multiple or empty
 selections keep the trait and receive a `DATABASE_UNSUPPORTED_CONFIGURATION`
 residual instead, because the trait always migrates the default connection
 while the attribute would repoint `migrate:fresh` at the selected connections.
+The same applies to DatabaseTruncation's `$connectionsToTruncate`: the source
+trait scopes only the table truncation with the selection, while its first
+`migrate:fresh` and every later `db:seed` run on the default connection — the
+attribute would migrate and seed the selected connections instead. Only the
+single-`null` selection lifts, into the bare `#[DatabaseTruncation]` form;
+named, multiple, duplicate or empty selections keep the trait and receive the
+residual. An explicit `connections:` argument written by hand keeps working:
+it is an author's deliberate target choice, not a lifted source property.
 
 ## Autoloading
 

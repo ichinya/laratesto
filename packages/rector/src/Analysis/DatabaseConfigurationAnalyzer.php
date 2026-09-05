@@ -77,6 +77,18 @@ final class DatabaseConfigurationAnalyzer
     ];
 
     /**
+     * The strategies whose migrate:fresh runs against the DEFAULT connection
+     * no matter what the source connection selection contains: the selection
+     * never picked the migration (or seeding) target, so only a provably
+     * default-only selection can lift into the target's `connections`
+     * argument.
+     */
+    private const DEFAULT_MIGRATION_TRAITS = [
+        'Illuminate\Foundation\Testing\RefreshDatabase',
+        'Illuminate\Foundation\Testing\DatabaseTruncation',
+    ];
+
+    /**
      * Methods of each database trait's composition whose class-level override
      * carries live behavior today but nothing after conversion: the Testo
      * interceptor replaces the trait machinery and never calls back into it.
@@ -301,11 +313,14 @@ final class DatabaseConfigurationAnalyzer
                 return $this->unsupported($base, $readerReason);
             }
 
-            // RefreshDatabase's migrate:fresh always targets the DEFAULT connection,
-            // while the attribute's connections argument repoints it: fail closed
-            // unless the selection is provably default-only.
-            if ($sourceTrait === 'Illuminate\Foundation\Testing\RefreshDatabase' && $argumentName === 'connections') {
-                $scopeReason = $this->connectionsMigrationScopeConflictReason($value);
+            // Both traits' migrate:fresh always targets the DEFAULT connection,
+            // while the attribute's connections argument repoints it: fail
+            // closed unless the selection is provably default-only.
+            if (in_array($sourceTrait, self::DEFAULT_MIGRATION_TRAITS, true) && $argumentName === 'connections') {
+                $scopeReason = $this->connectionsMigrationScopeConflictReason(
+                    $value,
+                    $this->connectionsSelectionResidualReason($sourceTrait),
+                );
                 if ($scopeReason !== null) {
                     return $this->unsupported($base, $scopeReason);
                 }
@@ -1158,45 +1173,72 @@ final class DatabaseConfigurationAnalyzer
     }
 
     /**
-     * Why the RefreshDatabase $connectionsToTransact selection cannot lift into
-     * the attribute's connections argument, or null when it provably selects
-     * only the default connection.
+     * Why the connection selection of a DEFAULT-migration strategy
+     * (RefreshDatabase, DatabaseTruncation) cannot lift into the attribute's
+     * connections argument, or null when it provably selects only the default
+     * connection.
      *
-     * The source trait runs its single migrate:fresh against the DEFAULT
-     * connection no matter what the selection contains: the selection only picks
-     * which connections receive the per-test transactions
-     * (RefreshDatabase::connectionsToTransact() falls back to
-     * `[config('database.default')]`, migrateDatabases() passes no --database).
-     * The target attribute repoints migrate:fresh at every selected connection
-     * instead (RefreshDatabaseInterceptor::migrateFresh() issues
+     * The source traits run their single migrate:fresh against the DEFAULT
+     * connection no matter what the selection contains: the selection only
+     * picks the trait's side scope (the per-test transactions for
+     * RefreshDatabase, the table truncation for DatabaseTruncation), and
+     * DatabaseTruncation's later db:seed calls pass no --database either. The
+     * target attribute repoints migrate:fresh AND db:seed at every selected
+     * connection instead (RefreshDatabaseInterceptor::migrateFresh() and
+     * DatabaseTruncationInterceptor::migrateFresh()/seed() issue
      * `--database=$name` per entry), so a named selection silently wipes a
      * different schema and skips the default migration, and an empty selection
      * migrates nothing where the trait still migrated the default. The runtime
      * selection semantics are an explicit author choice and stay untouched:
      * only the unproven LIFT is refused.
      *
-     * Proven equivalent is exactly a list with ONE null entry: the trait
-     * resolves `connection(null)` to the default connection for the transaction
-     * scope and always migrates the default, and the attribute's absent argument
-     * resolves to the same default-only behavior. Multiple entries, duplicates
-     * and empty strings cannot be proven equivalent to the runtime default —
-     * `[]` and non-list literals already fail the literal-shape guard upstream,
-     * so everything reaching this helper with entries is a named selection.
+     * Proven equivalent is exactly a list with ONE null entry: the traits
+     * resolve `connection(null)` to the default connection for their side
+     * scope and always migrate the default, and the attribute's absent
+     * argument resolves to the same default-only behavior. Multiple entries,
+     * duplicates and empty strings cannot be proven equivalent to the runtime
+     * default — `[]` and non-list literals already fail the literal-shape
+     * guard upstream, so everything reaching this helper with entries is a
+     * named selection.
      */
-    private function connectionsMigrationScopeConflictReason(Expr $value): ?string
+    private function connectionsMigrationScopeConflictReason(Expr $value, string $namedSelectionReason): ?string
     {
-        $isSingleDefaultSelection = $value instanceof Expr\Array_
+        if ($this->isSingleDefaultSelection($value)) {
+            return null;
+        }
+
+        return $namedSelectionReason;
+    }
+
+    /**
+     * A list with exactly one unkeyed null entry: the only selection shape
+     * statically equivalent to the runtime default-only scope.
+     */
+    private function isSingleDefaultSelection(Expr $value): bool
+    {
+        return $value instanceof Expr\Array_
             && count($value->items) === 1
             && $value->items[0] !== null
             && $value->items[0]->key === null
             && $value->items[0]->value instanceof Expr\ConstFetch
             && strtolower($value->items[0]->value->name->toString()) === 'null';
+    }
 
-        if ($isSingleDefaultSelection) {
-            return null;
-        }
-
-        return 'database option $connectionsToTransact changes the migration scope: the trait always runs migrate:fresh on the default connection, while the attribute would refresh the selected connections - migrate it manually';
+    /**
+     * The residual wording for a named selection, naming the converting
+     * strategy's option and its actual source scope: RefreshDatabase's
+     * selection only picks the per-test transaction scope, DatabaseTruncation's
+     * only the table truncation, and both keep their first migrate:fresh
+     * (DatabaseTruncation also its later db:seed) on the default connection.
+     */
+    private function connectionsSelectionResidualReason(string $sourceTrait): string
+    {
+        return match ($sourceTrait) {
+            'Illuminate\Foundation\Testing\RefreshDatabase'
+                => 'database option $connectionsToTransact changes the migration scope: the trait always runs migrate:fresh on the default connection, while the attribute would refresh the selected connections - migrate it manually',
+            'Illuminate\Foundation\Testing\DatabaseTruncation'
+                => 'database option $connectionsToTruncate changes the migration and seeding scope: the trait only truncates the selected connections while its first migrate:fresh and every later db:seed run on the default connection, but the attribute would migrate and seed every selected connection - migrate it manually',
+        };
     }
 
     private function isTableSelection(Expr $expression): bool

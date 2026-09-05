@@ -101,7 +101,7 @@ final class ParityMigrationE2eTest
             Assert::string($strategies)->notContains('use RefreshDatabase;');
 
             $truncation = (string) \file_get_contents($corpus . '/TruncationSelectionTest.php');
-            Assert::string($truncation)->contains('#[\Laratesto\Attribute\DatabaseTruncation(connections: [\'sqlite\', \'secondary\'], tables: [\'things\'])]');
+            Assert::string($truncation)->contains('#[\Laratesto\Attribute\DatabaseTruncation(tables: [\'things\'])]');
 
             // Unsupported constructs stay put with exactly their residual markers.
             $dynamic = (string) \file_get_contents($unsupported . '/UnsupportedCorpus.php');

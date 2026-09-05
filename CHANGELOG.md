@@ -130,6 +130,15 @@ versions follow [Semantic Versioning](https://semver.org/).
     `DATABASE_UNSUPPORTED_CONFIGURATION` residual, and only a provably
     default-only selection (a single `null` entry) converts, into the
     attribute's bare form;
+  - DatabaseTruncation's `$connectionsToTruncate` no longer lifts into the
+    attribute's `connections` argument: the source trait scopes only the table
+    truncation with the selection, while its first `migrate:fresh` and every
+    later `db:seed` run against the default connection — the attribute would
+    migrate and seed every selected connection instead, so a named, multiple,
+    duplicate or empty selection stays an unconverted
+    `DATABASE_UNSUPPORTED_CONFIGURATION` residual, and only a provably
+    default-only selection (a single `null` entry) converts, into the
+    attribute's bare form;
 - `DatabaseTransactions` restores and re-caches in-memory connections around
   the transaction, so a `:memory:` schema no longer vanishes between tests.
 
