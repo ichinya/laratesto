@@ -120,6 +120,62 @@ final class StaticAssertBlockTest extends TestCase
 }
 PHP;
 
+    /**
+     * MiMo finding 3: a one-argument $this->assertExitCode(0) call satisfied
+     * the old 1..3 helper-matrix arity, but the real runtime helper
+     * (InteractsWithLaravel::assertExitCode(int $code, string $command,
+     * array $parameters = [])) requires two — the call passed the preflight
+     * and died with an ArgumentCountError after migration. The gap must fail
+     * the class closed with an actionable residual instead.
+     */
+    private const EXIT_CODE_ARITY_BLOCKED_CORPUS = <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature;
+
+use Illuminate\Foundation\Testing\TestCase;
+
+final class ExitCodeArityBlockedTest extends TestCase
+{
+    public function test_one_argument_helper_call(): void
+    {
+        $this->assertExitCode(0);
+    }
+}
+PHP;
+
+    /**
+     * The other face of finding 3: two- and three-argument helper calls are
+     * the real runtime shape and must migrate untouched, and the pending
+     * chain keeps its ONE-argument assertExitCode(0) — PendingArtisanCommand
+     * really declares assertExitCode(int $code), the opposite of the helper.
+     */
+    private const EXIT_CODE_ARITY_ACCEPTED_CORPUS = <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature;
+
+use Illuminate\Foundation\Testing\TestCase;
+
+final class ExitCodeArityAcceptedTest extends TestCase
+{
+    public function test_supported_helper_forms(): void
+    {
+        $this->assertExitCode(0, 'parity:ping');
+        $this->assertExitCode(1, 'parity:ping', ['--fail' => true]);
+    }
+
+    public function test_pending_command_chain(): void
+    {
+        $this->artisan('parity:ping')->assertExitCode(0);
+    }
+}
+PHP;
+
 
     #[Test]
     public function mixedFileGateMarksSafeClassAndStaysIdempotent(): void
@@ -166,6 +222,52 @@ PHP;
         $blocked->contains(
             'rule=Laratesto\Rector\Rules\LaravelSourceCompatibleCallsRector, severity=manual)',
         );
+    }
+
+    /**
+     * MiMo finding 3, end to end: the helper matrix let a one-argument
+     * $this->assertExitCode(0) pass the preflight, but the migrated runtime
+     * helper requires (int $code, string $command, ...) — a TypeError after
+     * migration. The gap must block the swap with an actionable residual,
+     * while the real runtime shapes (2..3 helper arguments, and the pending
+     * chain whose PendingArtisanCommand::assertExitCode(int $code) takes
+     * exactly ONE argument) migrate clean.
+     */
+    #[Test]
+    public function exitCodeArityGapFailsClosedWhileAcceptedFormsMigrate(): void
+    {
+        $snapshot = RectorRun::twiceWithByteIdenticalSecondRun([
+            'ExitCodeArityBlockedTest.php' => self::EXIT_CODE_ARITY_BLOCKED_CORPUS,
+            'ExitCodeArityAcceptedTest.php' => self::EXIT_CODE_ARITY_ACCEPTED_CORPUS,
+        ]);
+
+        $blocked = Assert::string($snapshot['ExitCodeArityBlockedTest.php']);
+
+        // The arity gap keeps the class on PHPUnit instead of migrating it
+        // onto a base whose helper would die on the missing command argument.
+        $blocked->contains('extends TestCase');
+        $blocked->contains('assertExitCode() expects 2..3 common-path arguments; got 1');
+
+        // Both preflight rules fail the same code and merge into one marker comment.
+        $blocked->contains(
+            'laratesto-residual(code=HTTP_UNSUPPORTED_SIGNATURE, '
+            . 'rule=Laratesto\Rector\Rules\LaravelBaseClassRector, severity=manual)',
+        );
+        $blocked->contains(
+            'rule=Laratesto\Rector\Rules\LaravelSourceCompatibleCallsRector, severity=manual)',
+        );
+
+        $accepted = Assert::string($snapshot['ExitCodeArityAcceptedTest.php']);
+
+        // The supported arities migrate with the calls untouched...
+        $accepted->contains('extends \Laratesto\Testing\LaravelTestCase');
+        $accepted->contains('#[\Testo\Test]');
+        $accepted->notContains('laratesto-residual');
+        $accepted->contains("\$this->assertExitCode(0, 'parity:ping');");
+        $accepted->notContains("\$this->assertExitCode(0);");
+
+        // ...and the pending chain keeps its one-argument assertExitCode(0).
+        $accepted->contains("\$this->artisan('parity:ping')->assertExitCode(0);");
     }
 
     #[Test]

@@ -77,7 +77,7 @@ final class HttpCompatibilityAnalyzer
         'assertSessionHas' => [1, 2, ['string', 'any']],
         'assertSessionMissing' => [1, 1, ['string']],
         'assertSessionHasErrors' => [0, 1, ['array']],
-        'assertExitCode' => [1, 3, ['int', 'string', 'array']],
+        'assertExitCode' => [2, 3, ['int', 'string', 'array']],
         'session' => [0, 0, []],
         'app' => [0, 0, []],
         'make' => [1, 1, ['any']],
