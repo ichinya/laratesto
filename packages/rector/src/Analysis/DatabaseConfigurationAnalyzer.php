@@ -6,6 +6,7 @@ namespace Laratesto\Rector\Analysis;
 
 use PhpParser\Node;
 use PhpParser\NodeFinder;
+use PhpParser\PrettyPrinter\Standard;
 use PhpParser\Node\Attribute;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Name;
@@ -102,12 +103,15 @@ final class DatabaseConfigurationAnalyzer
 
     private NodeFinder $nodeFinder;
 
+    private Standard $prettyPrinter;
+
     public function __construct(
         private readonly NodeNameResolver $nodeNameResolver,
         private readonly AstResolver $astResolver,
     )
     {
         $this->nodeFinder = new NodeFinder();
+        $this->prettyPrinter = new Standard();
     }
 
     /**
@@ -288,7 +292,15 @@ final class DatabaseConfigurationAnalyzer
             return $this->unsupported($base, $directTraitReason);
         }
 
-        $ancestorReason = $this->ancestorConflictReason($class, $localClasses, $sourceTrait, $seenTraits);
+        $mergeIntoAncestor = false;
+        $ancestorReason = $this->ancestorConflictReason(
+            $class,
+            $localClasses,
+            $sourceTrait,
+            $seenTraits,
+            $options,
+            $mergeIntoAncestor,
+        );
 
         if ($ancestorReason !== null) {
             return $this->unsupported($base, $ancestorReason);
@@ -301,6 +313,7 @@ final class DatabaseConfigurationAnalyzer
             options: $options,
             removableProperties: $properties,
             removableAttributes: $attributes,
+            mergeIntoAncestor: $mergeIntoAncestor,
         );
     }
 
@@ -312,15 +325,31 @@ final class DatabaseConfigurationAnalyzer
     }
 
     /**
-     * Why converting this class's database trait would silently drop an option
-     * property declared on a resolved project ancestor, or null when the conversion
-     * is hierarchy-safe. The Laravel traits define no option properties; they read
-     * them through `property_exists($this, ...)`, which sees inherited public and
-     * protected declarations — so an ancestor's option is live for the trait-carrying
-     * class today and its value would vanish into the class-level attribute the
-     * conversion adds. (Trait machinery METHODS declared on an ancestor are not
-     * scanned: a trait import in the child overrides same-named inherited methods, so
-     * such an override never executed and nothing live is lost.)
+     * Why converting this class's database trait would silently break against the
+     * resolved project ancestors, or null when the conversion is hierarchy-safe.
+     *
+     * Two ancestor shapes matter:
+     *
+     * 1. An ancestor declaring an option property. The Laravel traits define no
+     *    option properties; they read them through `property_exists($this, ...)`,
+     *    which sees inherited public and protected declarations — so an ancestor's
+     *    option is live for the trait-carrying class today and its value would
+     *    vanish into the class-level attribute the conversion adds. (Trait machinery
+     *    METHODS declared on an ancestor are not scanned: a trait import in the
+     *    child overrides same-named inherited methods, so such an override never
+     *    executed and nothing live is lost.)
+     *
+     * 2. An ancestor already carrying the same database strategy — an explicit
+     *    trait use of the same trait, or the migrated target attribute. Laravel
+     *    deduplicated that duplication to one behavior (`class_uses_recursive`
+     *    collapses the trait to a single entry), but a second class-level
+     *    attribute here would make the Testo reflection (which merges the whole
+     *    hierarchy) run the interceptor twice. The conversion therefore merges
+     *    instead: the trait use converts into NO attribute and the class inherits
+     *    the ancestor's single one. The merge is only provably lossless when the
+     *    effective option configuration below the topmost duplicate equals the
+     *    configuration that ancestor carries — otherwise the conversion fails
+     *    closed with DATABASE_UNSUPPORTED_CONFIGURATION.
      *
      * A class without a database trait never reaches this scan: without the trait the
      * machinery never ran, so unrelated ancestor members are not flagged.
@@ -334,13 +363,22 @@ final class DatabaseConfigurationAnalyzer
      * flattens its option properties into that ancestor, where they are inherited
      * exactly like inline declarations.
      *
+     * @param array<non-empty-string, Expr> $ownOptions
      * @param list<ClassLike> $localClasses
      * @param array<string, true> $seenTraits Shared with the direct trait scan, so a
      *        trait used both directly and through an ancestor is inspected once,
      *        under the direct (wider) visibility rules first.
+     * @param bool $mergeIntoAncestor Out flag: set when the conversion must merge
+     *        into an ancestor's attribute instead of adding its own.
      */
-    private function ancestorConflictReason(Class_ $class, array $localClasses, string $sourceTrait, array &$seenTraits): ?string
-    {
+    private function ancestorConflictReason(
+        Class_ $class,
+        array $localClasses,
+        string $sourceTrait,
+        array &$seenTraits,
+        array $ownOptions,
+        bool &$mergeIntoAncestor,
+    ): ?string {
         $current = $class->extends === null ? null : $this->resolvedName($class->extends);
 
         if ($current === null) {
@@ -350,6 +388,14 @@ final class DatabaseConfigurationAnalyzer
         $optionProperties = self::PROPERTY_OPTIONS[$sourceTrait];
         $seen = [];
         $ancestorTraitNames = [];
+
+        /**
+         * Bottom-up duplicates of the same database strategy, nearest ancestor
+         * first: `name` plus the options its hierarchy position carries.
+         *
+         * @var list<array{name: non-empty-string, options: array<non-empty-string, Expr>}> $duplicates
+         */
+        $duplicates = [];
 
         for ($depth = 0; $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
             if ($current === self::FRAMEWORK_BASE || $current === self::TARGET_BASE || isset($seen[$current])) {
@@ -364,10 +410,28 @@ final class DatabaseConfigurationAnalyzer
                 break;
             }
 
-            $reason = $this->ancestorPropertyConflict($ancestor, $current, $optionProperties);
+            [$duplicateReason, $duplicateOptions] = $this->duplicateConfiguration(
+                $ancestor,
+                $current,
+                $sourceTrait,
+                $localClasses,
+            );
 
-            if ($reason !== null) {
-                return $reason;
+            if ($duplicateReason !== null) {
+                return $duplicateReason;
+            }
+
+            if ($duplicateOptions !== null) {
+                // A duplicate ancestor's option declarations are configuration, not
+                // shadowing danger: they are lifted into the ancestor's position of
+                // the hierarchy and compared for exactness below.
+                $duplicates[] = ['name' => $current, 'options' => $duplicateOptions];
+            } else {
+                $reason = $this->ancestorPropertyConflict($ancestor, $current, $optionProperties);
+
+                if ($reason !== null) {
+                    return $reason;
+                }
             }
 
             $ancestorTraitNames = array_merge($ancestorTraitNames, $this->directTraitNames($ancestor));
@@ -383,6 +447,22 @@ final class DatabaseConfigurationAnalyzer
             }
         }
 
+        if ($duplicates !== []) {
+            $mergeReason = $this->duplicateMergeConflict($ownOptions, $duplicates, $sourceTrait);
+
+            if ($mergeReason !== null) {
+                return $mergeReason;
+            }
+
+            // The child's own project-trait composition scan already ran in
+            // analyze(); with the ancestor configuration proven identical, the
+            // trait use converts into nothing and the ancestor's single attribute
+            // keeps covering this class.
+            $mergeIntoAncestor = true;
+
+            return null;
+        }
+
         return $this->traitCompositionConflictReason(
             $ancestorTraitNames,
             false,
@@ -391,6 +471,220 @@ final class DatabaseConfigurationAnalyzer
             $optionProperties,
             $seenTraits,
         );
+    }
+
+    /**
+     * The options a duplicate ancestor carries at its hierarchy position, or
+     * [null, null] when the ancestor is not a duplicate of this strategy at all.
+     * An ancestor explicitly using the same trait runs the exact same conversion:
+     * its own preflight must succeed (otherwise the hierarchy is half-migrated and
+     * the merge would silently drop this class's machinery) and its lifted options
+     * are the configuration it carries. An ancestor carrying the migrated target
+     * attribute instead is already final: its literal arguments are read directly,
+     * and anything non-literal cannot be proven equal.
+     *
+     * @param list<ClassLike> $localClasses
+     * @return array{non-empty-string|null, array<non-empty-string, Expr>|null}
+     */
+    private function duplicateConfiguration(
+        Class_ $ancestor,
+        string $ancestorName,
+        string $sourceTrait,
+        array $localClasses,
+    ): array {
+        if ($this->directlyUsesDatabaseTrait($ancestor, $sourceTrait)) {
+            $analysis = $this->analyze($ancestor, $localClasses);
+
+            if ($analysis->unsupportedReason !== null) {
+                return [
+                    sprintf(
+                        'ancestor %s also uses %s but cannot be converted automatically: %s',
+                        $ancestorName,
+                        $sourceTrait,
+                        $analysis->unsupportedReason,
+                    ),
+                    null,
+                ];
+            }
+
+            return [null, $analysis->options];
+        }
+
+        [$carries, $attributeOptions] = $this->migratedAttributeConfiguration($ancestor, self::TRAITS[$sourceTrait]);
+
+        if (! $carries) {
+            return [null, null];
+        }
+
+        if ($attributeOptions === null) {
+            return [
+                sprintf(
+                    'ancestor %s already carries %s with arguments that cannot be proven equal - align the duplicated database configuration manually',
+                    $ancestorName,
+                    self::TRAITS[$sourceTrait],
+                ),
+                null,
+            ];
+        }
+
+        return [null, $attributeOptions];
+    }
+
+    /**
+     * Whether the class-like's own TraitUse statements use the given framework
+     * database trait. Only direct statements count: a use inside a nested
+     * class-like belongs to that class-like, mirroring directTraitNames().
+     */
+    private function directlyUsesDatabaseTrait(ClassLike $classLike, string $sourceTrait): bool
+    {
+        foreach ($classLike->stmts as $statement) {
+            if (! $statement instanceof TraitUse) {
+                continue;
+            }
+
+            foreach ($statement->traits as $trait) {
+                if ($this->resolvedName($trait) === $sourceTrait) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether the class carries the migrated target attribute and which literal
+     * options it declares. Returns [true, null] when the attribute is present but
+     * its arguments cannot be proven (positional or non-literal arguments — the
+     * rules only ever emit named literals), [false, null] when absent.
+     *
+     * @return array{bool, array<non-empty-string, Expr>|null}
+     */
+    private function migratedAttributeConfiguration(Class_ $class, string $targetAttribute): array
+    {
+        $matches = [];
+
+        foreach ($class->attrGroups as $group) {
+            foreach ($group->attrs as $attribute) {
+                if ($this->resolvedName($attribute->name) === $targetAttribute) {
+                    $matches[] = $attribute;
+                }
+            }
+        }
+
+        if ($matches === []) {
+            return [false, null];
+        }
+
+        if (count($matches) > 1) {
+            return [true, null];
+        }
+
+        $options = [];
+
+        foreach ($matches[0]->args as $arg) {
+            if ($arg->name === null || $arg->unpack || ! $this->isLiteral($arg->value)) {
+                return [true, null];
+            }
+
+            $options[$arg->name->toString()] = $arg->value;
+        }
+
+        return [true, $options];
+    }
+
+    /**
+     * Why the duplicate-trait merge cannot be proven lossless. The post-migration
+     * configuration of the class is the topmost duplicate ancestor's attribute
+     * (every lower duplicate merges away, so only that one keeps an attribute);
+     * the pre-migration configuration resolves each option name to its nearest
+     * declaration below that ancestor. Both must agree exactly on presence and
+     * value — a wrong "equal" verdict here would be a silent behavior change.
+     *
+     * @param array<non-empty-string, Expr> $ownOptions
+     * @param list<array{name: non-empty-string, options: array<non-empty-string, Expr>}> $duplicates
+     */
+    private function duplicateMergeConflict(array $ownOptions, array $duplicates, string $sourceTrait): ?string
+    {
+        // Nearest-declaration resolution: the class's own options shadow everything
+        // inherited, and each duplicate ancestor shadows the ones above it (the
+        // list runs bottom-up).
+        $effective = $ownOptions;
+
+        foreach ($duplicates as $duplicate) {
+            foreach ($duplicate['options'] as $name => $value) {
+                if (! array_key_exists($name, $effective)) {
+                    $effective[$name] = $value;
+                }
+            }
+        }
+
+        $top = $duplicates[count($duplicates) - 1];
+
+        foreach ($effective as $name => $value) {
+            if (! array_key_exists($name, $top['options'])) {
+                return sprintf(
+                    'ancestor %s also uses %s and the database configurations cannot be merged exactly (%s exists only here) - remove the duplicated trait configuration manually',
+                    $top['name'],
+                    $sourceTrait,
+                    $this->renderOptions([$name => $value]),
+                );
+            }
+
+            if (! $this->sameLiteral($value, $top['options'][$name])) {
+                return sprintf(
+                    'ancestor %s also uses %s and the database configurations cannot be merged exactly (%s here, %s on the ancestor) - remove the duplicated trait configuration manually',
+                    $top['name'],
+                    $sourceTrait,
+                    $this->renderOptions([$name => $value]),
+                    $this->renderOptions([$name => $top['options'][$name]]),
+                );
+            }
+        }
+
+        foreach ($top['options'] as $name => $value) {
+            if (! array_key_exists($name, $effective)) {
+                return sprintf(
+                    'ancestor %s also uses %s and the database configurations cannot be merged exactly (%s exists only on the ancestor) - remove the duplicated trait configuration manually',
+                    $top['name'],
+                    $sourceTrait,
+                    $this->renderOptions([$name => $value]),
+                );
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Exact literal comparison, deliberately spelled out through the printer:
+     * `true` and `TRUE` are different sources and render differently, so any
+     * ambiguity fails closed on the merge instead of guessing equivalence.
+     */
+    private function sameLiteral(Expr $left, Expr $right): bool
+    {
+        return $this->prettyPrinter->prettyPrintExpr($left) === $this->prettyPrinter->prettyPrintExpr($right);
+    }
+
+    /**
+     * Human-facing option rendering for residual reasons, sanitized for the
+     * marker grammar (`;` separates contributions, `*` breaks the comment form).
+     *
+     * @param array<non-empty-string, Expr> $options
+     */
+    private function renderOptions(array $options): string
+    {
+        if ($options === []) {
+            return 'defaults';
+        }
+
+        $parts = [];
+
+        foreach ($options as $name => $value) {
+            $parts[] = $name . '=' . str_replace([';', '*', "\n"], ['"', 'x', ' '], $this->prettyPrinter->prettyPrintExpr($value));
+        }
+
+        return implode(', ', $parts);
     }
 
     /**

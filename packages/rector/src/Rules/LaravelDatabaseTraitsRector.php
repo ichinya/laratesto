@@ -27,7 +27,13 @@ use Symplify\RuleDocGenerator\ValueObject\CodeSample\CodeSample;
 use Symplify\RuleDocGenerator\ValueObject\RuleDefinition;
 use Testo\Bridge\Rector\Testing\TestRectorFixtures;
 
-/** Atomically converts one statically supported Laravel database trait. */
+/**
+ * Atomically converts one statically supported Laravel database trait. A duplicate
+ * of a strategy an ancestor already carries converts into nothing: the trait use is
+ * removed without adding a second attribute, so the Testo reflection keeps finding
+ * exactly one (Laravel's class_uses_recursive collapsed the duplication to one
+ * behavior before the migration).
+ */
 #[TestRectorFixtures('LaravelDatabaseTraitsRector')]
 final class LaravelDatabaseTraitsRector extends AbstractRector
 {
@@ -97,7 +103,11 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
             return null;
         }
 
-        $this->applyConversion($node, $analysis);
+        if ($analysis->mergeIntoAncestor) {
+            $this->applyInheritedConversion($node, $analysis);
+        } else {
+            $this->applyConversion($node, $analysis);
+        }
         $symbols = [(string) $analysis->sourceTrait];
         foreach ($analysis->removableAttributes as $attribute) {
             $name = $this->analyzer->resolvedName($attribute->name);
@@ -121,6 +131,26 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
             new Attribute(new FullyQualified((string) $analysis->targetAttribute), $arguments),
         ]);
 
+        $this->dropConvertedTraitUseAndLiftedOptions($class, $analysis);
+        $this->dropLiftedAttributes($class, $analysis);
+    }
+
+    /**
+     * Duplicate-trait merge: a resolved ancestor already carries the same database
+     * strategy with a provably identical configuration, so the class converts into
+     * NO attribute of its own and inherits the ancestor's single one through the
+     * hierarchy. Laravel deduplicated the double trait use to one behavior through
+     * class_uses_recursive before the migration — dropping the duplicate without
+     * adding a second attribute is what keeps the Testo interceptor exactly-once.
+     */
+    private function applyInheritedConversion(Class_ $class, DatabaseConfigurationAnalysis $analysis): void
+    {
+        $this->dropConvertedTraitUseAndLiftedOptions($class, $analysis);
+        $this->dropLiftedAttributes($class, $analysis);
+    }
+
+    private function dropConvertedTraitUseAndLiftedOptions(Class_ $class, DatabaseConfigurationAnalysis $analysis): void
+    {
         foreach ($class->stmts as $key => $statement) {
             if ($statement === $analysis->traitUse) {
                 /** @var TraitUse $statement */
@@ -149,7 +179,10 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
             }
         }
         $class->stmts = array_values($class->stmts);
+    }
 
+    private function dropLiftedAttributes(Class_ $class, DatabaseConfigurationAnalysis $analysis): void
+    {
         foreach ($class->attrGroups as $groupKey => $group) {
             $group->attrs = array_values(array_filter(
                 $group->attrs,

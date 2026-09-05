@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests;
 
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase as FoundationTestCase;
 
 /**
@@ -18,6 +19,8 @@ use Illuminate\Foundation\Testing\TestCase as FoundationTestCase;
  */
 abstract class TestCase extends FoundationTestCase
 {
+    use RefreshDatabase;
+
     public static int $baseSetUpCalls = 0;
 
     public static int $baseTearDownCalls = 0;

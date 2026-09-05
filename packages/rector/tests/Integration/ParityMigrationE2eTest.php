@@ -53,6 +53,14 @@ final class ParityMigrationE2eTest
             Assert::string($base)->notContains('parent::setUp()');
             Assert::string($base)->notContains('parent::tearDown()');
 
+            // The base-level RefreshDatabase trait becomes the hierarchy's single
+            // database attribute (MiMo finding 1): every duplicate below it must
+            // merge into this one instead of stacking a second interceptor.
+            Assert::string($base)->contains(
+                "#[\Laratesto\Attribute\RefreshDatabase]\n"
+                . 'abstract class TestCase extends \Laratesto\Testing\LaravelTestCase',
+            );
+
             // Descendants keep the project base and gain only the Testo surface.
             $counters = (string) \file_get_contents($corpus . '/LifecycleCountersTest.php');
             Assert::string($counters)->contains('extends TestCase');
@@ -82,10 +90,12 @@ final class ParityMigrationE2eTest
             Assert::string($discovery)->contains('The annotation probe keeps the project base alive.');
             Assert::string($discovery)->notContains('PHPUnit');
 
-            // Database strategies became attributes: the plain RefreshDatabase class,
-            // the wrapped-transactions class and the literal two-connection truncation.
+            // Database strategies became attributes: the plain RefreshDatabase use
+            // DUPLICATES the base configuration, so it merges into the base
+            // attribute with no own instance; the wrapped-transactions class keeps
+            // its own attribute because a different strategy legitimately stacks.
             $strategies = (string) \file_get_contents($corpus . '/DatabaseStrategiesTest.php');
-            Assert::string($strategies)->contains('#[\Laratesto\Attribute\RefreshDatabase]');
+            Assert::string($strategies)->notContains('#[\Laratesto\Attribute\RefreshDatabase]');
             Assert::string($strategies)->contains('#[\Laratesto\Attribute\DatabaseTransactions]');
             Assert::string($strategies)->notContains('use Illuminate\Foundation\Testing\DatabaseTransactions;');
             Assert::string($strategies)->notContains('use RefreshDatabase;');

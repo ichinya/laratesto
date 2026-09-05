@@ -10,7 +10,9 @@ use PhpParser\Node\Stmt\Property;
 use PhpParser\Node\Stmt\PropertyProperty;
 use PhpParser\Node\Stmt\TraitUse;
 
-/** @internal Immutable result of the database trait all-or-nothing preflight. */
+/**
+ * @internal Immutable result of the database trait all-or-nothing preflight.
+ */
 final readonly class DatabaseConfigurationAnalysis
 {
     /**
@@ -19,6 +21,11 @@ final readonly class DatabaseConfigurationAnalysis
      *        that move into the attribute — sibling options on the same multi-property
      *        declaration stay untouched.
      * @param list<Attribute> $removableAttributes
+     * @param bool $mergeIntoAncestor The class re-declares the same database trait a
+     *        resolved project ancestor already carries, with a provably identical
+     *        configuration: the trait use converts into NO attribute here because the
+     *        class inherits the ancestor's single one (Laravel's class_uses_recursive
+     *        deduplicated the trait to one behavior before the migration).
      */
     public function __construct(
         public ?string $sourceTrait = null,
@@ -28,6 +35,7 @@ final readonly class DatabaseConfigurationAnalysis
         public array $removableProperties = [],
         public array $removableAttributes = [],
         public ?string $unsupportedReason = null,
+        public bool $mergeIntoAncestor = false,
     ) {}
 
     public function hasSourceTrait(): bool

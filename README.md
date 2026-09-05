@@ -261,6 +261,20 @@ carries the trait. Trait machinery methods on the same ancestor are deliberately
 not flagged: a trait import in the child overrides same-named inherited methods,
 so such an override never executed.
 
+When a class re-declares the same database trait a project ancestor already
+uses, that is a duplicate of one strategy, not a second one — Laravel collapsed
+it to a single behavior through `class_uses_recursive()`. The conversion
+therefore emits no second attribute for the duplicate: it removes the trait use
+(and any identical option declarations) and the class keeps inheriting the
+ancestor's single attribute, so the database interceptor runs exactly once. The
+merge is only taken when the effective option configuration below the topmost
+duplicate ancestor is provably identical to the configuration that ancestor
+carries — same names, same literal values, or nothing on both sides. Anything
+else fails closed with `DATABASE_UNSUPPORTED_CONFIGURATION`; remove the
+duplicated trait and its options, or align them with the ancestor. An ancestor
+that already carries the migrated attribute counts the same way, so migrating
+files one at a time cannot stack a second interceptor either.
+
 The same applies to option properties supplied by non-Laravel project traits:
 traits flatten their whole composition tree into every consuming class, so `use
 RefreshDatabase` plus `use ProjectOptions { protected bool $seed = true; }`

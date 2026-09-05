@@ -36,6 +36,17 @@ versions follow [Semantic Versioning](https://semver.org/).
     `DATABASE_UNSUPPORTED_CONFIGURATION`; an unresolvable used trait blocks as
     well, while static members and ancestor-private members (invisible to the
     descendant) and trait uses of nested class-likes are correctly inert;
+  - a database trait re-declared on a descendant of a class that already uses
+    the same trait no longer produces a second class attribute (Laravel's
+    `class_uses_recursive` had collapsed the duplication to one behavior, while
+    Testo's hierarchy-wide reflection then ran the interceptor twice): the
+    duplicate merges into the ancestor's single attribute when the effective
+    option configuration is provably identical — same names and literal values,
+    or nothing on both sides — including across files, through intermediate
+    project bases and against an ancestor that already carries the migrated
+    attribute; a diverging configuration fails closed with an actionable
+    `DATABASE_UNSUPPORTED_CONFIGURATION` residual, and different database
+    traits keep stacking;
   - residual markers reconcile: changed constructs refresh their reason,
     resolved constructs lose the marker, unchanged runs stay byte-identical;
   - a file-level response-gate block no longer strands an otherwise convertible
