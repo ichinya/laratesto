@@ -77,7 +77,7 @@ rollback. Rollback is always scoped to the processed paths
 | Area | Automatic (AUTO) | Left for manual follow-up (RESIDUAL) |
 | --- | --- | --- |
 | Test class | `Tests\TestCase` / `Illuminate\Foundation\Testing\TestCase` → `LaravelTestCase`; `setUp/tearDown` → `setUpLaravel/tearDownLaravel` | unresolved/custom parents, parameterized or static lifecycle (`CLASS_UNSAFE_HIERARCHY`, `LIFECYCLE_UNSUPPORTED`) |
-| Database | trait → attribute (`RefreshDatabase`, `DatabaseTransactions`, `DatabaseMigrations`, `DatabaseTruncation`) with literal options | hooks, dynamic options, multiple traits/adaptations (`DATABASE_UNSUPPORTED_CONFIGURATION`) |
+| Database | trait → attribute (`RefreshDatabase`, `DatabaseTransactions`, `DatabaseMigrations`, `DatabaseTruncation`) with literal options | hooks, dynamic options, multiple traits/adaptations (`DATABASE_UNSUPPORTED_CONFIGURATION`); the lazy `LazilyRefreshDatabase` strategy is never converted — the trait use stays and needs manual migration |
 | HTTP / responses | common request, header, session, cookie, database and response assertions keep working unchanged | unknown helpers/signatures, unsupported response API (`HTTP_UNSUPPORTED_SIGNATURE`, `RESPONSE_UNSUPPORTED_API`) |
 | Fakes | — | `Mail/Queue/Bus/Event/Notification/Storage/Http::fake()` (`LARAVEL_FAKE_UNSUPPORTED`) |
 | Outside a convertible class | — | Laravel constructs in classes whose base does not resolve (`LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY`) |

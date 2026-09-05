@@ -15,6 +15,7 @@ use PhpParser\Node\Expr\Variable;
 use PhpParser\Node\Identifier;
 use PhpParser\Node\Name\FullyQualified;
 use PhpParser\Node\Stmt\Class_;
+use PhpParser\Node\Stmt\Trait_;
 use PhpParser\Node\Stmt\TraitUse;
 use PhpParser\NodeFinder;
 use Rector\PhpParser\AstResolver;
@@ -35,7 +36,11 @@ use Testo\Bridge\Rector\Testing\TestRectorFixtures;
  *    response asserts Laratesto does not provide (`assertJsonFragment`,
  *    `assertJsonCount`, `assertCookie`, `assertCookieExpired`, `assertViewIs`,
  *    `assertDownload`, ...). They keep running under PHPUnit semantics; the class gets
- *    a residual marker listing what needs a manual decision.
+ *    a residual marker listing what needs a manual decision. An unsupported database
+ *    strategy is made visible the same way: a `LazilyRefreshDatabase` trait use —
+ *    direct, or composed through a project trait resolvable in the same file — has no
+ *    lazy counterpart (the eager attribute would change refresh timing), so the trait
+ *    use stays and the class is marked for manual migration.
  *
  * 2. Outside the convertible hierarchy — a class that is NOT a Laravel test but still
  *    uses Laravel test constructs (`$this->app`, a database trait, a `TestResponse`
@@ -92,13 +97,25 @@ final class LaravelResidualDetectionRector extends AbstractRector
     ];
 
     /**
+     * The lazy refresh strategy: same refresh semantics as RefreshDatabase, deferred
+     * to the first database use. The migration has no lazy counterpart — mapping it
+     * to the eager attribute would change refresh timing — so a class carrying it
+     * (directly or through a same-file project trait) is marked, and the trait use
+     * stays in place for the manual migration.
+     */
+    private const LAZY_DATABASE_TRAIT = 'Illuminate\Foundation\Testing\LazilyRefreshDatabase';
+
+    /**
      * Laravel test constructs that mark a NON-test class as carrying unmigrated code.
+     * Includes the lazy refresh strategy: the pipeline never converts it, so it is a
+     * construct outside the hierarchy exactly like its eager siblings.
      */
     private const LARAVEL_TEST_TRAITS = [
         'Illuminate\Foundation\Testing\RefreshDatabase',
         'Illuminate\Foundation\Testing\DatabaseTransactions',
         'Illuminate\Foundation\Testing\DatabaseMigrations',
         'Illuminate\Foundation\Testing\DatabaseTruncation',
+        'Illuminate\Foundation\Testing\LazilyRefreshDatabase',
     ];
 
     public function __construct(
@@ -225,7 +242,105 @@ final class LaravelResidualDetectionRector extends AbstractRector
                 . ' — no automatic conversion; migrate manually',
         ) || $changed;
 
+        $lazyStrategy = $this->lazyStrategyFindings($node);
+
+        $lazyStrategy !== [] and $changed = ResidualMarker::mark(
+            $node,
+            ResidualCode::DATABASE_UNSUPPORTED_CONFIGURATION,
+            static::class,
+            \implode(', ', \array_values(\array_unique($lazyStrategy)))
+                . ' — the lazy database refresh strategy has no automatic conversion; migrate manually',
+        ) || $changed;
+
         return $changed ? $node : null;
+    }
+
+    /**
+     * The lazy refresh strategy inside a converted class: a direct trait use (any
+     * import alias or casing — matched through Rector name resolution), or a project
+     * trait resolvable in the same file that composes it
+     * ({@see sameFileTraitComposes()}). Traits flatten their composition into every
+     * consuming class, so the composed shape hides the strategy from the direct use
+     * scan exactly like an unconverted strategy trait would.
+     *
+     * @return list<string>
+     */
+    private function lazyStrategyFindings(Class_ $node): array
+    {
+        $findings = [];
+
+        $this->traverseNodesWithCallable($node->stmts, function (Node $inner) use (&$findings): void {
+            if (! $inner instanceof TraitUse) {
+                return;
+            }
+
+            foreach ($inner->traits as $trait) {
+                if ($this->isName($trait, self::LAZY_DATABASE_TRAIT)) {
+                    $findings[] = self::LAZY_DATABASE_TRAIT . ' trait';
+
+                    continue;
+                }
+
+                $traitName = $this->getName($trait);
+
+                if (\is_string($traitName) && $traitName !== ''
+                    && $this->sameFileTraitComposes($traitName)) {
+                    $findings[] = \sprintf(
+                        'project trait %s composes %s',
+                        $traitName,
+                        self::LAZY_DATABASE_TRAIT,
+                    );
+                }
+            }
+        });
+
+        return $findings;
+    }
+
+    /**
+     * Bounded, cycle-guarded walk over the file's own trait declarations: the exact
+     * local-first lookup {@see resolveChainClass()} uses, without the autoload
+     * fallback — Rector has no name resolution for trait declarations, and the walk
+     * must stay provable rather than speculative. An unresolvable project trait is
+     * not claimed here; its uses stay outside this rule's evidence.
+     */
+    private function sameFileTraitComposes(string $traitName, int $depth = 0, array $seen = []): bool
+    {
+        if ($depth > self::MAX_CHAIN_DEPTH || isset($seen[$traitName])) {
+            return false;
+        }
+
+        $seen[$traitName] = true;
+
+        $trait = (new NodeFinder())->findFirst(
+            $this->getFile()->getNewStmts(),
+            fn(Node $node): bool => $node instanceof Trait_ && $this->isName($node, $traitName),
+        );
+
+        if (! $trait instanceof Trait_) {
+            return false;
+        }
+
+        foreach ($trait->stmts as $stmt) {
+            if (! $stmt instanceof TraitUse) {
+                continue;
+            }
+
+            foreach ($stmt->traits as $composed) {
+                if ($this->isName($composed, self::LAZY_DATABASE_TRAIT)) {
+                    return true;
+                }
+
+                $composedName = $this->getName($composed);
+
+                if (\is_string($composedName) && $composedName !== ''
+                    && $this->sameFileTraitComposes($composedName, $depth + 1, $seen)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
