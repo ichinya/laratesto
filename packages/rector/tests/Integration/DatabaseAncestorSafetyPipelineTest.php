@@ -73,7 +73,7 @@ final class SeedTest extends \Tests\SeedBase
 {
     use RefreshDatabase;
 
-    protected array $connectionsToTransact = ['mariadb'];
+    protected array $connectionsToTransact = [null];
 
     public function test_ok(): void {}
 }
@@ -145,11 +145,12 @@ PHP);
 
             // SeedTest: the ancestor's $seed is live for its RefreshDatabase trait
             // (property_exists() sees inherited protected members) — the conversion
-            // must fail closed, keeping the trait and NOT lifting the class's own
-            // literal into an attribute.
+            // must fail closed even though the class's own connection selection is
+            // provably default-only, keeping the trait and NOT lifting anything
+            // into an attribute.
             $seedBlock = $between($tests, 'final class SeedTest', 'final class IntermediateTest');
             Assert::string($seedBlock)->contains('use RefreshDatabase;');
-            Assert::string($seedBlock)->contains("protected array \$connectionsToTransact = ['mariadb'];");
+            Assert::string($seedBlock)->contains('protected array $connectionsToTransact = [null];');
             Assert::string($seedBlock)->notContains('#[\Laratesto\Attribute');
 
             // IntermediateTest: the same for a DatabaseTransactions option on the

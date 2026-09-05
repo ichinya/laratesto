@@ -120,6 +120,16 @@ versions follow [Semantic Versioning](https://semver.org/).
     separator, an invalid label character) fail the run with a friendly error
     and exit 1 before anything executes; the README examples are unambiguous
     across POSIX and Windows shells.
+  - RefreshDatabase's `$connectionsToTransact` no longer lifts into the
+    attribute's `connections` argument: the source trait always runs its single
+    `migrate:fresh` against the default connection (the selection only picks
+    the per-test transaction scope), while the attribute repoints
+    `migrate:fresh` at every selected connection, so a named, multiple or
+    empty selection would silently wipe a different schema and skip the
+    default migration — the lift now fails closed with an actionable
+    `DATABASE_UNSUPPORTED_CONFIGURATION` residual, and only a provably
+    default-only selection (a single `null` entry) converts, into the
+    attribute's bare form;
 - `DatabaseTransactions` restores and re-caches in-memory connections around
   the transaction, so a `:memory:` schema no longer vanishes between tests.
 

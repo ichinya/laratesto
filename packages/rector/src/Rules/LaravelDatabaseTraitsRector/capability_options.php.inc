@@ -46,11 +46,21 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Database\DemoSeeder;
+use Illuminate\Foundation\Testing\Attributes\Seed;
+use Illuminate\Foundation\Testing\Attributes\Seeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase;
 
-#[\Laratesto\Attribute\RefreshDatabase(seed: true, seeder: DemoSeeder::class, dropViews: true, dropTypes: true, connections: ['sqlite', 'secondary'])]
+/* laratesto-residual(code=DATABASE_UNSUPPORTED_CONFIGURATION, rule=Laratesto\Rector\Rules\LaravelDatabaseTraitsRector, severity=manual): database option $connectionsToTransact changes the migration scope: the trait always runs migrate:fresh on the default connection, while the attribute would refresh the selected connections - migrate it manually */
+#[Seed]
+#[Seeder(DemoSeeder::class)]
 final class RefreshOptionsTest extends TestCase
 {
+    use RefreshDatabase;
+
+    protected bool $dropViews = true;
+    protected bool $dropTypes = true;
+    protected array $connectionsToTransact = ['sqlite', 'secondary'];
 }
 
 #[\Laratesto\Attribute\DatabaseTransactions(connections: ['sqlite', 'secondary'])]

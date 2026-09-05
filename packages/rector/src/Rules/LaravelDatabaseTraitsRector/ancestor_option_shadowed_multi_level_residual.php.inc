@@ -54,9 +54,13 @@ namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-#[\Laratesto\Attribute\RefreshDatabase(connections: ['pgsql'])]
+/* laratesto-residual(code=DATABASE_UNSUPPORTED_CONFIGURATION, rule=Laratesto\Rector\Rules\LaravelDatabaseTraitsRector, severity=manual): database option $connectionsToTransact changes the migration scope: the trait always runs migrate:fresh on the default connection, while the attribute would refresh the selected connections - migrate it manually */
 final class DeepestShadowTest extends \Tests\TestCase
 {
+    use RefreshDatabase;
+
+    protected array $connectionsToTransact = ['pgsql'];
+
     public function test_store(): void
     {
         $this->get('/store');

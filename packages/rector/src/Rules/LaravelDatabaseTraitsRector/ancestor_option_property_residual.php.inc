@@ -19,7 +19,7 @@ final class AncestorSeedTest extends \Tests\TestCase
 {
     use RefreshDatabase;
 
-    protected array $connectionsToTransact = ['mariadb'];
+    protected array $connectionsToTransact = [null];
 
     public function test_store(): void
     {
@@ -49,7 +49,7 @@ final class AncestorSeedTest extends \Tests\TestCase
 {
     use RefreshDatabase;
 
-    protected array $connectionsToTransact = ['mariadb'];
+    protected array $connectionsToTransact = [null];
 
     public function test_store(): void
     {

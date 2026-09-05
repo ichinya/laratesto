@@ -135,6 +135,14 @@ runtime `0.6.9` does not ship. Install `ichinya/laratesto` `dev-main` — or the
 release that includes those attributes — before running migrated tests; against
 `0.6.9` the generated code cannot run.
 
+Note that a `$connectionsToTransact` selection of a single `null` entry — the
+provably default-only shape — converts to the bare `#[RefreshDatabase]`
+attribute with no `connections` argument at all, which resolves to the same
+default-only migration and transaction scope. Named, multiple or empty
+selections keep the trait and receive a `DATABASE_UNSUPPORTED_CONFIGURATION`
+residual instead, because the trait always migrates the default connection
+while the attribute would repoint `migrate:fresh` at the selected connections.
+
 ## Autoloading
 
 Class-hierarchy detection needs the project's test classes to be autoloadable. A
