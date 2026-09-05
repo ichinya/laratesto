@@ -16,16 +16,6 @@ final class CustomRefreshTest extends TestCase
         $this->artisan('migrate', ['--path' => 'database/migrations/custom']);
     }
 }
-
-final class InMemoryRefreshTest extends TestCase
-{
-    use RefreshDatabase;
-
-    protected function refreshInMemoryDatabase(): void
-    {
-        $this->artisan('migrate', ['--path' => 'database/migrations/memory']);
-    }
-}
 -----
 <?php
 
@@ -44,16 +34,5 @@ final class CustomRefreshTest extends TestCase
     protected function refreshDatabase(): void
     {
         $this->artisan('migrate', ['--path' => 'database/migrations/custom']);
-    }
-}
-
-/* laratesto-residual(code=DATABASE_UNSUPPORTED_CONFIGURATION, rule=Laratesto\Rector\Rules\LaravelDatabaseTraitsRector, severity=manual): database override refreshInMemoryDatabase() requires manual migration */
-final class InMemoryRefreshTest extends TestCase
-{
-    use RefreshDatabase;
-
-    protected function refreshInMemoryDatabase(): void
-    {
-        $this->artisan('migrate', ['--path' => 'database/migrations/memory']);
     }
 }

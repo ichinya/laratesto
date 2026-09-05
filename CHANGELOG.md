@@ -87,6 +87,20 @@ versions follow [Semantic Versioning](https://semver.org/).
     command answers with a friendly error and exit 1 instead of a raw Symfony
     Process exception; the explicit missing-Rector-binary check and the stderr
     diagnostics stay in place.
+  - the database override preflight scopes every hook to the one active
+    trait's own machinery, including the hooks inherited from the shared
+    `CanConfigureMigrationCommands` concern: dead hooks of a different
+    strategy (for example `beforeRefreshingDatabase()` next to
+    `DatabaseTruncation` or `connectionsToTransact()` next to
+    `DatabaseMigrations`) no longer emit false
+    `DATABASE_UNSUPPORTED_CONFIGURATION` residuals, while overrides of live
+    machinery the flat list never covered (`migrateDatabases()`, the
+    in-memory refresh helpers, `tableExistsIn()`) and case-variant method
+    declarations still fail the conversion closed, as does a used project
+    trait (directly or through its composition tree) supplying a live hook —
+    an `insteadof` adaptation on the project trait's own use statement can
+    select the project hook body while the source trait's use statement
+    stays adaptation-free, so adaptation shapes fail closed as a whole;
   - `laratesto:migrate-rector --base-class` and rule `base_classes` values are
     canonicalized safely: the documented forward-slash spelling
     (`Tests/ApiTestCase`), a single leading separator and surrounding whitespace

@@ -61,29 +61,72 @@ final class DatabaseConfigurationAnalyzer
         ],
     ];
 
-    private const UNSUPPORTED_OVERRIDES = [
-        'beforeRefreshingDatabase',
-        'afterRefreshingDatabase',
-        'beforeTruncatingDatabase',
-        'afterTruncatingDatabase',
-        'connectionsToTransact',
-        'connectionsToTruncate',
-        'tablesToTruncate',
-        'exceptTables',
+    /**
+     * Hooks the three migration-command strategies share through
+     * CanConfigureMigrationCommands (RefreshDatabase, DatabaseMigrations and
+     * DatabaseTruncation each `use` it): the "migrate:fresh" argument builder
+     * and the property_exists()-gated option readers it consults.
+     */
+    private const MIGRATION_COMMAND_HOOKS = [
         'migrateFreshUsing',
-        'shouldSeed',
-        'seeder',
         'shouldDropViews',
         'shouldDropTypes',
-        'beginDatabaseTransaction',
-        'runDatabaseMigrations',
-        'refreshDatabase',
-        'refreshInMemoryDatabase',
-        'refreshTestDatabase',
-        'truncateDatabaseTables',
-        'truncateTablesForAllConnections',
-        'truncateTablesForConnection',
-        'getAllTablesForConnection',
+        'shouldSeed',
+        'seeder',
+    ];
+
+    /**
+     * Methods of each database trait's composition whose class-level override
+     * carries live behavior today but nothing after conversion: the Testo
+     * interceptor replaces the trait machinery and never calls back into it.
+     * Derived from the framework sources (`^12.0 || ^13.0`, verified at the
+     * v12.0.0 and v13.0.0 tags, the 12.x/13.x heads and the installed
+     * 12.69.1): the trait's own methods plus everything it inherits from the
+     * shared concern. The sets are the union across those versions —
+     * `updateLocalCacheOfInMemoryDatabases` only exists from later 12.x on —
+     * so every supported version is covered. A method outside the active
+     * trait's set belongs to a different strategy, never executed for this
+     * class, and must not block the conversion.
+     */
+    private const UNSUPPORTED_OVERRIDES = [
+        'Illuminate\Foundation\Testing\RefreshDatabase' => [
+            ...self::MIGRATION_COMMAND_HOOKS,
+            'refreshDatabase',
+            'usingInMemoryDatabases',
+            'usingInMemoryDatabase',
+            'restoreInMemoryDatabase',
+            'refreshTestDatabase',
+            'updateLocalCacheOfInMemoryDatabases',
+            'migrateDatabases',
+            'beginDatabaseTransaction',
+            'connectionsToTransact',
+            'beforeRefreshingDatabase',
+            'afterRefreshingDatabase',
+        ],
+        'Illuminate\Foundation\Testing\DatabaseMigrations' => [
+            ...self::MIGRATION_COMMAND_HOOKS,
+            'runDatabaseMigrations',
+            'refreshTestDatabase',
+            'beforeRefreshingDatabase',
+            'afterRefreshingDatabase',
+        ],
+        'Illuminate\Foundation\Testing\DatabaseTransactions' => [
+            'beginDatabaseTransaction',
+            'connectionsToTransact',
+        ],
+        'Illuminate\Foundation\Testing\DatabaseTruncation' => [
+            ...self::MIGRATION_COMMAND_HOOKS,
+            'truncateDatabaseTables',
+            'truncateTablesForAllConnections',
+            'truncateTablesForConnection',
+            'getAllTablesForConnection',
+            'tableExistsIn',
+            'connectionsToTruncate',
+            'tablesToTruncate',
+            'exceptTables',
+            'beforeTruncatingDatabase',
+            'afterTruncatingDatabase',
+        ],
     ];
 
     /**
@@ -104,6 +147,8 @@ final class DatabaseConfigurationAnalyzer
     private NodeFinder $nodeFinder;
 
     private Standard $prettyPrinter;
+    /** @var array<non-empty-string, list<lowercase-string&non-empty-string>> */
+    private array $unsupportedOverrides;
 
     public function __construct(
         private readonly NodeNameResolver $nodeNameResolver,
@@ -112,6 +157,10 @@ final class DatabaseConfigurationAnalyzer
     {
         $this->nodeFinder = new NodeFinder();
         $this->prettyPrinter = new Standard();
+        $this->unsupportedOverrides = array_map(
+            static fn (array $hooks): array => array_map('strtolower', $hooks),
+            self::UNSUPPORTED_OVERRIDES,
+        );
     }
 
     /**
@@ -174,9 +223,14 @@ final class DatabaseConfigurationAnalyzer
             return $this->unsupported($base, 'database trait adaptations are not converted automatically');
         }
 
+        $unsupportedOverrides = $this->unsupportedOverrides[$sourceTrait];
+
         foreach ($class->getMethods() as $method) {
             $name = $method->name->toString();
-            if (in_array($name, self::UNSUPPORTED_OVERRIDES, true)) {
+
+            // PHP resolves method names case-insensitively, so a case-variant
+            // declaration is still the same override of the trait machinery.
+            if (in_array(strtolower($name), $unsupportedOverrides, true)) {
                 return $this->unsupported($base, sprintf('database override %s() requires manual migration', $name));
             }
         }
@@ -277,7 +331,10 @@ final class DatabaseConfigurationAnalyzer
 
         // Traits flatten their full composition tree into every consuming class,
         // so a project trait can supply live option properties that the class
-        // scan above never sees (PHP-Parser does not flatten trait properties).
+        // scan above never sees (PHP-Parser does not flatten trait properties)
+        // — and, through an insteadof adaptation on its own use statement, it
+        // can supply a live hook override while the source trait's use stays
+        // adaptation-free.
         $seenTraits = [];
         $directTraitReason = $this->traitCompositionConflictReason(
             $this->directTraitNames($class),
@@ -286,6 +343,7 @@ final class DatabaseConfigurationAnalyzer
             $localClasses,
             self::PROPERTY_OPTIONS[$sourceTrait],
             $seenTraits,
+            $this->unsupportedOverrides[$sourceTrait],
         );
 
         if ($directTraitReason !== null) {
@@ -807,6 +865,12 @@ final class DatabaseConfigurationAnalyzer
      * @param array<string, true> $seenTraits Shared with the other scan phase, so a
      *        trait used both directly and through an ancestor is inspected once,
      *        under the direct (wider) visibility rules first.
+     * @param list<lowercase-string&non-empty-string> $hookOverrides The active
+     *        trait's live machinery hooks; checked in the consumer's own scope
+     *        only, where every visibility qualifies. Empty for the ancestor
+     *        walk: an ancestor trait's hook is dead for the descendant because
+     *        the descendant's source-trait machinery overrides every inherited
+     *        same-named method.
      */
     private function traitCompositionConflictReason(
         array $traitNames,
@@ -815,6 +879,7 @@ final class DatabaseConfigurationAnalyzer
         array $localClasses,
         array $optionProperties,
         array &$seenTraits,
+        array $hookOverrides = [],
     ): ?string {
         while ($traitNames !== []) {
             $traitName = array_shift($traitNames);
@@ -831,7 +896,8 @@ final class DatabaseConfigurationAnalyzer
                 return sprintf('used trait %s could not be resolved, so its database options require manual migration', $traitName);
             }
 
-            $reason = $this->traitPropertyConflict($trait, $traitName, $sameClassScope, $class, $optionProperties);
+            $reason = $this->traitPropertyConflict($trait, $traitName, $sameClassScope, $class, $optionProperties)
+                ?? $this->traitHookConflict($trait, $traitName, $hookOverrides);
 
             if ($reason !== null) {
                 return $reason;
@@ -938,6 +1004,39 @@ final class DatabaseConfigurationAnalyzer
                 if (isset($optionProperties[$name]) && ! isset($ownNames[$name])) {
                     return sprintf('database option $%s on trait %s requires manual migration', $name, $traitName);
                 }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Why a hook method the trait supplies requires manual migration, or null
+     * when it supplies none. The composition flattens into the consumer with
+     * the consumer's scope, and the machinery calls its hooks through
+     * `$this`, which resolves even static and private trait members — so any
+     * visibility qualifies. When the source trait declares the same hook, the
+     * shape is one of: a runtime fatal (two traits, no adaptation), an
+     * insteadof adaptation selecting the project body while the source
+     * trait's separate use statement stays adaptation-free (live), or an
+     * adaptation selecting the source body (dead, but not provable without
+     * deciding adaptation semantics). All three fail closed rather than
+     * guess: the class can be restructured or migrated by hand.
+     *
+     * @param list<lowercase-string&non-empty-string> $hookOverrides
+     */
+    private function traitHookConflict(Trait_ $trait, string $traitName, array $hookOverrides): ?string
+    {
+        if ($hookOverrides === []) {
+            return null;
+        }
+
+        foreach ($trait->getMethods() as $method) {
+            $name = $method->name->toString();
+
+            // PHP resolves method names case-insensitively; see the class-level scan.
+            if (in_array(strtolower($name), $hookOverrides, true)) {
+                return sprintf('database override %s() on trait %s requires manual migration', $name, $traitName);
             }
         }
 
