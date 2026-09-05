@@ -10,9 +10,11 @@ use PhpParser\Node\Attribute;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Name;
 use PhpParser\Node\Scalar;
+use PhpParser\Node\Stmt\ClassLike;
 use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\Property;
 use PhpParser\Node\Stmt\TraitUse;
+use PhpParser\Node\Stmt\Trait_;
 use Rector\NodeNameResolver\NodeNameResolver;
 use Rector\PhpParser\AstResolver;
 
@@ -109,9 +111,10 @@ final class DatabaseConfigurationAnalyzer
     }
 
     /**
-     * @param list<Class_> $localClasses The class nodes declared in the file under
-     *        analysis (old statements), used to resolve the extends chain without
-     *        autoload before AstResolver is consulted.
+     * @param list<ClassLike> $localClasses The class-like nodes declared in the
+     *        file under analysis (old statements), used to resolve the extends
+     *        chain and used traits without autoload before AstResolver is
+     *        consulted.
      */
     public function analyze(Class_ $class, array $localClasses = []): DatabaseConfigurationAnalysis
     {
@@ -268,7 +271,24 @@ final class DatabaseConfigurationAnalyzer
             }
         }
 
-        $ancestorReason = $this->ancestorConflictReason($class, $localClasses, $sourceTrait);
+        // Traits flatten their full composition tree into every consuming class,
+        // so a project trait can supply live option properties that the class
+        // scan above never sees (PHP-Parser does not flatten trait properties).
+        $seenTraits = [];
+        $directTraitReason = $this->traitCompositionConflictReason(
+            $this->directTraitNames($class),
+            true,
+            $class,
+            $localClasses,
+            self::PROPERTY_OPTIONS[$sourceTrait],
+            $seenTraits,
+        );
+
+        if ($directTraitReason !== null) {
+            return $this->unsupported($base, $directTraitReason);
+        }
+
+        $ancestorReason = $this->ancestorConflictReason($class, $localClasses, $sourceTrait, $seenTraits);
 
         if ($ancestorReason !== null) {
             return $this->unsupported($base, $ancestorReason);
@@ -309,11 +329,17 @@ final class DatabaseConfigurationAnalyzer
      * AstResolver — the exact resolution order the other hierarchy walks use.
      * Unresolvable names are not flagged: the classification stays exactly as
      * provable as before, cycles and over-deep chains terminate the walk (the
-     * hierarchy rule owns their diagnosis).
+     * hierarchy rule owns their diagnosis). Each resolved ancestor also contributes
+     * its own trait uses to the trait scan: a project ancestor's used trait
+     * flattens its option properties into that ancestor, where they are inherited
+     * exactly like inline declarations.
      *
-     * @param list<Class_> $localClasses
+     * @param list<ClassLike> $localClasses
+     * @param array<string, true> $seenTraits Shared with the direct trait scan, so a
+     *        trait used both directly and through an ancestor is inspected once,
+     *        under the direct (wider) visibility rules first.
      */
-    private function ancestorConflictReason(Class_ $class, array $localClasses, string $sourceTrait): ?string
+    private function ancestorConflictReason(Class_ $class, array $localClasses, string $sourceTrait, array &$seenTraits): ?string
     {
         $current = $class->extends === null ? null : $this->resolvedName($class->extends);
 
@@ -323,14 +349,11 @@ final class DatabaseConfigurationAnalyzer
 
         $optionProperties = self::PROPERTY_OPTIONS[$sourceTrait];
         $seen = [];
+        $ancestorTraitNames = [];
 
         for ($depth = 0; $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
-            if ($current === self::FRAMEWORK_BASE || $current === self::TARGET_BASE) {
-                return null;
-            }
-
-            if (isset($seen[$current])) {
-                return null;
+            if ($current === self::FRAMEWORK_BASE || $current === self::TARGET_BASE || isset($seen[$current])) {
+                break;
             }
 
             $seen[$current] = true;
@@ -338,7 +361,7 @@ final class DatabaseConfigurationAnalyzer
             $ancestor = $this->resolveAncestor($current, $localClasses);
 
             if (! $ancestor instanceof Class_) {
-                return null;
+                break;
             }
 
             $reason = $this->ancestorPropertyConflict($ancestor, $current, $optionProperties);
@@ -347,31 +370,42 @@ final class DatabaseConfigurationAnalyzer
                 return $reason;
             }
 
+            $ancestorTraitNames = array_merge($ancestorTraitNames, $this->directTraitNames($ancestor));
+
             if ($ancestor->extends === null) {
-                return null;
+                break;
             }
 
             $current = $this->resolvedName($ancestor->extends);
 
             if ($current === null) {
-                return null;
+                break;
             }
         }
 
-        return null;
+        return $this->traitCompositionConflictReason(
+            $ancestorTraitNames,
+            false,
+            $class,
+            $localClasses,
+            $optionProperties,
+            $seenTraits,
+        );
     }
 
     /**
      * Same-file lookup first, then reflection — the resolution order
      * LaravelBaseClassRector::resolveClassNode() uses, so a base defined in the file
-     * currently being processed resolves without autoload.
+     * currently being processed resolves without autoload. Same-file traits share
+     * the lookup table and are skipped here: an extends target is always a class.
      *
-     * @param list<Class_> $localClasses
+     * @param list<ClassLike> $localClasses
      */
     private function resolveAncestor(string $className, array $localClasses): ?Class_
     {
         foreach ($localClasses as $local) {
-            if ($local->namespacedName !== null
+            if ($local instanceof Class_
+                && $local->namespacedName !== null
                 && $local->namespacedName->toString() === $className) {
                 return $local;
             }
@@ -410,6 +444,170 @@ final class DatabaseConfigurationAnalyzer
 
                 if (isset($optionProperties[$name])) {
                     return sprintf('database option $%s on ancestor %s requires manual migration', $name, $ancestorName);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Why converting this class's database trait would silently drop an option
+     * property supplied by a used project trait, or null when the conversion is
+     * trait-safe. Traits flatten their full composition tree into every consuming
+     * class at runtime, and the Laravel traits read their options through
+     * `property_exists($this, ...)` from the consumer's scope — so a trait-supplied
+     * option is live exactly like an inline declaration, yet `Class_::getProperties()`
+     * never sees it (PHP-Parser does not flatten trait properties).
+     *
+     * Only TraitUse statements on the class-like's own body flatten into it: a trait
+     * use inside a nested class-like belongs to that class-like. The four framework
+     * database traits declare no option properties and are skipped. Names the class
+     * itself declares are skipped as well: the class's own declaration wins the
+     * composition (or the file fatals), and the class-level scan already lifted
+     * that literal into the attribute.
+     *
+     * A used trait that cannot be resolved — or resolves to a non-trait — cannot be
+     * proven option-free and fails the conversion closed. Cyclic compositions
+     * terminate on the seen-set: every member of a cycle was already collected, and
+     * the composition itself is a runtime fatal the hierarchy rule owns.
+     *
+     * @param list<non-empty-string> $traitNames
+     * @param array<non-empty-string, non-empty-string> $optionProperties
+     * @param list<ClassLike> $localClasses
+     * @param array<string, true> $seenTraits Shared with the other scan phase, so a
+     *        trait used both directly and through an ancestor is inspected once,
+     *        under the direct (wider) visibility rules first.
+     */
+    private function traitCompositionConflictReason(
+        array $traitNames,
+        bool $sameClassScope,
+        Class_ $class,
+        array $localClasses,
+        array $optionProperties,
+        array &$seenTraits,
+    ): ?string {
+        while ($traitNames !== []) {
+            $traitName = array_shift($traitNames);
+
+            if (isset($seenTraits[$traitName])) {
+                continue;
+            }
+
+            $seenTraits[$traitName] = true;
+
+            $trait = $this->resolveTraitLike($traitName, $localClasses);
+
+            if (! $trait instanceof Trait_) {
+                return sprintf('used trait %s could not be resolved, so its database options require manual migration', $traitName);
+            }
+
+            $reason = $this->traitPropertyConflict($trait, $traitName, $sameClassScope, $class, $optionProperties);
+
+            if ($reason !== null) {
+                return $reason;
+            }
+
+            // The whole composition tree flattens into the consumer, so a used-by-used
+            // trait contributes exactly like a direct one.
+            $traitNames = array_merge($traitNames, $this->directTraitNames($trait));
+        }
+
+        return null;
+    }
+
+    /**
+     * The trait names of the class-like's own TraitUse statements, skipping the
+     * framework database traits: a trait use inside a nested class-like belongs
+     * to that class-like, not to this one, so only the body's direct statements
+     * flatten their properties into it.
+     *
+     * @return list<non-empty-string>
+     */
+    private function directTraitNames(ClassLike $classLike): array
+    {
+        $names = [];
+
+        foreach ($classLike->stmts as $statement) {
+            if (! $statement instanceof TraitUse) {
+                continue;
+            }
+
+            foreach ($statement->traits as $trait) {
+                $name = $this->resolvedName($trait);
+
+                if ($name !== null && ! isset(self::TRAITS[$name])) {
+                    $names[] = $name;
+                }
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * Same-file lookup first, then reflection — the resolution order the ancestor
+     * walk uses, so a trait defined in the file currently being processed resolves
+     * without autoload. Null when the symbol cannot be resolved as a trait.
+     *
+     * @param list<ClassLike> $localClasses
+     */
+    private function resolveTraitLike(string $traitName, array $localClasses): ?Trait_
+    {
+        foreach ($localClasses as $local) {
+            if ($local instanceof Trait_
+                && $local->namespacedName !== null
+                && $local->namespacedName->toString() === $traitName) {
+                return $local;
+            }
+        }
+
+        try {
+            $resolved = $this->astResolver->resolveClassFromName($traitName);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $resolved instanceof Trait_ ? $resolved : null;
+    }
+
+    /**
+     * The first live option declaration the trait supplies, as a fail-closed
+     * reason. The composition flattens into the consumer with the consumer's
+     * scope: a directly used trait lives in the consumer's own scope, where even
+     * private members are reachable (`property_exists()` and `$this->option` both
+     * see them); a trait an ancestor uses is inherited, so private members stay
+     * private to the ancestor and are invisible to the descendant. Static
+     * properties are skipped in both scopes: the traits read their options
+     * through `$this`, which never resolves to a static declaration.
+     *
+     * @param array<non-empty-string, non-empty-string> $optionProperties
+     */
+    private function traitPropertyConflict(
+        Trait_ $trait,
+        string $traitName,
+        bool $sameClassScope,
+        Class_ $class,
+        array $optionProperties,
+    ): ?string {
+        $ownNames = [];
+
+        foreach ($class->getProperties() as $property) {
+            foreach ($property->props as $item) {
+                $ownNames[$item->name->toString()] = true;
+            }
+        }
+
+        foreach ($trait->getProperties() as $property) {
+            if ($property->isStatic() || (! $sameClassScope && $property->isPrivate())) {
+                continue;
+            }
+
+            foreach ($property->props as $item) {
+                $name = $item->name->toString();
+
+                if (isset($optionProperties[$name]) && ! isset($ownNames[$name])) {
+                    return sprintf('database option $%s on trait %s requires manual migration', $name, $traitName);
                 }
             }
         }

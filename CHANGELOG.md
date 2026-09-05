@@ -26,6 +26,16 @@ versions follow [Semantic Versioning](https://semver.org/).
     rejected as documented;
   - multi-property database options split losslessly — sibling properties on
     the same declaration survive;
+  - database option properties supplied by non-Laravel project traits stay
+    visible: traits flatten their composition tree into every consuming class,
+    so a directly or ancestor-used trait carrying `$seed`, `$tablesToTruncate`
+    and friends is live for the trait machinery even though a class-level scan
+    never sees it — the preflight now resolves used traits (same-file first,
+    then reflection) with their full composition trees for the class and the
+    applicable ancestor chain and fails the conversion closed with
+    `DATABASE_UNSUPPORTED_CONFIGURATION`; an unresolvable used trait blocks as
+    well, while static members and ancestor-private members (invisible to the
+    descendant) and trait uses of nested class-likes are correctly inert;
   - residual markers reconcile: changed constructs refresh their reason,
     resolved constructs lose the marker, unchanged runs stay byte-identical;
   - a file-level response-gate block no longer strands an otherwise convertible

@@ -261,6 +261,21 @@ carries the trait. Trait machinery methods on the same ancestor are deliberately
 not flagged: a trait import in the child overrides same-named inherited methods,
 so such an override never executed.
 
+The same applies to option properties supplied by non-Laravel project traits:
+traits flatten their whole composition tree into every consuming class, so `use
+RefreshDatabase` plus `use ProjectOptions { protected bool $seed = true; }`
+seeds today, yet no class-level scan sees a trait property. The preflight
+resolves the directly used traits of the class and of every resolvable ancestor
+(same-file first, then reflection), inspects their composition trees, and fails
+the conversion closed with `DATABASE_UNSUPPORTED_CONFIGURATION` instead. A used
+trait that cannot be resolved cannot be proven option-free and blocks as well.
+Private members of a directly used trait are live (they flatten into the
+consumer's own scope); private members of an ancestor-used trait stay private to
+the ancestor and are not flagged; static members are never flagged in either
+scope — the traits read their options through `$this`, which never resolves to a
+static declaration. Trait uses inside nested class-likes belong to those
+class-likes and are not flagged.
+
 ### Dry-run report contract
 
 `laratesto-residuals.json` is deterministic: stable schema version, sorted

@@ -229,11 +229,11 @@ final class LaravelDatabaseTraitsRector extends AbstractRector
         return $symbols !== [] && $fileNode->removeImports($symbols) ? $fileNode : null;
     }
 
-    /** @return list<Class_> */
+    /** @return list<ClassLike> */
     private function fileClasses(): array
     {
-        /** @var list<Class_> $classes */
-        $classes = (new NodeFinder())->findInstanceOf($this->getFile()->getOldStmts(), Class_::class);
+        /** @var list<ClassLike> $classes */
+        $classes = (new NodeFinder())->findInstanceOf($this->getFile()->getOldStmts(), ClassLike::class);
 
         return $classes;
     }
