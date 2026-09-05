@@ -47,6 +47,14 @@ versions follow [Semantic Versioning](https://semver.org/).
     attribute; a diverging configuration fails closed with an actionable
     `DATABASE_UNSUPPORTED_CONFIGURATION` residual, and different database
     traits keep stacking;
+  - ancestor option properties shadowed by the converted class no longer block
+    the database trait conversion: the Laravel traits read their options through
+    `property_exists($this, ...)` plus `$this->option`, and PHP resolves both to
+    the most-derived declaration, so when the class itself declares the option
+    with a supported literal only that value was ever live — the conversion now
+    lifts it into the attribute and ignores same-named ancestor declarations at
+    every chain depth, while an ancestor option the class does not redeclare
+    still fails the conversion closed;
   - residual markers reconcile: changed constructs refresh their reason,
     resolved constructs lose the marker, unchanged runs stay byte-identical;
   - a file-level response-gate block no longer strands an otherwise convertible

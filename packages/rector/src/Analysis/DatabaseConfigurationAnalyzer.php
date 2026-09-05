@@ -351,6 +351,13 @@ final class DatabaseConfigurationAnalyzer
      *    configuration that ancestor carries — otherwise the conversion fails
      *    closed with DATABASE_UNSUPPORTED_CONFIGURATION.
      *
+     * An option name the concrete class itself declares is the exception: PHP
+     * resolves both the `property_exists()` gate and the `$this->option` read to
+     * the most-derived declaration, so an ancestor's same-named declaration never
+     * carried live behavior at any chain depth — the class-level scan has already
+     * proven the child's declaration a single non-static supported unread literal
+     * and lifted it into the attribute.
+     *
      * A class without a database trait never reaches this scan: without the trait the
      * machinery never ran, so unrelated ancestor members are not flagged.
      *
@@ -386,6 +393,16 @@ final class DatabaseConfigurationAnalyzer
         }
 
         $optionProperties = self::PROPERTY_OPTIONS[$sourceTrait];
+        $shadowedOptions = [];
+        foreach ($class->getProperties() as $property) {
+            foreach ($property->props as $item) {
+                $name = $item->name->toString();
+
+                if (isset($optionProperties[$name])) {
+                    $shadowedOptions[$name] = true;
+                }
+            }
+        }
         $seen = [];
         $ancestorTraitNames = [];
 
@@ -427,7 +444,7 @@ final class DatabaseConfigurationAnalyzer
                 // the hierarchy and compared for exactness below.
                 $duplicates[] = ['name' => $current, 'options' => $duplicateOptions];
             } else {
-                $reason = $this->ancestorPropertyConflict($ancestor, $current, $optionProperties);
+                $reason = $this->ancestorPropertyConflict($ancestor, $current, $optionProperties, $shadowedOptions);
 
                 if ($reason !== null) {
                     return $reason;
@@ -716,17 +733,35 @@ final class DatabaseConfigurationAnalyzer
 
     /**
      * The first live option declaration the ancestor carries, as a fail-closed
-     * reason. Private members are skipped: `property_exists()` may see them, but the
-     * trait-scope read `$this->option` cannot reach them, so they never carried
-     * behavior. Static properties are skipped for the same reason: the traits read
-     * their options through `$this`, which never resolves to a static declaration.
+     * reason, or null when the conversion is hierarchy-safe.
+     *
+     * An option name the concrete class itself declares is skipped at every chain
+     * level: PHP resolves a redeclared property to its most-derived declaration,
+     * so both the trait machinery's `property_exists($this, ...)` gate and the
+     * `$this->option` read answer from the class's own declaration, and the
+     * ancestor's same-named declaration is inert. When the class does not declare
+     * the name, the most-derived non-private non-static ancestor declaration is
+     * exactly the value the machinery reads, and the reason names it.
+     *
+     * Private members are skipped: `property_exists()` is visibility-aware, so the
+     * gate already answers false for an ancestor-private option and the traits
+     * fall back to their defaults — the private value never carried behavior.
+     * Static members are skipped too: the traits read their options through
+     * `$this`, which never resolves a static declaration (an ancestor-static read
+     * warns and yields null), and mixing static with non-static down a chain is a
+     * compile-time fatal the hierarchy rule owns, not a provable value.
      *
      * @param array<non-empty-string, non-empty-string> $optionProperties
+     * @param array<non-empty-string, true> $shadowedOptions Option names the
+     *        converted class itself declares; the class-level scan has already
+     *        proven each one a single non-static supported unread literal and
+     *        lifted it into the attribute.
      */
     private function ancestorPropertyConflict(
         Class_ $ancestor,
         string $ancestorName,
         array $optionProperties,
+        array $shadowedOptions,
     ): ?string {
         foreach ($ancestor->getProperties() as $property) {
             if ($property->isPrivate() || $property->isStatic()) {
@@ -736,7 +771,7 @@ final class DatabaseConfigurationAnalyzer
             foreach ($property->props as $item) {
                 $name = $item->name->toString();
 
-                if (isset($optionProperties[$name])) {
+                if (isset($optionProperties[$name]) && ! isset($shadowedOptions[$name])) {
                     return sprintf('database option $%s on ancestor %s requires manual migration', $name, $ancestorName);
                 }
             }

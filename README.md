@@ -257,9 +257,12 @@ such as `Tests\TestCase`, or any resolvable class between it and the trait) stay
 live for the trait machinery through `property_exists()`, so a descendant's
 conversion fails closed with `DATABASE_UNSUPPORTED_CONFIGURATION` instead of
 dropping it; move the option into a literal attribute argument on the class that
-carries the trait. Trait machinery methods on the same ancestor are deliberately
-not flagged: a trait import in the child overrides same-named inherited methods,
-so such an override never executed.
+carries the trait. An option the class itself redeclares is the exception: PHP
+resolves the `property_exists()` gate and the value read to the most-derived
+declaration, so only the class's own (already lifted) literal is live and the
+ancestor's same-named declaration is inert at every chain depth. Trait machinery
+methods on the same ancestor are deliberately not flagged: a trait import in the
+child overrides same-named inherited methods, so such an override never executed.
 
 When a class re-declares the same database trait a project ancestor already
 uses, that is a duplicate of one strategy, not a second one — Laravel collapsed
