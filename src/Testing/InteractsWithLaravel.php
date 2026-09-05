@@ -497,23 +497,33 @@ trait InteractsWithLaravel
     /**
      * Set the currently logged-in user without a session.
      *
-     * The user is set on the guard directly, so it persists across all
-     * subsequent HTTP requests in the same test, regardless of session cookies.
+     * Mirrors Laravel's `actingAs`/`be` pair: the user is set on the guard
+     * directly, so it persists across all subsequent HTTP requests in the same
+     * test regardless of session cookies, the guard becomes the default for
+     * subsequent requests, and a freshly created model's `wasRecentlyCreated`
+     * flag is cleared.
      */
     protected function actingAs(Authenticatable $user, ?string $guard = null): static
     {
+        if (isset($user->wasRecentlyCreated) && $user->wasRecentlyCreated) {
+            $user->wasRecentlyCreated = false;
+        }
+
         $this->guard($guard)->setUser($user);
-        $this->app()['auth']->shouldUse($guard ?? 'web');
+        $this->app()['auth']->shouldUse($guard);
 
         return $this;
     }
 
     /**
-     * Clear the authenticated user on the given guard.
+     * Clear the authenticated user on the given guard and make that guard the
+     * default, mirroring Laravel's `actingAsGuest`.
      */
     protected function actingAsGuest(?string $guard = null): static
     {
         $this->guard($guard)->forgetUser();
+
+        $this->app()['auth']->shouldUse($guard);
 
         return $this;
     }
@@ -540,12 +550,17 @@ trait InteractsWithLaravel
 
     /**
      * Assert that the user is authenticated as the given user.
+     *
+     * Mirrors Laravel: the given user must be an instance of the
+     * authenticated user's class (a subclass of it is accepted) and their
+     * identifiers must be strictly equal.
      */
     protected function assertAuthenticatedAs(Authenticatable $user, ?string $guard = null): static
     {
         $expected = $this->guard($guard)->user();
 
         Assert::notNull($expected, 'The current user is not authenticated.');
+        Assert::instanceOf($user, $expected::class, 'The currently authenticated user is not who was expected.');
         Assert::same($expected->getAuthIdentifier(), $user->getAuthIdentifier(), 'The currently authenticated user is not who was expected.');
 
         return $this;
