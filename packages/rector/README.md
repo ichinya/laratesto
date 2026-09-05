@@ -151,6 +151,13 @@ named, multiple, duplicate or empty selections keep the trait and receive the
 residual. An explicit `connections:` argument written by hand keeps working:
 it is an author's deliberate target choice, not a lifted source property.
 
+Table/exclusion selections keyed by connection name fail closed as well: the
+trait looks the map up with the null default selector, misses every literal
+name and falls back to the whole map that matches no table, while the
+attribute resolves the selector to the connection name first — the two sides
+would keep vs truncate opposite tables. Flat table lists and the empty list
+select the same tables on both sides and keep converting.
+
 ## Autoloading
 
 Class-hierarchy detection needs the project's test classes to be autoloadable. A

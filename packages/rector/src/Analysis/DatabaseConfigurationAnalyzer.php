@@ -333,6 +333,21 @@ final class DatabaseConfigurationAnalyzer
                 continue;
             }
 
+            // DatabaseTruncation's table/exclusion maps are keyed by connection
+            // name in the attribute, but the trait looks them up with the
+            // source selector — for the remaining convertible default-only
+            // scope that is the null key. The lookup misses every literal
+            // name, so the trait falls back to the whole map, whose array
+            // values match no table, while the attribute resolves the selector
+            // to the connection name first and selects the listed tables:
+            // fail closed instead of silently mapping null to a runtime name.
+            if ($sourceTrait === 'Illuminate\Foundation\Testing\DatabaseTruncation'
+                && in_array($argumentName, ['tables', 'exceptTables'], true)
+                && $this->isConnectionKeyedMap($value)
+            ) {
+                return $this->unsupported($base, $this->tableMapResidualReason($argumentName));
+            }
+
             $options[$argumentName] = $value;
             $properties[] = $propertyItem;
         }
@@ -1238,6 +1253,45 @@ final class DatabaseConfigurationAnalyzer
                 => 'database option $connectionsToTransact changes the migration scope: the trait always runs migrate:fresh on the default connection, while the attribute would refresh the selected connections - migrate it manually',
             'Illuminate\Foundation\Testing\DatabaseTruncation'
                 => 'database option $connectionsToTruncate changes the migration and seeding scope: the trait only truncates the selected connections while its first migrate:fresh and every later db:seed run on the default connection, but the attribute would migrate and seed every selected connection - migrate it manually',
+        };
+    }
+
+    /**
+     * Whether the table/exclusion literal is a connection-KEYED map (every item
+     * carries a literal string key and a list of tables) rather than a flat
+     * table list: the keyed shape resolves differently on the two sides of the
+     * conversion. Empty lists and flat lists return false — they remain
+     * provably equivalent positive controls.
+     */
+    private function isConnectionKeyedMap(Expr $value): bool
+    {
+        if (! $value instanceof Expr\Array_ || $value->items === []) {
+            return false;
+        }
+
+        foreach ($value->items as $item) {
+            if ($item === null || $item->unpack || $item->key === null || ! $item->value instanceof Expr\Array_) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * The residual wording for a connection-keyed map, naming the option and
+     * the actual source lookup: the trait indexes the map with the null
+     * default selector (a null key never matches a literal name) and falls
+     * back to the whole map, whose array values match no table, so the keyed
+     * shape keeps or truncates everything except the migrations table — the
+     * attribute resolves the selector to the connection name and applies the
+     * listed tables instead.
+     */
+    private function tableMapResidualReason(string $argumentName): string
+    {
+        return match ($argumentName) {
+            'tables' => 'database option $tablesToTruncate keyed by connection name changes the truncation selection: the trait looks the map up with the null default selector, falls back to the whole map that matches no table and truncates nothing, while the attribute would truncate the listed tables on the resolved connection - migrate it manually',
+            'exceptTables' => 'database option $exceptTables keyed by connection name changes the exclusion selection: the trait looks the map up with the null default selector, falls back to the whole map that matches no table and excludes nothing beyond the migrations table, while the attribute would exclude the listed tables on the resolved connection - migrate it manually',
         };
     }
 

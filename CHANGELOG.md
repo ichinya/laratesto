@@ -139,6 +139,15 @@ versions follow [Semantic Versioning](https://semver.org/).
     `DATABASE_UNSUPPORTED_CONFIGURATION` residual, and only a provably
     default-only selection (a single `null` entry) converts, into the
     attribute's bare form;
+  - DatabaseTruncation's `tablesToTruncate`/`exceptTables` maps keyed by
+    connection name no longer lift into the attribute's `tables`/`exceptTables`
+    arguments: the trait looks them up with the null default selector, misses
+    every literal name and falls back to the whole map (whose array values
+    match no table), so the trait truncates nothing — or excludes nothing
+    beyond the migrations table — while the attribute resolves the selector to
+    the connection name and applies the listed tables; keyed maps stay an
+    unconverted `DATABASE_UNSUPPORTED_CONFIGURATION` residual, flat table
+    lists and the empty list keep converting;
 - `DatabaseTransactions` restores and re-caches in-memory connections around
   the transaction, so a `:memory:` schema no longer vanishes between tests.
 
