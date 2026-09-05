@@ -64,6 +64,11 @@ final class ResidualsReport
     /**
      * Atomically replace the report file: write to a sibling temp file, then rename.
      *
+     * The temp path is created exclusively and never follows a planted entry:
+     * any pre-existing path — a leftover file, a symlink or a Windows reparse
+     * point at the predictable PID-suffixed location — is refused, never
+     * overwritten or written through.
+     *
      * @param list<non-empty-string> $paths
      * @param list<Residual> $residuals
      * @return non-empty-string The rendered body (also persisted).
@@ -80,11 +85,37 @@ final class ResidualsReport
 
         $temp = $file . '.tmp-' . \getmypid();
 
-        if (\file_put_contents($temp, $body) === false) {
+        // Two fail-closed gates, mirroring RectorConfigWriter::write():
+        // lstat() refuses every pre-existing entry — including the dangling
+        // reparse points Windows' exclusive create happily "creates through".
+        // The exclusive create (`x` = O_CREAT|O_EXCL) then closes the race
+        // atomically: a link planted between the gates makes the open fail
+        // instead of being followed.
+        \clearstatcache(true);
+
+        $refusal = \sprintf('Refusing to write the residuals report temp file "%s": the path already exists and may be a planted link.', $temp);
+
+        if (@\lstat($temp) !== false) {
+            throw new \RuntimeException($refusal);
+        }
+
+        $handle = @\fopen($temp, 'x');
+
+        if ($handle === false) {
+            throw new \RuntimeException($refusal);
+        }
+
+        $written = @\fwrite($handle, $body);
+        $flushed = @\fflush($handle);
+        $closed = @\fclose($handle);
+
+        if ($written === false || $written !== \strlen($body) || $flushed === false || $closed === false) {
+            @\unlink($temp);
+
             throw new \RuntimeException(\sprintf('Unable to write the residuals report to "%s".', $temp));
         }
 
-        if (! \rename($temp, $file)) {
+        if (! @\rename($temp, $file)) {
             @\unlink($temp);
 
             throw new \RuntimeException(\sprintf('Unable to atomically replace the residuals report at "%s".', $file));
