@@ -24,18 +24,51 @@ use Testo\Test;
  * A trait that cannot be resolved cannot be proven option-free and blocks too; a
  * cyclic composition never reaches the analyzer because PHP refuses to compile the
  * forward reference, and the diamond re-visit terminates on the seen-set.
+ *
+ * The pipeline runs once per line-ending spelling: Rector preserves the input's
+ * EOL style, and a Git checkout with core.autocrlf=true hands the nowdoc corpus
+ * to PHP with CRLF, so both LF and CRLF input must reach the same fail-closed
+ * classification.
  */
 final class DatabaseTraitOptionSafetyPipelineTest
 {
     #[Test]
     public function projectTraitOptionsFailTheTraitConversionClosed(): void
     {
+        $this->assertPipelineOutcome("\n");
+    }
+
+    #[Test]
+    public function projectTraitOptionsFailTheTraitConversionClosedOnCrlfInput(): void
+    {
+        $this->assertPipelineOutcome("\r\n");
+    }
+
+    /**
+     * Runs the migration over the corpus spelled with the given line ending and
+     * asserts the per-class fail-closed/converted outcomes. The semantic adjacency
+     * assertions run on line-ending-normalized content — they pin the marker and
+     * attribute attachment, not the file's EOL style — while the second-run
+     * idempotency assertion compares the raw file bytes.
+     */
+    private function assertPipelineOutcome(string $lineEnding): void
+    {
         $rootDir = dirname(__DIR__, 4);
-        $tmpDir = sys_get_temp_dir() . '/laratesto-rector-trait-' . getmypid();
+        $tmpDir = sys_get_temp_dir() . '/laratesto-rector-trait-' . getmypid()
+            . ($lineEnding === "\n" ? '-lf' : '-crlf');
         Assert::true(mkdir($tmpDir . '/corpus', 0777, true) || is_dir($tmpDir . '/corpus'));
 
         try {
-            file_put_contents($tmpDir . '/corpus/Base.php', <<<'PHP'
+            // The nowdoc spelling depends on the checkout's line endings, so both
+            // variants are canonicalized to LF first and then spelled with the
+            // ending under test.
+            $corpus = static function (string $source) use ($lineEnding): string {
+                $source = str_replace("\r\n", "\n", $source);
+
+                return str_replace("\n", $lineEnding, $source);
+            };
+
+            file_put_contents($tmpDir . '/corpus/Base.php', $corpus(<<<'PHP'
 <?php
 
 declare(strict_types=1);
@@ -74,8 +107,8 @@ abstract class TraitBase extends TestCase
 {
     use AncestorDefaults;
 }
-PHP);
-            file_put_contents($tmpDir . '/corpus/Tests.php', <<<'PHP'
+PHP));
+            file_put_contents($tmpDir . '/corpus/Tests.php', $corpus(<<<'PHP'
 <?php
 
 declare(strict_types=1);
@@ -134,7 +167,7 @@ final class PlainControlTest extends \Tests\TestCase
 
     public function test_ok(): void {}
 }
-PHP);
+PHP));
 
             $paths = var_export($tmpDir . '/corpus', true);
             $set = var_export(LaratestoRectorSetList::LARAVEL_PHPUNIT_TO_LARATESTO, true);
@@ -160,8 +193,12 @@ PHP);
 
             $this->runRector($rootDir, $tmpDir);
 
-            $base = (string) file_get_contents($tmpDir . '/corpus/Base.php');
-            $tests = (string) file_get_contents($tmpDir . '/corpus/Tests.php');
+            // Semantic checks run on line-ending-normalized content: Rector
+            // preserves the input's EOL style, and the assertions below pin the
+            // marker and attribute adjacency, not the file's EOL style.
+            $base = str_replace("\r\n", "\n", (string) file_get_contents($tmpDir . '/corpus/Base.php'));
+            $tests = str_replace("\r\n", "\n", (string) file_get_contents($tmpDir . '/corpus/Tests.php'));
+
             // Every marker is attached directly to its own class declaration and
             // every converted class carries its attribute directly, so the exact
             // adjacency fragments below pin each outcome to one class without any
@@ -210,10 +247,11 @@ PHP);
                 "#[\Laratesto\Attribute\RefreshDatabase]\n"
                 . 'final class PlainControlTest extends \Tests\TestCase' . "\n{\n",
             );
-
             // Re-running the migration over its own output changes nothing: the
-            // markers reconcile and the conversions stay byte-identical.
+            // markers reconcile and the conversions stay byte-identical — compared
+            // on the raw file bytes, with no line-ending normalization.
             $afterFirstRun = (string) file_get_contents($tmpDir . '/corpus/Tests.php');
+
             $this->runRector($rootDir, $tmpDir);
             Assert::same($afterFirstRun, (string) file_get_contents($tmpDir . '/corpus/Tests.php'));
         } finally {
