@@ -63,7 +63,8 @@ final class LaravelSourceCompatibleCallsRector extends AbstractRector
             return null;
         }
 
-        $analysis = $this->analyzer->analyze($node, $this->topLevelClasses());
+        $topLevelClasses = $this->topLevelClasses();
+        $analysis = $this->analyzer->analyze($node, $topLevelClasses);
         $changed = false;
 
         foreach ($analysis->reasonsByCode as $code => $reasons) {
@@ -75,7 +76,7 @@ final class LaravelSourceCompatibleCallsRector extends AbstractRector
             ) || $changed;
         }
 
-        $preflightBlockers = $this->responsePreflightBlockers();
+        $preflightBlockers = $this->responsePreflightBlockers($topLevelClasses);
 
         if (! $analysis->safe()
             || $preflightBlockers !== []
@@ -122,14 +123,21 @@ final class LaravelSourceCompatibleCallsRector extends AbstractRector
      * siblings too — refactor() marks those siblings with an actionable residual
      * instead of swapping.
      *
+     * The same local-class snapshot as the main analysis is required: static
+     * reflection cannot reliably resolve classes that exist only in the file
+     * being processed, so a same-file TestResponse subclass receiver is only
+     * provable through $localClasses. Classifying a sibling without them would
+     * call the subclass receiver safe and let the swap through.
+     *
+     * @param list<Class_> $topLevelClasses
      * @return list<non-empty-string> blocker descriptions in file order
      */
-    private function responsePreflightBlockers(): array
+    private function responsePreflightBlockers(array $topLevelClasses): array
     {
         $blockers = [];
 
-        foreach ($this->topLevelClasses() as $class) {
-            if (! $this->hierarchy->recognizesTestClass($class) || $this->analyzer->analyze($class)->safe()) {
+        foreach ($topLevelClasses as $class) {
+            if (! $this->hierarchy->recognizesTestClass($class) || $this->analyzer->analyze($class, $topLevelClasses)->safe()) {
                 continue;
             }
 

@@ -176,6 +176,57 @@ final class ExitCodeArityAcceptedTest extends TestCase
 }
 PHP;
 
+    /**
+     * MiMo finding 6: the file gate classified siblings through a weaker
+     * analysis than the main one - responsePreflightBlockers() analyzed each
+     * top-level class without the same-file class snapshot, so a sibling whose
+     * only unsafety is a same-file TestResponse-subclass receiver read as safe
+     * and the safe class was swapped while the receiver stayed un-migrated.
+     * The gate now proves subclass receivers through the same snapshot: the
+     * swap stays blocked, the safe class carries the actionable residual, and
+     * the second run does not touch anything.
+     */
+    private const SAME_FILE_SUBCLASS_GATE_CORPUS = <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature;
+
+use Illuminate\Foundation\Testing\TestCase;
+use Illuminate\Testing\TestResponse;
+
+final class SubclassGateSafeTest extends TestCase
+{
+    private TestResponse $pending;
+
+    public function response(): TestResponse
+    {
+        return $this->get('/safe');
+    }
+
+    public function hold(TestResponse $response): void
+    {
+        $this->pending = $response;
+    }
+}
+
+final class SubclassGateReceiverTest extends TestCase
+{
+    private GateResponse $cached;
+
+    private function fetch(): GateResponse
+    {
+        return $this->get('/users');
+    }
+}
+
+final class GateResponse extends TestResponse
+{
+}
+PHP;
+
+
 
     #[Test]
     public function mixedFileGateMarksSafeClassAndStaysIdempotent(): void
@@ -198,6 +249,33 @@ PHP;
 
         // The unsafe sibling keeps its own marker and stays un-migrated.
         $migrated->contains('TestResponse::assertDownload() is outside the supported response matrix');
+        $migrated->contains('extends TestCase');
+    }
+
+    #[Test]
+    public function sameFileSubclassGateBlocksSwapAndStaysIdempotent(): void
+    {
+        $snapshot = RectorRun::twiceWithByteIdenticalSecondRun([
+            'SubclassGateTest.php' => self::SAME_FILE_SUBCLASS_GATE_CORPUS,
+        ]);
+
+        $migrated = Assert::string($snapshot['SubclassGateTest.php']);
+
+        // The safe class converted but the file-wide swap stayed blocked.
+        $migrated->contains('extends \Laratesto\Testing\LaravelTestCase');
+        $migrated->contains('public function response(): TestResponse');
+
+        // The safe class carries an actionable residual naming the blocker.
+        $migrated->contains(
+            'the file-wide TestResponse to Laratesto\Testing\LaravelResponse swap'
+            . ' was blocked by sibling class Tests\Feature\SubclassGateReceiverTest',
+        );
+
+        // The subclass receiver keeps its own marker and stays un-migrated.
+        $migrated->contains(
+            'Tests\Feature\GateResponse extends TestResponse, but the Laratesto'
+            . ' runtime never produces TestResponse subclasses',
+        );
         $migrated->contains('extends TestCase');
     }
 

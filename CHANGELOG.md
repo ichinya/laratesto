@@ -54,6 +54,12 @@ versions follow [Semantic Versioning](https://semver.org/).
     safe class is marked with a `RESPONSE_UNSUPPORTED_API` residual naming the
     blocker instead of silently keeping `TestResponse` declarations that would
     TypeError against the runtime `Laratesto\Testing\LaravelResponse`;
+  - the file-level response gate classifies siblings with the same local-class
+    snapshot as the main analysis: a same-file `TestResponse` subclass receiver
+    (unprovable through static reflection, which cannot see the file being
+    processed) no longer reads as safe during the preflight, so the file-wide
+    swap stays blocked with the actionable blocker residual instead of
+    stranding the un-migrated receiver class;
   - markers emitted by several rules for the same code merge deterministically:
     one marker comment per code, one contribution per rule sorted by rule,
     byte-identical on re-runs — no rule overwrites or loses another rule's reason;
