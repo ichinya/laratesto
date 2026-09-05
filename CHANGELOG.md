@@ -55,6 +55,17 @@ versions follow [Semantic Versioning](https://semver.org/).
     lifts it into the attribute and ignores same-named ancestor declarations at
     every chain depth, while an ancestor option the class does not redeclare
     still fails the conversion closed;
+  - a project reader above the converting class bounds that relaxation: while
+    the class's own shadowing declaration is the value an ancestor method, an
+    ancestor trait method or one of the class's own project trait methods
+    observes, removing it silently repoints those reads at whatever the
+    hierarchy resolves next. The lift now fails closed with an actionable
+    `DATABASE_UNSUPPORTED_CONFIGURATION` residual for any live reader, except
+    the proven inert shape where the reader's own scope declares the option
+    privately (a more-derived redeclare never shadows that private slot, so it
+    answers identically before and after the lift); statically named instance
+    reads count, dynamic property names fail closed, and a same-value inherited
+    literal still receives a stable residual instead of a value-proof engine;
   - residual markers reconcile: changed constructs refresh their reason,
     resolved constructs lose the marker, unchanged runs stay byte-identical;
   - a file-level response-gate block no longer strands an otherwise convertible

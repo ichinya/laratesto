@@ -13,6 +13,7 @@ use PhpParser\Node\Name;
 use PhpParser\Node\Scalar;
 use PhpParser\Node\Stmt\ClassLike;
 use PhpParser\Node\Stmt\Class_;
+use PhpParser\Node\Stmt\ClassMethod;
 use PhpParser\Node\Stmt\Property;
 use PhpParser\Node\Stmt\TraitUse;
 use PhpParser\Node\Stmt\Trait_;
@@ -293,6 +294,13 @@ final class DatabaseConfigurationAnalyzer
                 return $this->unsupported($base, sprintf('database option $%s is also used by class code', $propertyName));
             }
 
+            // Lifting the declaration repoints every project reader above the
+            // class: fail closed unless every live reader is provably inert.
+            $readerReason = $this->inheritedReaderConflictReason($class, $localClasses, $propertyName);
+            if ($readerReason !== null) {
+                return $this->unsupported($base, $readerReason);
+            }
+
             $options[$argumentName] = $value;
             $properties[] = $propertyItem;
         }
@@ -414,7 +422,11 @@ final class DatabaseConfigurationAnalyzer
      * the most-derived declaration, so an ancestor's same-named declaration never
      * carried live behavior at any chain depth — the class-level scan has already
      * proven the child's declaration a single non-static supported unread literal
-     * and lifted it into the attribute.
+     * and lifted it into the attribute. Project readers observing the declaration
+     * from above are a separate guard: the trait machinery's reads are replaced by
+     * the attribute, but ancestor, ancestor-trait and composed-trait methods keep
+     * executing, and inheritedReaderConflictReason() fails the lift closed for
+     * them unless every reader is provably inert.
      *
      * A class without a database trait never reaches this scan: without the trait the
      * machinery never ran, so unrelated ancestor members are not flagged.
@@ -1160,29 +1172,306 @@ final class DatabaseConfigurationAnalyzer
     {
         return $this->nodeFinder->findFirst(
             $class->stmts,
-            static function (Node $node) use ($propertyName): bool {
-                if (! $node instanceof Expr\PropertyFetch
-                    && ! $node instanceof Expr\NullsafePropertyFetch) {
-                    return false;
-                }
-
-                if (! $node->var instanceof Expr\Variable || $node->var->name !== 'this') {
-                    return false;
-                }
-
-                if ($node->name instanceof Node\Identifier) {
-                    return $node->name->toString() === $propertyName;
-                }
-
-                if ($node->name instanceof Scalar\String_) {
-                    return $node->name->value === $propertyName;
-                }
-
-                // Dynamic property name ($this->{$opt}): the option may be read,
-                // so fail closed instead of removing a live declaration.
-                return true;
-            },
+            fn (Node $node): bool => $this->instancePropertyRead($node, $propertyName) !== null,
         ) instanceof Node;
+    }
+
+    /**
+     * Whether one node is an instance read of $propertyName: null when the node is
+     * not an instance fetch of the name, false for a statically named read
+     * (`$this->seed`, nullsafe `$this?->seed`, literal-string `$this->{'seed'}`),
+     * true for a dynamic property name whose target cannot be proven.
+     */
+    private function instancePropertyRead(Node $node, string $propertyName): ?bool
+    {
+        if (! $node instanceof Expr\PropertyFetch
+            && ! $node instanceof Expr\NullsafePropertyFetch) {
+            return null;
+        }
+
+        if (! $node->var instanceof Expr\Variable || $node->var->name !== 'this') {
+            return null;
+        }
+
+        if ($node->name instanceof Node\Identifier) {
+            return $node->name->toString() === $propertyName ? false : null;
+        }
+
+        if ($node->name instanceof Scalar\String_) {
+            return $node->name->value === $propertyName ? false : null;
+        }
+
+        // Dynamic property name ($this->{$opt}): the option may be read,
+        // so fail closed instead of removing a live declaration.
+        return true;
+    }
+
+    /**
+     * Why lifting the class's own option property into the attribute would change
+     * what project code observes by reading it, or null when the lift is
+     * reader-safe.
+     *
+     * The replaced trait machinery's reads are accounted for by the attribute, but
+     * every PROJECT reader keeps executing: methods of the resolved ancestors,
+     * methods of the traits those ancestors compose, and methods of the project
+     * traits the converting class itself composes — trait methods execute with
+     * the consuming class's scope. While the class carries the declaration it is
+     * the value those readers observe; removing it silently repoints the reads at
+     * whatever the hierarchy resolves next. One reader shape is proven inert: a
+     * reader whose own scope owns a private declaration of the name answers from
+     * that private slot before and after the lift, because a more-derived
+     * redeclare never shadows it there (PropertyShadowingRuntimeContractTest pins
+     * the slot semantics). Everything else fails closed with a stable residual —
+     * a private slot in any other scope shields nothing, and equal lifted and
+     * inherited literals are not chased by a value-proof engine.
+     *
+     * Statically named instance access is a reader; a dynamic property NAME
+     * (`$this->{$option}`) cannot be proven either way; a static property fetch
+     * never resolves an instance declaration, and the mixed static/non-static
+     * hierarchy shapes are compile-time fatals the hierarchy rule owns. A
+     * composition trait that cannot be resolved has unknown methods, so the walk
+     * fails closed on it. Ancestor classes that cannot be resolved terminate the
+     * walk, mirroring ancestorConflictReason(): the hierarchy rule owns their
+     * diagnosis.
+     *
+     * @param list<ClassLike> $localClasses
+     */
+    private function inheritedReaderConflictReason(
+        Class_ $class,
+        array $localClasses,
+        string $propertyName,
+    ): ?string {
+        $className = $class->namespacedName?->toString() ?? 'the converting class';
+
+        [$childTraitReaders, $unresolvable] = $this->composedReaderSites($class, $propertyName, $localClasses, $className);
+
+        $readers = $childTraitReaders;
+        $privateSlotScopes = [];
+
+        $current = $class->extends === null ? null : $this->resolvedName($class->extends);
+        $seen = [];
+
+        for ($depth = 0; $current !== null && $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
+            if ($current === self::FRAMEWORK_BASE || $current === self::TARGET_BASE || isset($seen[$current])) {
+                break;
+            }
+
+            $seen[$current] = true;
+
+            $ancestor = $this->resolveAncestor($current, $localClasses);
+
+            if (! $ancestor instanceof Class_) {
+                break;
+            }
+
+            if ($this->hasOwnPrivateDeclaration($ancestor, $propertyName, $localClasses)) {
+                $privateSlotScopes[$current] = true;
+            }
+
+            [$ancestorTraitReaders, $traitUnresolvable] = $this->composedReaderSites($ancestor, $propertyName, $localClasses, $current);
+            $unresolvable ??= $traitUnresolvable;
+
+            $readers = array_merge($readers, $this->ownReaderSites($ancestor, $propertyName, $current), $ancestorTraitReaders);
+
+            $current = $ancestor->extends === null ? null : $this->resolvedName($ancestor->extends);
+        }
+
+        // A composition trait whose methods are unknown may be a reader itself.
+        if ($unresolvable !== null) {
+            return sprintf('used trait %s could not be resolved, so its database option reads require manual migration', $unresolvable);
+        }
+
+        foreach ($readers as $reader) {
+            if ($reader['dynamic']) {
+                return sprintf(
+                    'database option $%s may be read dynamically by project code in %s and requires manual migration',
+                    $propertyName,
+                    $reader['location'],
+                );
+            }
+        }
+
+        foreach ($readers as $reader) {
+            if (! isset($privateSlotScopes[$reader['scope']])) {
+                return sprintf(
+                    'database option $%s is read by project code in %s and requires manual migration',
+                    $propertyName,
+                    $reader['location'],
+                );
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Walks the class-like's project-trait composition tree depth-first (seen-set
+     * terminated, framework database traits excluded like directTraitNames()) and
+     * visits every composed trait. Returns the first trait name that could not be
+     * resolved, or null when the whole tree resolved.
+     *
+     * @param list<ClassLike> $localClasses
+     * @param \Closure(Trait_, non-empty-string): void $visit
+     */
+    private function eachComposedTrait(ClassLike $classLike, array $localClasses, \Closure $visit): ?string
+    {
+        $traitNames = $this->directTraitNames($classLike);
+        $seenTraits = [];
+
+        while ($traitNames !== []) {
+            $traitName = array_shift($traitNames);
+
+            if (isset($seenTraits[$traitName])) {
+                continue;
+            }
+
+            $seenTraits[$traitName] = true;
+
+            $trait = $this->resolveTraitLike($traitName, $localClasses);
+
+            if (! $trait instanceof Trait_) {
+                return $traitName;
+            }
+
+            $visit($trait, $traitName);
+
+            $traitNames = array_merge($traitNames, $this->directTraitNames($trait));
+        }
+
+        return null;
+    }
+
+    /**
+     * The reader sites in the class-like's project-trait composition, together
+     * with the first unresolvable composition trait. A reader site carries the
+     * consuming scope (whose private slots decide inertness) and the declaring
+     * symbol (named in the residual reason).
+     *
+     * @param list<ClassLike> $localClasses
+     * @return array{0: list<array{scope: non-empty-string, location: non-empty-string, dynamic: bool}>, 1: ?non-empty-string}
+     */
+    private function composedReaderSites(ClassLike $classLike, string $propertyName, array $localClasses, string $scope): array
+    {
+        $readers = [];
+
+        $unresolvable = $this->eachComposedTrait(
+            $classLike,
+            $localClasses,
+            function (Trait_ $trait, string $traitName) use (&$readers, $propertyName, $scope): void {
+                foreach ($trait->getMethods() as $method) {
+                    $site = $this->methodReaderSite($method, $propertyName, $scope, $traitName);
+
+                    if ($site !== null) {
+                        $readers[] = $site;
+                    }
+                }
+            },
+        );
+
+        return [$readers, $unresolvable];
+    }
+
+    /**
+     * The reader sites in the class's own methods at one ancestor level. The
+     * converting class's own reads have their own residual shape
+     * (propertyIsReadByClass) and are never scanned here.
+     *
+     * @return list<array{scope: non-empty-string, location: non-empty-string, dynamic: bool}>
+     */
+    private function ownReaderSites(Class_ $class, string $propertyName, string $scope): array
+    {
+        $readers = [];
+
+        foreach ($class->getMethods() as $method) {
+            $site = $this->methodReaderSite($method, $propertyName, $scope, $scope);
+
+            if ($site !== null) {
+                $readers[] = $site;
+            }
+        }
+
+        return $readers;
+    }
+
+    /**
+     * The reader site one method contributes for $propertyName, or null. Any
+     * instance fetch of the statically named property counts — including nullsafe
+     * and literal-string dynamic spellings; a dynamic property NAME is flagged so
+     * the caller can fail closed.
+     *
+     * @return array{scope: non-empty-string, location: non-empty-string, dynamic: bool}|null
+     */
+    private function methodReaderSite(ClassMethod $method, string $propertyName, string $scope, string $location): ?array
+    {
+        $dynamic = false;
+        $reads = false;
+
+        $fetches = array_merge(
+            $this->nodeFinder->findInstanceOf($method, Expr\PropertyFetch::class),
+            $this->nodeFinder->findInstanceOf($method, Expr\NullsafePropertyFetch::class),
+        );
+
+        foreach ($fetches as $fetch) {
+            $read = $this->instancePropertyRead($fetch, $propertyName);
+
+            if ($read === true) {
+                $dynamic = true;
+
+                break;
+            }
+
+            $reads = $reads || $read === false;
+        }
+
+        if ($dynamic) {
+            return ['scope' => $scope, 'location' => $location, 'dynamic' => true];
+        }
+
+        return $reads ? ['scope' => $scope, 'location' => $location, 'dynamic' => false] : null;
+    }
+
+    /**
+     * Whether the class carries a private non-static declaration of the property
+     * in its own body or its composed traits — the reader-exempting own slot: a
+     * reader whose scope owns that slot answers from it before and after the
+     * lift, whatever more-derived declarations exist.
+     *
+     * @param list<ClassLike> $localClasses
+     */
+    private function hasOwnPrivateDeclaration(Class_ $class, string $propertyName, array $localClasses): bool
+    {
+        if ($this->hasPrivatePropertyItem($class, $propertyName)) {
+            return true;
+        }
+
+        $found = false;
+
+        $this->eachComposedTrait(
+            $class,
+            $localClasses,
+            function (Trait_ $trait) use (&$found, $propertyName): void {
+                if ($this->hasPrivatePropertyItem($trait, $propertyName)) {
+                    $found = true;
+                }
+            },
+        );
+
+        return $found;
+    }
+
+    private function hasPrivatePropertyItem(ClassLike $classLike, string $propertyName): bool
+    {
+        foreach ($classLike->getProperties() as $property) {
+            if (! $property->isStatic() && $property->isPrivate()) {
+                foreach ($property->props as $item) {
+                    if ($item->name->toString() === $propertyName) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     /** @return list<Attribute> */

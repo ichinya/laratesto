@@ -263,6 +263,18 @@ declaration, so only the class's own (already lifted) literal is live and the
 ancestor's same-named declaration is inert at every chain depth. Trait machinery
 methods on the same ancestor are deliberately not flagged: a trait import in the
 child overrides same-named inherited methods, so such an override never executed.
+A project reader above the class bounds that relaxation: the redeclare is what
+every project method higher up observes, so lifting the class's own declaration
+would silently repoint their reads at the nearest remaining declaration. The
+preflight fails the lift closed for readers in resolved ancestors, in the traits
+those ancestors compose, and in the project traits the converting class itself
+composes (trait methods execute with the consumer's scope) — except the proven
+inert shape where the reader's own scope declares the option privately: a
+more-derived redeclare never shadows it there, so the private slot answers
+identically before and after the lift. Statically named instance reads
+(`$this->seed`, `$this->{'seed'}`, nullsafe fetches) count; a dynamic property
+name (`$this->{$option}`) cannot be proven either way; static property fetches
+never resolve an instance declaration.
 
 When a class re-declares the same database trait a project ancestor already
 uses, that is a duplicate of one strategy, not a second one — Laravel collapsed

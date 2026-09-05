@@ -125,6 +125,108 @@ PHP);
         Assert::same("gate=false\nidiom=false", $output);
     }
 
+    #[Test]
+    public function anOwnPrivateSlotAnswersItsOwnScopeReaderAcrossTheLift(): void
+    {
+        $output = $this->runProbe(<<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+class OwnerBefore
+{
+    private bool $seed = true;
+
+    public function observedSeed(): bool
+    {
+        return $this->seed;
+    }
+}
+
+final class ChildBefore extends OwnerBefore
+{
+    protected bool $seed = false;
+}
+
+class OwnerAfter
+{
+    private bool $seed = true;
+
+    public function observedSeed(): bool
+    {
+        return $this->seed;
+    }
+}
+
+final class ChildAfter extends OwnerAfter
+{
+}
+
+echo 'before=', var_export((new ChildBefore())->observedSeed(), true), "\n";
+echo 'after=', var_export((new ChildAfter())->observedSeed(), true), "\n";
+PHP);
+
+        // The owner's private slot wins in the owner's scope: the child's
+        // protected redeclare never shadows it for a reader declared in the
+        // same class, so lifting the child declaration cannot repoint this
+        // reader — the shape the preflight exempts as provably inert.
+        Assert::same("before=true\nafter=true", $output);
+    }
+
+    #[Test]
+    public function anIntermediatePrivateSlotShieldsNoOtherScopeReader(): void
+    {
+        $output = $this->runProbe(<<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+class ReaderBefore
+{
+    public function observedSeed(): mixed
+    {
+        return $this->seed ?? 'missing';
+    }
+}
+
+abstract class MiddleBefore extends ReaderBefore
+{
+    private bool $seed = true;
+}
+
+final class LeafBefore extends MiddleBefore
+{
+    protected bool $seed = false;
+}
+
+class ReaderAfter
+{
+    public function observedSeed(): mixed
+    {
+        return $this->seed ?? 'missing';
+    }
+}
+
+abstract class MiddleAfter extends ReaderAfter
+{
+    private bool $seed = true;
+}
+
+final class LeafAfter extends MiddleAfter
+{
+}
+
+echo 'before=', var_export((new LeafBefore())->observedSeed(), true), "\n";
+echo 'after=', var_export((new LeafAfter())->observedSeed(), true), "\n";
+PHP);
+
+        // The reader's scope is the grandparent: the intermediate private slot
+        // is invisible there and the lookup continues above it, so removing
+        // the leaf declaration silently repoints the read from the leaf value
+        // to nothing — the shape the preflight must fail closed on.
+        Assert::same("before=false\nafter='missing'", $output);
+    }
+
     public function anAncestorStaticOptionNeverResolvesThroughThis(): void
     {
         $output = $this->runProbe(<<<'PHP'
