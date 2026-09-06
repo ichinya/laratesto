@@ -14,7 +14,10 @@ use PhpParser\Node;
 use PhpParser\Node\Attribute;
 use PhpParser\Node\AttributeGroup;
 use PhpParser\Node\Expr;
+use PhpParser\Node\Expr\FuncCall;
 use PhpParser\Node\Expr\MethodCall;
+use PhpParser\Node\Expr\New_;
+use PhpParser\Node\Expr\NullsafeMethodCall;
 use PhpParser\Node\Expr\PropertyFetch;
 use PhpParser\Node\Expr\StaticCall;
 use PhpParser\Node\Identifier;
@@ -25,6 +28,7 @@ use PhpParser\Node\Stmt\ClassLike;
 use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\ClassMethod;
 use PhpParser\Node\Stmt\Expression;
+use PhpParser\Node\Stmt\Function_;
 use PhpParser\Node\Stmt\Trait_;
 use PhpParser\Node\Stmt\TraitUse;
 use PhpParser\Node\Stmt\TraitUseAdaptation;
@@ -122,6 +126,13 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         'afterapplicationcreated',
         'beforeapplicationdestroyed',
     ];
+
+    /**
+     * One stable reason for every $this->app write/reference context: the
+     * rewritten app() method result is a temporary and cannot take the place of
+     * the writable property.
+     */
+    private const APP_WRITE_CONTEXT_REASON = '$this->app is used in a write context (assignment/isset/unset/reference) that cannot become an app() method call';
 
     private BaseClassConfiguration $configuration;
 
@@ -857,6 +868,87 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
                 $failures[] = 'dynamic $this property access cannot be classified as $this->app';
             }
 
+            // Write contexts are recognized from their wrapper node downward: the
+            // app fetch itself must stay the direct receiver. A member access
+            // ($this->app->flag = ..., isset($this->app->booted)) only writes or
+            // inspects the returned object, which survives the rewrite.
+            if (($inner instanceof Expr\Assign || $inner instanceof Expr\AssignOp)
+                && $inner->var instanceof PropertyFetch
+                && $this->isThisApp($inner->var)) {
+                $failures[] = self::APP_WRITE_CONTEXT_REASON;
+            }
+
+            // Destructuring binds the property itself: [$this->app, $b] = ... .
+            // An ordinary array literal holding the fetch ($x = [$this->app]) is a
+            // by-value read and must stay convertible.
+            if ($inner instanceof Expr\Assign
+                && ($inner->var instanceof Expr\Array_ || $inner->var instanceof Expr\List_)
+                && $this->destructuringTargetsApp($inner->var)) {
+                $failures[] = self::APP_WRITE_CONTEXT_REASON;
+            }
+
+            if ($inner instanceof Expr\AssignRef
+                && (($inner->var instanceof PropertyFetch && $this->isThisApp($inner->var))
+                    || ($inner->expr instanceof PropertyFetch && $this->isThisApp($inner->expr)))) {
+                $failures[] = self::APP_WRITE_CONTEXT_REASON;
+            }
+
+            // isset() is an expression; unset() is a statement - both bind the
+            // property itself when it is the direct target.
+            if ($inner instanceof Expr\Isset_) {
+                foreach ($inner->vars as $var) {
+                    if ($var instanceof PropertyFetch && $this->isThisApp($var)) {
+                        $failures[] = self::APP_WRITE_CONTEXT_REASON;
+                        break;
+                    }
+                }
+            }
+
+            if ($inner instanceof Stmt\Unset_) {
+                foreach ($inner->vars as $var) {
+                    if ($var instanceof PropertyFetch && $this->isThisApp($var)) {
+                        $failures[] = self::APP_WRITE_CONTEXT_REASON;
+                        break;
+                    }
+                }
+            }
+
+            if (($inner instanceof Expr\PreInc
+                    || $inner instanceof Expr\PreDec
+                    || $inner instanceof Expr\PostInc
+                    || $inner instanceof Expr\PostDec)
+                && $inner->var instanceof PropertyFetch
+                && $this->isThisApp($inner->var)) {
+                $failures[] = self::APP_WRITE_CONTEXT_REASON;
+            }
+
+            if ($inner instanceof Node\ArrayItem && $inner->byRef
+                && $inner->value instanceof PropertyFetch && $this->isThisApp($inner->value)) {
+                $failures[] = self::APP_WRITE_CONTEXT_REASON;
+            }
+
+            if ($inner instanceof Stmt\Foreach_) {
+                foreach ([$inner->keyVar, $inner->valueVar] as $target) {
+                    if (($target instanceof PropertyFetch && $this->isThisApp($target))
+                        || (($target instanceof Expr\Array_ || $target instanceof Expr\List_)
+                            && $this->destructuringTargetsApp($target))) {
+                        $failures[] = self::APP_WRITE_CONTEXT_REASON;
+                    }
+                }
+            }
+
+            // Callee declarations reveal by-reference parameters, including
+            // named arguments and constructor parameters.
+            if ($inner instanceof MethodCall
+                || $inner instanceof StaticCall
+                || $inner instanceof FuncCall
+                || $inner instanceof NullsafeMethodCall
+                || $inner instanceof New_) {
+                if ($this->callTakesAppByReference($inner)) {
+                    $failures[] = self::APP_WRITE_CONTEXT_REASON;
+                }
+            }
+
             if (! $inner instanceof MethodCall
                 || ! $inner->var instanceof PropertyFetch
                 || ! $this->isThisApp($inner->var)
@@ -876,6 +968,157 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         });
 
         return array_values(array_unique($failures));
+    }
+
+    /**
+     * True when any destructuring value slot of this left-hand array - at any
+     * nesting depth - binds the $this->app property directly.
+     */
+    private function destructuringTargetsApp(Expr\Array_|Expr\List_ $leftHandSide): bool
+    {
+        foreach ($leftHandSide->items as $item) {
+            if ($item === null) {
+                continue;
+            }
+
+            if ($item->value instanceof PropertyFetch && $this->isThisApp($item->value)) {
+                return true;
+            }
+
+            if ($item->value instanceof Expr\Array_ || $item->value instanceof Expr\List_) {
+                if ($this->destructuringTargetsApp($item->value)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function callTakesAppByReference(MethodCall|StaticCall|FuncCall|NullsafeMethodCall|New_ $call): bool
+    {
+        $callee = null;
+        $calleeResolved = false;
+
+        foreach ($call->getArgs() as $position => $arg) {
+            $value = $arg->value;
+
+            if (! $value instanceof PropertyFetch || ! $this->isThisApp($value)) {
+                continue;
+            }
+
+            if ($arg->byRef) {
+                return true;
+            }
+
+            if (! $calleeResolved) {
+                $callee = $this->resolveCalleeDeclaration($call);
+                $calleeResolved = true;
+
+                if (! $callee instanceof ClassMethod && ! $callee instanceof Function_) {
+                    // The callee cannot be resolved, so a by-reference parameter
+                    // cannot be proven; the by-value read stays convertible.
+                    return false;
+                }
+            }
+
+            if ($arg->name === null) {
+                $parameter = $callee->params[$position] ?? null;
+            } else {
+                $parameter = null;
+
+                foreach ($callee->params as $candidate) {
+                    // Param var names are plain strings, not Identifier nodes, and
+                    // parameter names are case-sensitive.
+                    if (is_string($candidate->var->name)
+                        && $candidate->var->name === $arg->name->toString()) {
+                        $parameter = $candidate;
+                        break;
+                    }
+                }
+            }
+
+            $lastParameter = $callee->params === [] ? null : $callee->params[array_key_last($callee->params)];
+            if ($parameter === null && $lastParameter !== null && $lastParameter->variadic) {
+                $parameter = $lastParameter;
+            }
+
+            if ($parameter !== null && $parameter->byRef) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * AstResolver misses declarations that live in the very file being processed
+     * (same-run corpus functions and classes are not in the composer autoloader),
+     * so the current file's statements are searched before giving up.
+     *
+     */
+    private function resolveCalleeDeclaration(MethodCall|StaticCall|FuncCall|NullsafeMethodCall|New_ $call): ClassMethod|Function_|null
+    {
+        if ($call instanceof FuncCall && $call->name instanceof Name) {
+            foreach ($this->localFunctionCandidates($call) as $functionName) {
+                $function = (new NodeFinder())->findFirst(
+                    $this->getFile()->getNewStmts(),
+                    fn(Node $node): bool => $node instanceof Function_
+                        && strcasecmp((string) $this->getName($node), $functionName) === 0,
+                );
+
+                if ($function instanceof Function_) {
+                    return $function;
+                }
+            }
+        }
+
+        if ($call instanceof New_ && $call->class instanceof Name) {
+            $className = $this->getName($call->class);
+
+            if ($className !== null) {
+                $classNode = (new NodeFinder())->findFirst(
+                    $this->getFile()->getNewStmts(),
+                    fn(Node $node): bool => $node instanceof Class_ && $this->isName($node, $className),
+                );
+
+                if ($classNode instanceof Class_) {
+                    return $classNode->getMethod('__construct');
+                }
+            }
+        }
+
+        $resolved = $this->astResolver->resolveClassMethodOrFunctionFromCall($call);
+
+        return $resolved instanceof ClassMethod || $resolved instanceof Function_ ? $resolved : null;
+    }
+
+    /** @return list<string> */
+    private function localFunctionCandidates(FuncCall $call): array
+    {
+        if (! $call->name instanceof Name) {
+            return [];
+        }
+
+        $name = $call->name->toString();
+        if ($call->name->isFullyQualified()) {
+            return [$name];
+        }
+
+        $namespaced = $call->name->getAttribute(AttributeKey::NAMESPACED_NAME);
+        $scope = $call->getAttribute(AttributeKey::SCOPE);
+        $namespace = $scope instanceof Scope ? $scope->getNamespace() : null;
+        $qualified = $namespaced instanceof Name ? $namespaced->toString() : $namespaced;
+        if (! is_string($qualified)) {
+            $qualified = $namespace === null ? $name : $namespace . '\\' . $name;
+        }
+
+        // Only an unqualified call can fall back to the global function. Never
+        // pick an unrelated namespace's same-named declaration: its parameter
+        // passing mode can differ from the function PHP actually calls.
+        return $call->name->isUnqualified()
+            ? array_values(array_unique([$qualified, $name]))
+            : [$qualified];
     }
 
     /**
