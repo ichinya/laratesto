@@ -289,7 +289,7 @@ final class HttpCompatibilityAnalyzer
         /** @var list<MethodCall> $calls */
         $calls = $this->nodeFinder->findInstanceOf($class->stmts, MethodCall::class);
         foreach ($calls as $call) {
-            $method = $this->nodeNameResolver->getName($call->name);
+            $method = $call->name instanceof Identifier ? $call->name->toString() : null;
             if ($method === null) {
                 if ($this->isThisReceiver($call->var)
                     || $this->isResponseReceiver($call->var, $responseVariables, $responseProperties, $responseMethods)
@@ -709,7 +709,7 @@ final class HttpCompatibilityAnalyzer
 
             $this->addReason($reasons, 'RESPONSE_UNSUPPORTED_API', sprintf(
                 'TestResponse::%s() has no Laratesto static equivalent; preserve the Laravel response type and migrate manually',
-                $this->nodeNameResolver->getName($call->name) ?? '<dynamic>',
+                $call->name instanceof Identifier ? $call->name->toString() : '<dynamic>',
             ));
         }
 
@@ -886,7 +886,7 @@ final class HttpCompatibilityAnalyzer
             return false;
         }
 
-        $method = $this->nodeNameResolver->getName($expression->name);
+        $method = $expression->name instanceof Identifier ? $expression->name->toString() : null;
 
         if ($method !== null
             && (($this->isThisVariable($expression->var) && in_array($method, $responseMethods, true))
@@ -923,8 +923,8 @@ final class HttpCompatibilityAnalyzer
 
         if ($expression instanceof StaticCall
             && $this->nodeNameResolver->isName($expression->class, 'parent')
-            && $this->nodeNameResolver->getName($expression->name) !== null
-            && isset(self::REQUEST_SIGNATURES[$this->nodeNameResolver->getName($expression->name)])) {
+            && $expression->name instanceof Identifier
+            && isset(self::REQUEST_SIGNATURES[$expression->name->toString()])) {
             // `parent::get()`/`parent::post()`-style calls produce a response on
             // the converted base exactly like their `$this->` siblings.
             return true;
@@ -934,7 +934,7 @@ final class HttpCompatibilityAnalyzer
             return false;
         }
 
-        $method = $this->nodeNameResolver->getName($expression->name);
+        $method = $expression->name instanceof Identifier ? $expression->name->toString() : null;
         if ($method !== null && $this->isThisVariable($expression->var) && in_array($method, $responseMethods, true)) {
             return true;
         }
@@ -1257,7 +1257,7 @@ final class HttpCompatibilityAnalyzer
             return false;
         }
 
-        $method = $this->nodeNameResolver->getName($expression->name);
+        $method = $expression->name instanceof Identifier ? $expression->name->toString() : null;
         if ($method === 'artisan' && $this->isThisReceiver($expression->var)) {
             return true;
         }
@@ -1284,7 +1284,7 @@ final class HttpCompatibilityAnalyzer
             return false;
         }
 
-        $method = $this->nodeNameResolver->getName($expression->name);
+        $method = $expression->name instanceof Identifier ? $expression->name->toString() : null;
 
         return ($method === 'artisan' && $this->isThisReceiver($expression->var))
             || $this->isArtisanReceiver($expression->var, $artisanVariables);
@@ -1305,7 +1305,7 @@ final class HttpCompatibilityAnalyzer
             return false;
         }
 
-        $method = $this->nodeNameResolver->getName($expression->name);
+        $method = $expression->name instanceof Identifier ? $expression->name->toString() : null;
 
         if ($method === null || ! isset(self::HELPER_SIGNATURES[$method])) {
             return false;
