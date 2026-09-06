@@ -84,7 +84,7 @@ final class ResidualMarkerReconciliationTest
 
         Assert::same(1, $this->markerCount($class), 'One marker per code: the second rule must merge, not add a comment.');
 
-        $residuals = (new ResidualsScanner())->scan('Demo.php', $this->markerText($class));
+        $residuals = (new ResidualsScanner())->scan('Demo.php', "<?php\n" . $this->markerText($class));
 
         Assert::count($residuals, 2, 'The scanner must report one finding per rule contribution.');
 

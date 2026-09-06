@@ -19,7 +19,16 @@ namespace Laratesto\Rector\Residuals;
 final class ResidualsScanner
 {
     /**
-     * Scan one file's contents for residual markers.
+     * Scan one PHP file's contents for residual markers.
+     *
+     * Ownership, exactly like {@see ResidualMarker}: only a PHP comment whose
+     * ENTIRE text is one canonical marker comment is a residual. The scan walks
+     * the tokenized source, so a quoted example inside a string literal or
+     * heredoc never reaches the match, and prose that merely embeds marker text
+     * inside a line comment or docblock fails the full-text match — while a
+     * canonical marker comment among other comments is still reported once per
+     * rule contribution. Anything the PHP tokenizer does not treat as code (no
+     * open tag, inline HTML) offers no comments to own and is not scanned.
      *
      * @return list<Residual>
      */
@@ -27,16 +36,28 @@ final class ResidualsScanner
     {
         $residuals = [];
 
-        if (\preg_match_all(ResidualMarker::MARKER_COMMENT_REGEX, $contents, $comments, \PREG_OFFSET_CAPTURE) === false) {
-            return [];
-        }
-
-        foreach ($comments[0] as [$comment, $offset]) {
-            $line = self::lineAt($contents, (int) $offset);
-
-            if (\preg_match_all(ResidualMarker::MARKER_REGEX, (string) $comment, $matches) === false) {
+        foreach (\token_get_all($contents) as $token) {
+            if (! \is_array($token) || ($token[0] !== \T_COMMENT && $token[0] !== \T_DOC_COMMENT)) {
                 continue;
             }
+
+            $comment = $token[1];
+
+            if (\preg_match(ResidualMarker::MARKER_COMMENT_REGEX, $comment, $owned, \PREG_OFFSET_CAPTURE) !== 1) {
+                continue;
+            }
+
+            [$ownedText, $ownedOffset] = $owned[0];
+
+            if ($ownedOffset !== 0 || \strlen($ownedText) !== \strlen($comment)) {
+                continue;
+            }
+
+            if (\preg_match_all(ResidualMarker::MARKER_REGEX, $ownedText, $matches) === false) {
+                continue;
+            }
+
+            $line = (int) $token[2];
 
             foreach ($matches['rule'] as $index => $rule) {
                 $residuals[] = new Residual(
@@ -122,11 +143,6 @@ final class ResidualsScanner
         }
 
         return \implode("\n", $lines) . "\n";
-    }
-
-    private static function lineAt(string $contents, int $offset): int
-    {
-        return \substr_count($contents, "\n", 0, $offset) + 1;
     }
 
     private static function clip(string $value, int $width): string

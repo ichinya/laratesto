@@ -71,8 +71,8 @@ final class ResidualsScannerTest
     #[Test]
     public function rendersTableAndReport(): void
     {
-        $residuals = $this->scanner->scan('A.php', "/* laratesto-residual(code=TEST_ONE, rule=RuleOne, severity=manual): first reason */\n");
-        $residuals = [...$residuals, ...$this->scanner->scan('B.php', "line\n/* laratesto-residual(code=TEST_TWO, rule=RuleTwo, severity=manual): second reason */\n")];
+        $residuals = $this->scanner->scan('A.php', "<?php\n/* laratesto-residual(code=TEST_ONE, rule=RuleOne, severity=manual): first reason */\n");
+        $residuals = [...$residuals, ...$this->scanner->scan('B.php', "<?php\nline\n/* laratesto-residual(code=TEST_TWO, rule=RuleTwo, severity=manual): second reason */\n")];
 
         $table = $this->scanner->renderTable($residuals);
 
@@ -83,7 +83,7 @@ final class ResidualsScannerTest
 
         $report = $this->scanner->renderReport($residuals);
 
-        Assert::true(str_contains($report, '- B.php:2 [TEST_TWO/RuleTwo] second reason'));
+        Assert::true(str_contains($report, '- B.php:3 [TEST_TWO/RuleTwo] second reason'));
         Assert::count(explode("\n", $report), 6);
     }
 
@@ -167,5 +167,81 @@ final class ResidualsScannerTest
         Assert::same($residual->severity, 'manual');
         Assert::same($residual->rule, 'Laratesto\Rector\Rules\LaravelResidualDetectionRector');
         Assert::same($residual->reason, 'Mail::fake() — migrate manually');
+    }
+
+    #[Test]
+    public function aQuotedMarkerExampleInsideAStringIsNotAResidual(): void
+    {
+        $residuals = $this->scanner->scan('ReadmeExampleTest.php', <<<'PHP'
+            <?php
+
+            final class ReadmeExampleTest
+            {
+                public function test_documentation_example(): void
+                {
+                    $example = '/* laratesto-residual(code=LARAVEL_FAKE_UNSUPPORTED, rule=LaravelResidualDetectionRector, severity=manual): Mail::fake() — migrate manually */';
+
+                    self::assertTrue($example !== '');
+                }
+            }
+            PHP);
+
+        Assert::same($residuals, [], 'A quoted example of the marker is user documentation, not a residual.');
+    }
+
+    #[Test]
+    public function aMarkerEmbeddedInsideALineCommentIsNotAResidual(): void
+    {
+        $residuals = $this->scanner->scan('ProseTest.php', <<<'PHP'
+            <?php
+
+            // To opt out manually, write: /* laratesto-residual(code=LIFECYCLE_UNSUPPORTED, rule=Rule\A, severity=manual): example reason; */
+            final class ProseTest
+            {
+            }
+            PHP);
+
+        Assert::same($residuals, [], 'The canonical wrapper inside a line comment is prose, not an owned marker.');
+    }
+
+    #[Test]
+    public function aMarkerInsideAHeredocIsNotAResidual(): void
+    {
+        $residuals = $this->scanner->scan('HeredocTest.php', <<<'PHP'
+            <?php
+
+            final class HeredocTest
+            {
+                public function test_embedded_docs(): void
+                {
+                    $guide = <<<GUIDE
+                    /* laratesto-residual(code=LARAVEL_FAKE_UNSUPPORTED, rule=LaravelResidualDetectionRector, severity=manual): Mail::fake() — migrate manually */
+                    GUIDE;
+                }
+            }
+            PHP);
+
+        Assert::same($residuals, [], 'A heredoc body is string content, never a comment token.');
+    }
+
+    #[Test]
+    public function aCanonicalMarkerBetweenOtherCommentsIsStillFound(): void
+    {
+        $residuals = $this->scanner->scan('SurroundedTest.php', <<<'PHP'
+            <?php
+
+            /* unrelated note */
+            /* laratesto-residual(code=LARAVEL_FAKE_UNSUPPORTED, rule=LaravelResidualDetectionRector, severity=manual): Mail::fake() — migrate manually */
+            final class SurroundedTest
+            {
+            }
+            PHP);
+
+        Assert::count($residuals, 1, 'The canonical comment token among others keeps its finding.');
+
+        $residual = $residuals[0] ?? null;
+        \assert($residual instanceof Residual);
+
+        Assert::same($residual->line, 4, 'The line must come from the comment token itself.');
     }
 }
