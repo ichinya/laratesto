@@ -25,4 +25,3 @@ final class ParentSurfaceTest extends TestCase
         parent::get('/users')->assertOk();
     }
 }
-

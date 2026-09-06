@@ -20,4 +20,3 @@ final class ParentProjectTest extends ProjectCase
         parent::assertTruth(true);
     }
 }
-
