@@ -13,6 +13,14 @@ use Testo\Test;
  * Ticket 06 acceptance: the Artisan journey over a throwaway corpus inside the
  * fixture application — dry-run leaves sources untouched but atomically replaces
  * the JSON report; apply rewrites in place; manual residuals yield exit 2.
+ *
+ * The fixture corpus lives under the fixture app's ignored storage tree, so it
+ * is exactly the unrestorable-by-Git input the #10 guard refuses. The apply
+ * journeys here therefore carry the explicit --allow-dirty escape (asserting
+ * its warning), while the guard's own accept/reject behavior — including the
+ * untracked/ignored refusals and the allow-dirty override over a REAL work
+ * tree — is covered by MigrateRectorCommandGitFixtureTest and the canned
+ * guard tests, which never touch the shared checkout index.
  */
 final class MigrateRectorCommandTest
 {
@@ -118,9 +126,11 @@ PHP;
                 '--path' => [$dir],
                 '--report' => $report,
                 '--apply' => true,
+                '--allow-dirty' => true,
             ]);
 
             Assert::same($first->exitCode(), 2);
+            Assert::true(\str_contains($first->output(), 'allow-dirty'), 'The ignored fixture corpus forces the explicit override.');
 
             $applied = (string) \file_get_contents($file);
 
@@ -136,6 +146,7 @@ PHP;
                 '--path' => [$dir],
                 '--report' => $report,
                 '--apply' => true,
+                '--allow-dirty' => true,
             ]);
 
             Assert::same($second->exitCode(), 2);
@@ -165,6 +176,7 @@ PHP;
                 '--path' => [$dir],
                 '--report' => $report,
                 '--apply' => true,
+                '--allow-dirty' => true,
             ]);
 
             Assert::same($apply->exitCode(), 2, 'The first apply must leave a manual residual behind. Output: ' . $apply->output());
@@ -192,46 +204,6 @@ PHP;
         }
     }
 
-    #[Test]
-    public function applyRefusesDirtyProcessedPaths(): void
-    {
-        [$dir, $file, $report] = $this->corpus('dirty');
-
-        $this->registerProvider();
-
-        // Staging the corpus makes it non-untracked — the guard must refuse.
-        // The index entry is always dropped again in the finally block.
-        \exec(\sprintf('git add -f -- %s 2>&1', \escapeshellarg($file)), $out, $added);
-
-        try {
-            // Staging must work wherever the suite runs: a failure is a harness
-            // bug, so it fails the test with the captured git diagnostics instead
-            // of silently skipping the guard coverage.
-            Assert::same(
-                0,
-                $added,
-                'git add -f failed; unable to stage the corpus. git said: ' . \implode("\n", $out),
-            );
-
-            $result = $this->artisan('laratesto:migrate-rector', [
-                '--path' => [$dir],
-                '--report' => $report,
-                '--apply' => true,
-            ]);
-
-            Assert::same(
-                $result->exitCode(),
-                1,
-                'A staged (non-untracked) processed path must block --apply. Output: ' . $result->output(),
-            );
-            Assert::true(\str_contains($result->output(), 'Refusing --apply'));
-        } finally {
-            \exec(\sprintf('git reset -q HEAD -- %s 2>&1', \escapeshellarg($file)));
-
-            self::cleanup($dir, $report);
-        }
-    }
-
     private function registerProvider(): void
     {
         $this->app()->register(LaratestoRectorServiceProvider::class);
@@ -250,6 +222,7 @@ PHP;
                 '--report' => $report,
                 '--base-class' => ['Tests\ApiTestCase'],
                 '--apply' => true,
+                '--allow-dirty' => true,
             ]);
 
             Assert::same(0, $result->exitCode(), 'No manual residuals expected here: ' . $result->output());
@@ -285,6 +258,7 @@ PHP;
                 '--report' => $report,
                 '--base-class' => ['Tests/ApiTestCase'],
                 '--apply' => true,
+                '--allow-dirty' => true,
             ]);
 
             Assert::same(
@@ -345,45 +319,6 @@ PHP;
         }
     }
 
-    #[Test]
-    public function allowDirtyOverridesTheGuardWithAWarning(): void
-    {
-        [$dir, $file, $report] = $this->corpus('allow-dirty');
-
-        $this->registerProvider();
-
-        \exec(\sprintf('git add -f -- %s 2>&1', \escapeshellarg($file)), $out, $added);
-
-        try {
-            // Staging must work wherever the suite runs: a failure is a harness
-            // bug, so it fails the test with the captured git diagnostics instead
-            // of silently skipping the allow-dirty coverage.
-            Assert::same(
-                0,
-                $added,
-                'git add -f failed; unable to stage the corpus. git said: ' . \implode("\n", $out),
-            );
-
-            $result = $this->artisan('laratesto:migrate-rector', [
-                '--path' => [$dir],
-                '--report' => $report,
-                '--apply' => true,
-                '--allow-dirty' => true,
-            ]);
-
-            Assert::same(2, $result->exitCode());
-            Assert::true(
-                \str_contains($result->output(), 'allow-dirty'),
-                'The override must print an explicit warning about the lost safe rollback.',
-            );
-            Assert::true(\str_contains((string) \file_get_contents($file), 'Laratesto\\Testing\\LaravelTestCase'));
-        } finally {
-            \exec(\sprintf('git reset -q HEAD -- %s 2>&1', \escapeshellarg($file)));
-
-            self::cleanup($dir, $report);
-        }
-    }
-
     /**
      * The generated RectorConfig must carry the `--target-mode=trait` override: only
      * then does Rector drop the framework parent and wire `InteractsWithLaravel` in
@@ -404,6 +339,7 @@ PHP;
                 '--report' => $report,
                 '--target-mode' => 'trait',
                 '--apply' => true,
+                '--allow-dirty' => true,
             ]);
 
             Assert::same(0, $first->exitCode(), 'A clean corpus must migrate with no residuals. Output: ' . $first->output());
@@ -428,6 +364,7 @@ PHP;
                 '--report' => $report,
                 '--target-mode' => 'trait',
                 '--apply' => true,
+                '--allow-dirty' => true,
             ]);
 
             Assert::same(0, $second->exitCode(), 'A second trait-mode apply is a no-op. Output: ' . $second->output());

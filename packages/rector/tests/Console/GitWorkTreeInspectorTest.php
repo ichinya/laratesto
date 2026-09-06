@@ -45,7 +45,7 @@ final class GitWorkTreeInspectorTest
         ));
 
         try {
-            $inspector->modifiedPaths('/app', ['tests']);
+            $inspector->statusPaths('/app', ['tests']);
 
             Assert::fail('A failing Git status must throw.');
         } catch (\RuntimeException $failure) {
@@ -67,18 +67,43 @@ final class GitWorkTreeInspectorTest
     }
 
     #[Test]
-    public function trackedModificationsAreReportedAndUntrackedIgnored(): void
+    public function statusClassifiesModifiedUntrackedAndIgnoredEntriesSeparately(): void
     {
         $inspector = new GitWorkTreeInspector(new FakeProcessRunner(gitStatus: new ProcessOutcome(
             0,
-            " M tests/Foo.php\0?? tests/New.php\0A  tests/Staged.php\0\0",
+            " M tests/Foo.php\0?? tests/New.php\0A  tests/Staged.php\0!! tests/Gone.php\0\0",
             '',
         )));
 
-        Assert::same($inspector->modifiedPaths('/app', ['tests']), [
+        $status = $inspector->statusPaths('/app', ['tests']);
+
+        Assert::same($status['modified'], [
             'tests/Foo.php',
             'tests/Staged.php',
         ]);
+        Assert::same($status['untracked'], ['tests/New.php'], 'Untracked files are their own rollback hazard.');
+        Assert::same($status['ignored'], ['tests/Gone.php'], 'Ignored PHP under the processed paths is equally unrestorable.');
+    }
+
+    #[Test]
+    public function theStatusCallEnumeratesUntrackedAndIgnoredFilesIndividually(): void
+    {
+        $runner = new FakeProcessRunner();
+
+        (new GitWorkTreeInspector($runner))->statusPaths('/app', ['tests']);
+
+        Assert::count($runner->invocations, 1);
+
+        $command = $runner->invocations[0]['command'] ?? [];
+
+        Assert::true(
+            \in_array('--untracked-files=all', $command, true),
+            'A collapsed `?? dir/` entry cannot name the file: -uall must enumerate untracked files.',
+        );
+        Assert::true(
+            \in_array('--ignored=traditional', $command, true),
+            'Ignored PHP under the processed paths must be enumerated per file: `matching` collapses a whole ignored directory into one suffix-less entry.',
+        );
     }
 
     #[Test]
@@ -93,26 +118,34 @@ final class GitWorkTreeInspectorTest
             '',
         )));
 
-        Assert::same($inspector->modifiedPaths('/app', ['tests']), [
+        $status = $inspector->statusPaths('/app', ['tests']);
+
+        Assert::same($status['modified'], [
             'tests/NewTest.php',
         ]);
+        Assert::same($status['untracked'], [], 'The origin path must not resurface as untracked.');
+        Assert::same($status['ignored'], []);
     }
 
     #[Test]
     public function theRenameOriginSkipConsumesExactlyOneField(): void
     {
         // The origin field is exactly one chunk: the entry after it must still be
-        // parsed as itself, and the untracked entry must stay ignored.
+        // parsed as itself, and the untracked entry must be classified as its own.
         $inspector = new GitWorkTreeInspector(new FakeProcessRunner(gitStatus: new ProcessOutcome(
             0,
-            "R  tests/NewTest.php\0tests/OldName.php\0 M tests/Touched.php\0?? tests/Fresh.php\0\0",
+            "R  tests/NewTest.php\0tests/OldName.php\0 M tests/Touched.php\0?? tests/Fresh.php\0!! tests/Gone.php\0\0",
             '',
         )));
 
-        Assert::same($inspector->modifiedPaths('/app', ['tests']), [
+        $status = $inspector->statusPaths('/app', ['tests']);
+
+        Assert::same($status['modified'], [
             'tests/NewTest.php',
             'tests/Touched.php',
         ]);
+        Assert::same($status['untracked'], ['tests/Fresh.php'], 'The origin skip must not swallow a following untracked entry.');
+        Assert::same($status['ignored'], ['tests/Gone.php']);
     }
 
     #[Test]
@@ -124,9 +157,13 @@ final class GitWorkTreeInspectorTest
             '',
         )));
 
-        Assert::same($inspector->modifiedPaths('/app', ['tests']), [
+        $status = $inspector->statusPaths('/app', ['tests']);
+
+        Assert::same($status['modified'], [
             'tests/Copy.php',
         ]);
+        Assert::same($status['untracked'], []);
+        Assert::same($status['ignored'], []);
     }
 
     #[Test]
@@ -138,8 +175,12 @@ final class GitWorkTreeInspectorTest
             '',
         )));
 
-        Assert::same($inspector->modifiedPaths('/app', ['tests']), [
+        $status = $inspector->statusPaths('/app', ['tests']);
+
+        Assert::same($status['modified'], [
             'tests/NewTest.php',
         ]);
+        Assert::same($status['untracked'], []);
+        Assert::same($status['ignored'], []);
     }
 }

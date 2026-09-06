@@ -114,6 +114,83 @@ final class MigrateRectorCommandCliTest
         Assert::true(\is_file($scratch['report']));
     }
 
+    #[Test]
+    public function anUntrackedProcessedPhpFileBlocksApply(): void
+    {
+        $scratch = $this->scratch();
+        \file_put_contents($scratch['corpus'] . '/UntrackedProbeTest.php', self::CORPUS);
+
+        // A corpus file inside a gitignored fixture directory is invisible to the
+        // real `git status`, so the hazard is injected through the canned runner.
+        [$exit, $output] = $this->run(
+            rector: new ProcessOutcome(0, \json_encode(['totals' => ['errors' => 0], 'file_diffs' => []]), ''),
+            corpus: $scratch['corpus'],
+            report: $scratch['report'],
+            gitStatus: new ProcessOutcome(0, "?? {$this->relativeCorpusEntry($scratch['corpus'], 'UntrackedProbeTest.php')}\0", ''),
+            apply: true,
+        );
+
+        Assert::same(1, $exit, 'An untracked processed PHP file is unrestorable after an apply — the guard must refuse.');
+        Assert::string($output)->contains('Refusing --apply: these processed PHP files are untracked');
+        Assert::string($output)->contains('git restore --source=HEAD');
+        Assert::string($output)->contains('UntrackedProbeTest.php');
+        Assert::false(\is_file($scratch['report']), 'No report is written for a refused apply.');
+    }
+
+    #[Test]
+    public function anUntrackedFileOutsideTheProcessedPathsAllowsApply(): void
+    {
+        $scratch = $this->scratch();
+        \file_put_contents($scratch['corpus'] . '/TrackedProbeTest.php', self::CORPUS);
+
+        [$exit] = $this->run(
+            rector: new ProcessOutcome(0, \json_encode(['totals' => ['errors' => 0], 'file_diffs' => []]), ''),
+            corpus: $scratch['corpus'],
+            report: $scratch['report'],
+            gitStatus: new ProcessOutcome(0, "?? .repowise/state.json\0?? storage/other/unrelated.php\0", ''),
+            apply: true,
+        );
+
+        Assert::same(0, $exit, 'Untracked files outside the processed paths are not an apply hazard.');
+    }
+
+    #[Test]
+    public function anUntrackedNonPhpFileUnderTheProcessedPathsAllowsApply(): void
+    {
+        $scratch = $this->scratch();
+        \file_put_contents($scratch['corpus'] . '/TrackedProbeTest.php', self::CORPUS);
+
+        [$exit] = $this->run(
+            rector: new ProcessOutcome(0, \json_encode(['totals' => ['errors' => 0], 'file_diffs' => []]), ''),
+            corpus: $scratch['corpus'],
+            report: $scratch['report'],
+            gitStatus: new ProcessOutcome(0, "?? {$this->relativeCorpusEntry($scratch['corpus'], 'fixture.json')}\0", ''),
+            apply: true,
+        );
+
+        Assert::same(0, $exit, 'Rector does not rewrite non-PHP files, so they are not a rollback hazard.');
+    }
+
+    #[Test]
+    public function anIgnoredProcessedPhpFileBlocksApply(): void
+    {
+        $scratch = $this->scratch();
+        \file_put_contents($scratch['corpus'] . '/IgnoredProbeTest.php', self::CORPUS);
+
+        [$exit, $output] = $this->run(
+            rector: new ProcessOutcome(0, \json_encode(['totals' => ['errors' => 0], 'file_diffs' => []]), ''),
+            corpus: $scratch['corpus'],
+            report: $scratch['report'],
+            gitStatus: new ProcessOutcome(0, "!! {$this->relativeCorpusEntry($scratch['corpus'], 'IgnoredProbeTest.php')}\0", ''),
+            apply: true,
+        );
+
+        Assert::same(1, $exit, 'An ignored processed PHP file is unrecoverable through Git — the guard must refuse.');
+        Assert::string($output)->contains('Refusing --apply: these processed PHP files are Git-ignored');
+        Assert::string($output)->contains('IgnoredProbeTest.php');
+        Assert::false(\is_file($scratch['report']), 'No report is written for a refused apply.');
+    }
+
     /**
      * The shared unreadable-read contract: exit 1 with the named file, no report,
      * and the previously installed error handler still on top after the command
@@ -214,6 +291,19 @@ final class MigrateRectorCommandCliTest
         $exit = $command->run(new ArrayInput($options), $output);
 
         return [$exit, $output->fetch()];
+    }
+
+    /**
+     * A corpus file spelled the way `git status` reports it: relative to the app
+     * root, forward-slashed.
+     *
+     * @param non-empty-string $corpus
+     */
+    private function relativeCorpusEntry(string $corpus, string $file): string
+    {
+        $root = \dirname(__DIR__, 4) . '/tests/Fixture/laravel';
+
+        return \str_replace('\\', '/', \substr($corpus, \strlen($root) + 1)) . '/' . $file;
     }
 
     /**

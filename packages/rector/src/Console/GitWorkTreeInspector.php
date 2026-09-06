@@ -37,18 +37,24 @@ class GitWorkTreeInspector
     }
 
     /**
-     * The processed paths that Git reports as modified (tracked changes, staged or
-     * not). Untracked files are fresh migration input, not a rollback hazard, so
-     * they are not reported; anything Git itself cannot answer throws.
+     * One `git status --porcelain=v1 -z -uall --ignored=traditional` call
+     * classifying the processed paths: `modified` are tracked entries with any
+     * staged or work-tree change, `untracked` are files Git has never committed
+     * (`??`, enumerated per file via `-uall`), and `ignored` are files excluded
+     * by ignore rules (`!!`, enumerated per file via `traditional` — `matching`
+     * would collapse a whole ignored DIRECTORY into one suffix-less entry that
+     * cannot name the PHP files inside). All three buckets need guarding because
+     * the scoped rollback `git restore --source=HEAD` cannot restore what no
+     * commit ever contained. Anything Git itself cannot answer throws.
      *
      * @param list<non-empty-string> $pathspecs Project-relative or absolute paths.
-     * @return list<non-empty-string> Project-relative modified paths.
+     * @return array{modified: list<non-empty-string>, untracked: list<non-empty-string>, ignored: list<non-empty-string>} Project-relative paths.
      * @throws \RuntimeException When the Git status call itself fails.
      */
-    public function modifiedPaths(string $root, array $pathspecs): array
+    public function statusPaths(string $root, array $pathspecs): array
     {
         $status = $this->runner->run(
-            ['git', '-C', $root, 'status', '--porcelain=v1', '-z', '--', ...$pathspecs],
+            ['git', '-C', $root, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=traditional', '--', ...$pathspecs],
             $root,
         );
 
@@ -66,6 +72,8 @@ class GitWorkTreeInspector
         // as an entry of its own.
         $entries = \explode("\0", $status->stdout);
         $modified = [];
+        $untracked = [];
+        $ignored = [];
 
         for ($index = 0, $count = \count($entries); $index < $count; $index++) {
             $entry = $entries[$index];
@@ -78,6 +86,14 @@ class GitWorkTreeInspector
             $path = \substr($entry, 3);
 
             if ($xy === '??') {
+                $untracked[] = \str_replace('\\', '/', $path);
+
+                continue;
+            }
+
+            if ($xy === '!!') {
+                $ignored[] = \str_replace('\\', '/', $path);
+
                 continue;
             }
 
@@ -88,6 +104,10 @@ class GitWorkTreeInspector
             $modified[] = \str_replace('\\', '/', $path);
         }
 
-        return \array_values(\array_unique($modified));
+        return [
+            'modified' => \array_values(\array_unique($modified)),
+            'untracked' => \array_values(\array_unique($untracked)),
+            'ignored' => \array_values(\array_unique($ignored)),
+        ];
     }
 }

@@ -41,7 +41,7 @@ final class MigrateRectorCommand extends Command
         {--base-class=* : Additional source base classes to convert (the defaults stay active)}
         {--target-mode=base_class : Conversion target: base_class or trait}
         {--apply : Write the changes in place instead of a dry-run}
-        {--allow-dirty : Allow --apply over modified (non-untracked) processed paths}
+        {--allow-dirty : Allow --apply over modified, untracked or ignored processed paths}
         {--report= : Residuals report path, relative to the project root (default: laratesto-residuals.json)}';
 
     private readonly GitWorkTreeInspector $gitInspector;
@@ -359,7 +359,9 @@ final class MigrateRectorCommand extends Command
 
     /**
      * The apply guard: no Git work tree, a failing Git call (including a missing Git
-     * binary), or any modified processed path blocks the run.
+     * binary), or any modified, untracked or ignored processed PHP file blocks
+     * the run — none of the three can be restored through `git restore --source=HEAD`
+     * once Rector has rewritten them in place.
      *
      * @param list<non-empty-string> $paths
      */
@@ -372,23 +374,88 @@ final class MigrateRectorCommand extends Command
                 return false;
             }
 
-            $modified = $this->gitInspector->modifiedPaths($root, $paths);
+            $status = $this->gitInspector->statusPaths($root, $paths);
         } catch (\RuntimeException $failure) {
             $this->error('Unable to verify a clean state with Git: ' . $failure->getMessage());
 
             return false;
         }
 
-        if ($modified !== []) {
+        if ($status['modified'] !== []) {
             $this->error(\sprintf(
                 "Refusing --apply: processed paths have modifications (run without --apply to review, or pass --allow-dirty to override):\n  %s",
-                \implode("\n  ", $modified),
+                \implode("\n  ", $status['modified']),
+            ));
+
+            return false;
+        }
+
+        $untracked = $this->processedPhpFilesInScope($root, $paths, $status['untracked']);
+
+        if ($untracked !== []) {
+            $this->error(\sprintf(
+                "Refusing --apply: these processed PHP files are untracked — Git has never committed them, so the scoped rollback `git restore --source=HEAD` cannot restore them after the rewrite. Commit them first, or pass --allow-dirty to accept the risk:\n  %s",
+                \implode("\n  ", $untracked),
+            ));
+
+            return false;
+        }
+
+        $ignored = $this->processedPhpFilesInScope($root, $paths, $status['ignored']);
+
+        if ($ignored !== []) {
+            $this->error(\sprintf(
+                "Refusing --apply: these processed PHP files are Git-ignored — they are rewritten in place and no commit and no `git restore` can bring them back. Track and commit them first, or pass --allow-dirty to accept the risk:\n  %s",
+                \implode("\n  ", $ignored),
             ));
 
             return false;
         }
 
         return true;
+    }
+
+    /**
+     * The processed-scope subset of Git's not-recoverable files that Rector would
+     * rewrite: an untracked or ignored PHP file inside the processed paths is
+     * exactly the rollback hole — it gets rewritten in place and no commit
+     * exists to restore it from. Files OUTSIDE the processed paths (tooling
+     * state, scratch, `.repowise`) and non-PHP files Rector does not touch stay
+     * irrelevant, so the refusal is as narrow as the hazard.
+     *
+     * @param list<non-empty-string> $paths Absolute processed paths.
+     * @param list<non-empty-string> $entries Project-relative paths of one bucket.
+     * @return list<non-empty-string> The blocking project-relative paths.
+     */
+    private function processedPhpFilesInScope(string $root, array $paths, array $entries): array
+    {
+        $processed = [];
+
+        foreach ($paths as $path) {
+            $processed[] = \rtrim(\strtolower($this->toForwardSlashes($path)), '/');
+        }
+
+        $blocking = [];
+
+        foreach ($entries as $entry) {
+            if (! \str_ends_with(\strtolower($entry), '.php')) {
+                continue;
+            }
+
+            $absolute = \rtrim(\strtolower($this->toForwardSlashes($root . '/' . $entry)), '/');
+
+            foreach ($processed as $processedPath) {
+                if ($absolute === $processedPath || \str_starts_with($absolute, $processedPath . '/')) {
+                    $blocking[] = $entry;
+
+                    break;
+                }
+            }
+        }
+
+        \sort($blocking, \SORT_STRING);
+
+        return $blocking;
     }
 
     /**
