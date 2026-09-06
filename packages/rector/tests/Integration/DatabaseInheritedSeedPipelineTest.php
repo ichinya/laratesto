@@ -41,7 +41,7 @@ final class DatabaseInheritedSeedPipelineTest
                 <?php
                 namespace Tests\SeedConsumer;
                 use Illuminate\Foundation\Testing\RefreshDatabase;
-                #[\Illuminate\Foundation\Testing\Attributes\Seeder(\SplObjectStorage::class)]
+                #[\Illuminate\Foundation\Testing\Attributes\Seeder(class: \SplObjectStorage::class)]
                 final class OwnTest extends \Tests\SeedHierarchy\NearestBase
                 {
                     use RefreshDatabase;
@@ -59,6 +59,21 @@ final class DatabaseInheritedSeedPipelineTest
                 PHP,
         ], ['Tests\SeedHierarchy\GrandBase', 'Tests\SeedHierarchy\NearestBase']);
 
+        if (! class_exists(\Illuminate\Foundation\Testing\Attributes\Seed::class)) {
+            foreach (['Child.php', 'Own.php'] as $name) {
+                Assert::string($snapshot[$name])->contains('code=DATABASE_UNSUPPORTED_CONFIGURATION');
+                Assert::string($snapshot[$name])->contains('require proven Laravel 13 source semantics');
+                Assert::string($snapshot[$name])->contains('use RefreshDatabase;');
+                Assert::string($snapshot[$name])->notContains('#[\Laratesto\Attribute\RefreshDatabase');
+            }
+            Assert::string($snapshot['Child.php'])->contains('protected bool $seed = false;');
+            Assert::string($snapshot['Child.php'])->contains('protected string $seeder = \stdClass::class;');
+            Assert::string($snapshot['Plain.php'])->contains('#[\Laratesto\Attribute\RefreshDatabase]');
+            Assert::string($snapshot['Plain.php'])->notContains('laratesto-residual');
+
+            return;
+        }
+
         Assert::string($snapshot['Child.php'])->contains('RefreshDatabase(seed: true, seeder: \ArrayIterator::class)');
         Assert::string($snapshot['Child.php'])->notContains('protected bool $seed');
         Assert::string($snapshot['Child.php'])->notContains('protected string $seeder');
@@ -70,6 +85,31 @@ final class DatabaseInheritedSeedPipelineTest
         // Ancestor metadata remains available to other descendants.
         Assert::string($snapshot['Base.php'])->contains('#[Seed]');
         Assert::string($snapshot['Base.php'])->contains('#[Seeder(\ArrayIterator::class)]');
+    }
+
+    #[Test]
+    public function inheritedPositiveFixturesHaveExplicitVersionDependentOutcomes(): void
+    {
+        $fixtures = glob(dirname(__DIR__) . '/Fixture/DatabaseSeedAttributes/*.php.inc') ?: [];
+        Assert::same(4, count($fixtures), 'Keep every inherited positive fixture covered.');
+        foreach ($fixtures as $fixture) {
+            [$input, $expected13] = explode("-----\n", str_replace("\r\n", "\n", file_get_contents($fixture)));
+            $snapshot = DatabasePipeline::run(['Tests.php' => $input], ['Tests\TestCase', 'Tests\GrandTestCase']);
+            $source = $snapshot['Tests.php'];
+            if (class_exists(\Illuminate\Foundation\Testing\Attributes\Seed::class)) {
+                $start = strpos($expected13, '#[\Laratesto\Attribute\RefreshDatabase');
+                Assert::true($start !== false);
+                $end = strpos($expected13, ']', $start);
+                Assert::true($end !== false);
+                Assert::string($source)->contains(substr($expected13, $start, $end - $start + 1));
+                Assert::string($source)->notContains('laratesto-residual');
+            } else {
+                Assert::string($source)->contains('code=DATABASE_UNSUPPORTED_CONFIGURATION');
+                Assert::string($source)->contains('require proven Laravel 13 source semantics');
+                Assert::string($source)->contains('use RefreshDatabase;');
+                Assert::string($source)->notContains('#[\Laratesto\Attribute\RefreshDatabase');
+            }
+        }
     }
 
     #[Test]

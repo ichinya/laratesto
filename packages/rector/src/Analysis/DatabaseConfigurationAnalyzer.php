@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Laratesto\Rector\Analysis;
 
+use Composer\InstalledVersions;
 use PhpParser\Node;
 use PhpParser\NodeFinder;
 use PhpParser\PrettyPrinter\Standard;
@@ -415,6 +416,11 @@ final class DatabaseConfigurationAnalyzer
                 // the property fallback: the inherited attribute shadows the
                 // class's own literal $seeder as well.
                 $options['seeder'] = $inherited['seeder'];
+            }
+
+            if (($attributes !== [] || $inherited['seed'] || $inherited['seeder'] !== null)
+                && ! $this->sourceSupportsSeedAttributes()) {
+                return $this->unsupported($base, 'Laravel Seed/Seeder attributes require proven Laravel 13 source semantics; preserve them for manual migration');
             }
         }
 
@@ -1931,6 +1937,17 @@ final class DatabaseConfigurationAnalyzer
         return $attributes;
     }
 
+    private function sourceSupportsSeedAttributes(): bool
+    {
+        if (! InstalledVersions::isInstalled('laravel/framework')) {
+            return false;
+        }
+
+        $version = InstalledVersions::getVersion('laravel/framework');
+
+        return $version !== null && preg_match('/^13(?:\.|$)/', $version) === 1;
+    }
+
     /**
      * The Laravel Seed/Seeder attribute situation on the resolved ancestors
      * above the class.
@@ -1941,8 +1958,8 @@ final class DatabaseConfigurationAnalyzer
      * seeder() takes the NEAREST level's first Seeder attribute (also before
      * the property fallback, so an inherited Seeder shadows the class's own
      * literal $seeder). Laravel 12 ignores both attributes entirely and reads
-     * only the properties; the conversion targets the newer supported
-     * semantics, consistent with the existing own-level attribute lift.
+     * only the properties; after metadata validation the caller refuses to lift
+     * attributes unless the installed source framework is proven Laravel 13.
      *
      * Walk contract: same-file ancestors first, then AstResolver; the walk
      * stops at the framework and target bases (no project attributes above

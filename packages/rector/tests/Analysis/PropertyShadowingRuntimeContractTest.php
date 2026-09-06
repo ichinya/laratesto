@@ -337,12 +337,8 @@ PHP);
     }
 
     #[Test]
-    public function laravel13InheritedAttributesPrecedePropertyFallbacks(): void
+    public function installedFrameworkControlsNativeSeedAttributePrecedence(): void
     {
-        if (! class_exists(\Illuminate\Foundation\Testing\Attributes\Seed::class)) {
-            throw new \Testo\Core\Exception\SkipTest('Laravel 13 Seed/Seeder attributes are not installed.');
-        }
-
         $autoload = var_export(dirname(__DIR__, 4) . '/vendor/autoload.php', true);
         $output = $this->runProbe("<?php\nrequire {$autoload};\n" . <<<'PHP'
             #[\Illuminate\Foundation\Testing\Attributes\Seed]
@@ -359,7 +355,10 @@ PHP);
             class NearestSeedChild extends SeedChild {}
             echo json_encode([(new SeedChild())->options(), (new NearestSeedChild())->options()]);
             PHP);
-        Assert::same('[[true,"stdClass"],[true,"ArrayIterator"]]', $output);
+        $expected = class_exists(\Illuminate\Foundation\Testing\Attributes\Seed::class)
+            ? '[[true,"stdClass"],[true,"ArrayIterator"]]'
+            : '[[false,"SplObjectStorage"],[false,"SplObjectStorage"]]';
+        Assert::same($expected, $output);
     }
 
     #[Test]
