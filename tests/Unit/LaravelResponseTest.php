@@ -434,6 +434,54 @@ final class LaravelResponseTest
     }
 
     #[Test]
+    public function assertJsonClosureSupportsConditionableAndMacroable(): void
+    {
+        // Laravel's AssertableJson carries Conditionable and Macroable, so
+        // rewritten tests may call ->when()/macros inside the closure.
+        $response = new LaravelResponse(new Response('{"user":{"id":1,"name":"Ada"},"role":"admin"}'));
+
+        $response->assertJson(static function (AssertableJson $json): void {
+            $json->where('role', 'admin')
+                ->when(true, static function (AssertableJson $json): void {
+                    $json->has('user.name');
+                })
+                ->when(false, static function (AssertableJson $json): void {
+                    Assert::fail('The false branch must not run.');
+                })
+                ->etc();
+        });
+
+        $response->assertJson(static function (AssertableJson $json): void {
+            // The macro closure pins native Macroable binding: $this is the
+            // AssertableJson instance the macro is called on.
+            $json->macro('assertAdminRole', function (string $role): AssertableJson {
+                return $this->where('role', $role);
+            });
+
+            $json->assertAdminRole('admin')->etc();
+        });
+
+        // Macros do not bypass assertion failures.
+        $failed = false;
+        try {
+            $response->assertJson(static function (AssertableJson $json): void {
+                $json->macro('assertWrongRole', function (string $role): AssertableJson {
+                    return $this->where('role', $role);
+                });
+
+                $json->assertWrongRole('editor')->etc();
+            });
+        } catch (\Testo\Assert\State\Assertion\AssertionException) {
+            $failed = true;
+        } finally {
+            // Macros are static class state: never leak them into other tests.
+            AssertableJson::flushMacros();
+        }
+
+        Assert::true($failed, 'A macro-backed wrong where() must still fail.');
+    }
+
+    #[Test]
     public function assertSeeAcceptsArraysAndEscapesLikeLaravelE(): void
     {
         $response = new LaravelResponse(new Response('hello <b>world</b> &amp; more'));

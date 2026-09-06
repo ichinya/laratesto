@@ -9,6 +9,8 @@ use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Illuminate\Support\Traits\Conditionable;
+use Illuminate\Support\Traits\Macroable;
 use Illuminate\Support\Traits\Tappable;
 use Testo\Assert;
 
@@ -26,6 +28,10 @@ use function Illuminate\Support\enum_value;
  */
 class AssertableJson implements Arrayable
 {
+    // Conditionable/Macroable keep Laravel's fluent parity: rewritten tests
+    // call $json->when()/macros inside assertJson() closures.
+    use Conditionable;
+    use Macroable;
     use Tappable;
 
     /**
