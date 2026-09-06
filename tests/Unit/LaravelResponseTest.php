@@ -93,19 +93,26 @@ final class LaravelResponseTest
     }
 
     #[Test]
-    public function assertHeaderMatchesNameCaseInsensitivelyButValueExactly(): void
+    public function assertHeaderMatchesNameAndValueCaseInsensitively(): void
     {
+        // Laravel's TestResponse::assertHeader() compares values with
+        // assertEqualsIgnoringCase: case-only differences must stay green.
         $response = new LaravelResponse(new Response('', 200, ['X-Mode' => 'Production']));
-        $response->assertHeader('x-mode', 'Production');
+        $response->assertHeader('x-mode', 'production');
+
+        $charset = new LaravelResponse(new Response('', 200, [
+            'Content-Type' => 'application/json; charset=UTF-8',
+        ]));
+        $charset->assertHeader('Content-Type', 'application/json; charset=utf-8');
 
         $failed = false;
         try {
-            $response->assertHeader('X-MODE', 'production');
+            $charset->assertHeader('Content-Type', 'application/json');
         } catch (\Testo\Assert\State\Assertion\AssertionException) {
             $failed = true;
         }
 
-        Assert::true($failed, 'Header values are case-sensitive even though header names are not.');
+        Assert::true($failed, 'Header values that differ beyond case must still fail.');
     }
 
     #[Test]

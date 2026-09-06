@@ -136,7 +136,9 @@ final readonly class LaravelResponse
         );
 
         if ($value !== null) {
-            Assert::same((string) $actual, $value, \sprintf(
+            // Laravel's TestResponse::assertHeader() compares with
+            // assertEqualsIgnoringCase, so case-only differences pass.
+            Assert::same(\strtolower((string) $actual), \strtolower($value), \sprintf(
                 'Expected header "%s" to be "%s", got "%s".',
                 $name,
                 $value,
