@@ -1385,10 +1385,13 @@ final class DatabaseConfigurationAnalyzer
 
     private function propertyIsReadByClass(Class_ $class, string $propertyName): bool
     {
-        return $this->nodeFinder->findFirst(
-            $class->stmts,
-            fn (Node $node): bool => $this->instancePropertyRead($node, $propertyName) !== null,
-        ) instanceof Node;
+        foreach ($this->nodeFinder->findInstanceOf($class->stmts, ClassMethod::class) as $method) {
+            if ($this->methodReaderSite($method, $propertyName, 'class', 'class') !== null) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -1397,14 +1400,14 @@ final class DatabaseConfigurationAnalyzer
      * (`$this->seed`, nullsafe `$this?->seed`, literal-string `$this->{'seed'}`),
      * true for a dynamic property name whose target cannot be proven.
      */
-    private function instancePropertyRead(Node $node, string $propertyName): ?bool
+    private function instancePropertyRead(Node $node, string $propertyName, array $aliases): ?bool
     {
         if (! $node instanceof Expr\PropertyFetch
             && ! $node instanceof Expr\NullsafePropertyFetch) {
             return null;
         }
 
-        if (! $node->var instanceof Expr\Variable || $node->var->name !== 'this') {
+        if (! $this->mayAliasThis($node->var, $aliases)) {
             return null;
         }
 
@@ -1620,6 +1623,7 @@ final class DatabaseConfigurationAnalyzer
     {
         $dynamic = false;
         $reads = false;
+        $aliases = $this->thisAliases($method);
 
         $fetches = array_merge(
             $this->nodeFinder->findInstanceOf($method, Expr\PropertyFetch::class),
@@ -1627,7 +1631,7 @@ final class DatabaseConfigurationAnalyzer
         );
 
         foreach ($fetches as $fetch) {
-            $read = $this->instancePropertyRead($fetch, $propertyName);
+            $read = $this->instancePropertyRead($fetch, $propertyName, $aliases);
 
             if ($read === true) {
                 $dynamic = true;
@@ -1643,6 +1647,54 @@ final class DatabaseConfigurationAnalyzer
         }
 
         return $reads ? ['scope' => $scope, 'location' => $location, 'dynamic' => false] : null;
+    }
+
+    /** @return array<string, true> */
+    private function thisAliases(ClassMethod $method): array
+    {
+        $aliases = ['this' => true];
+        $assignments = $this->nodeFinder->find($method, static fn (Node $node): bool =>
+            $node instanceof Expr\Assign || $node instanceof Expr\AssignRef);
+
+        // A monotone method-local set covers chained assignments and reference
+        // bindings in either direction. Do not kill aliases on assignment: a
+        // branch or closure may still observe the original object.
+        do {
+            $before = $aliases;
+            foreach ($assignments as $assignment) {
+                if ($assignment->var instanceof Expr\Variable && is_string($assignment->var->name)
+                    && $this->mayAliasThis($assignment->expr, $aliases)) {
+                    $aliases[$assignment->var->name] = true;
+                }
+                if ($assignment instanceof Expr\AssignRef
+                    && $assignment->expr instanceof Expr\Variable && is_string($assignment->expr->name)
+                    && $this->mayAliasThis($assignment->var, $aliases)) {
+                    $aliases[$assignment->expr->name] = true;
+                }
+            }
+        } while ($before !== $aliases);
+
+        return $aliases;
+    }
+
+    /** @param array<string, true> $aliases */
+    private function mayAliasThis(Expr $expression, array $aliases): bool
+    {
+        if ($expression instanceof Expr\Variable) {
+            return is_string($expression->name) && isset($aliases[$expression->name]);
+        }
+        if ($expression instanceof Expr\Assign || $expression instanceof Expr\AssignRef) {
+            return $this->mayAliasThis($expression->expr, $aliases);
+        }
+        if ($expression instanceof Expr\Ternary) {
+            return $this->mayAliasThis($expression->if ?? $expression->cond, $aliases)
+                || $this->mayAliasThis($expression->else, $aliases);
+        }
+        if ($expression instanceof Expr\BinaryOp\Coalesce) {
+            return $this->mayAliasThis($expression->left, $aliases) || $this->mayAliasThis($expression->right, $aliases);
+        }
+
+        return false;
     }
 
     /**
