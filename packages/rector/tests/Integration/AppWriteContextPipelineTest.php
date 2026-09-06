@@ -140,6 +140,9 @@ PHP);
             'ReferenceArray' => ['', '$references = [&$this->app];', false],
             'ForeachTarget' => ['', 'foreach ([$this->app] as $this->app) {}', false],
             'FunctionValue' => ['function takeRef($container): void {}', 'takeRef($this->app);', true],
+            'DynamicReference' => ['', '$callback = function (&$container): void { $container = null; }; $callback($this->app);', false],
+            'InvokableReference' => ['class Receiver { public function __invoke(&$container): void { $container = null; } }', '$callback = new Receiver; $callback($this->app);', false],
+            'UnresolvedReference' => ['', '$receiver = resolve("reference-service"); $receiver->replace($this->app);', false],
         ];
 
         try {

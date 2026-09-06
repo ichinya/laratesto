@@ -944,8 +944,11 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
                 || $inner instanceof FuncCall
                 || $inner instanceof NullsafeMethodCall
                 || $inner instanceof New_) {
-                if ($this->callTakesAppByReference($inner)) {
+                $takesReference = $this->callTakesAppByReference($inner);
+                if ($takesReference === true) {
                     $failures[] = self::APP_WRITE_CONTEXT_REASON;
+                } elseif ($takesReference === null) {
+                    $failures[] = '$this->app is passed to a call whose by-value parameter signature cannot be proven';
                 }
             }
 
@@ -995,7 +998,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         return false;
     }
 
-    private function callTakesAppByReference(MethodCall|StaticCall|FuncCall|NullsafeMethodCall|New_ $call): bool
+    private function callTakesAppByReference(MethodCall|StaticCall|FuncCall|NullsafeMethodCall|New_ $call): ?bool
     {
         $callee = null;
         $calleeResolved = false;
@@ -1016,9 +1019,10 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
                 $calleeResolved = true;
 
                 if (! $callee instanceof ClassMethod && ! $callee instanceof Function_) {
-                    // The callee cannot be resolved, so a by-reference parameter
-                    // cannot be proven; the by-value read stays convertible.
-                    return false;
+                    // An unresolved callback may require a writable reference;
+                    // replacing the property with a temporary method result
+                    // would silently discard writes or raise a runtime error.
+                    return null;
                 }
             }
 
