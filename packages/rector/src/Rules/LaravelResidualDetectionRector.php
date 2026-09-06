@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Laratesto\Rector\Rules;
 
 use Laratesto\Rector\Configuration\ConfiguredHierarchy;
+use Laratesto\Rector\Analysis\HttpCompatibilityAnalyzer;
 use Laratesto\Rector\Residuals\ResidualCode;
 use Laratesto\Rector\Residuals\ResidualMarker;
 use PhpParser\Node;
@@ -18,6 +19,7 @@ use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\Trait_;
 use PhpParser\Node\Stmt\TraitUse;
 use PhpParser\NodeFinder;
+use PHPStan\Type\ObjectType;
 use Rector\PhpParser\AstResolver;
 use Rector\Rector\AbstractRector;
 use Symplify\RuleDocGenerator\ValueObject\CodeSample\CodeSample;
@@ -191,7 +193,7 @@ final class LaravelResidualDetectionRector extends AbstractRector
         $unsupportedHelpers = [];
         $unsupportedResponses = [];
 
-        $this->traverseNodesWithCallable($node->stmts, function (Node $inner) use (&$fakes, &$unsupportedHelpers, &$unsupportedResponses): void {
+        $this->traverseNodesWithCallable($node->stmts, function (Node $inner) use ($node, &$fakes, &$unsupportedHelpers, &$unsupportedResponses): void {
             if ($inner instanceof StaticCall
                 && $this->isNames($inner->class, self::FAKE_FACADES)
                 && $this->isName($inner->name, 'fake')) {
@@ -207,11 +209,13 @@ final class LaravelResidualDetectionRector extends AbstractRector
                 return;
             }
 
-            if ($this->isNames($inner->name, self::UNSUPPORTED_TEST_HELPERS)) {
+            if ($this->isNames($inner->name, self::UNSUPPORTED_TEST_HELPERS)
+                && ! $this->isUnrelatedHelperReceiver($inner, $node)) {
                 $unsupportedHelpers[] = \sprintf('%s()', $this->getName($inner->name));
             }
 
-            if ($this->isNames($inner->name, self::UNSUPPORTED_RESPONSE_METHODS)) {
+            if ($this->isNames($inner->name, self::UNSUPPORTED_RESPONSE_METHODS)
+                && ! $this->isProvenOutsideTypes($inner->var, [HttpCompatibilityAnalyzer::TEST_RESPONSE, HttpCompatibilityAnalyzer::LARAVEL_RESPONSE])) {
                 $unsupportedResponses[] = \sprintf('%s()', $this->getName($inner->name));
             }
         });
@@ -253,6 +257,36 @@ final class LaravelResidualDetectionRector extends AbstractRector
         ) || $changed;
 
         return $changed ? $node : null;
+    }
+
+    private function isUnrelatedHelperReceiver(MethodCall $call, Class_ $class): bool
+    {
+        if ($call->var instanceof Variable && $call->var->name === 'this') {
+            return $call->name instanceof Identifier && $class->getMethod($call->name->toString()) !== null;
+        }
+
+        return $this->isProvenOutsideTypes($call->var, [
+            'Illuminate\\Foundation\\Testing\\TestCase',
+            'Laratesto\\Testing\\LaravelTestCase',
+            (string) $this->getName($class),
+        ]);
+    }
+
+    /** @param list<class-string> $classes */
+    private function isProvenOutsideTypes(Node\Expr $receiver, array $classes): bool
+    {
+        $type = $this->getNativeType($receiver);
+        if (! $type->isObject()->yes()) {
+            return false;
+        }
+
+        foreach ($classes as $class) {
+            if (! (new ObjectType($class))->isSuperTypeOf($type)->no()) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
