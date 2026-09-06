@@ -191,6 +191,30 @@ final class MigrateRectorCommandCliTest
         Assert::false(\is_file($scratch['report']), 'No report is written for a refused apply.');
     }
 
+    #[Test]
+    public function aConfigWriterFailureHonorsTheExitContract(): void
+    {
+        $scratch = $this->scratch();
+        \file_put_contents($scratch['corpus'] . '/ProbeTest.php', self::CORPUS);
+
+        // Drive the real writer into its exclusive-create refusal: the allocator
+        // hands back the path of an already existing file (a planted target).
+        $planted = $scratch['corpus'] . '/Planted.php';
+        \file_put_contents($planted, "<?php\n");
+
+        [$exit, $output] = $this->run(
+            rector: new ProcessOutcome(0, \json_encode(['totals' => ['errors' => 0], 'file_diffs' => []]), ''),
+            corpus: $scratch['corpus'],
+            report: $scratch['report'],
+            configWriter: new RectorConfigWriter(targetPathAllocator: static fn(): string => $planted),
+        );
+
+        Assert::same(1, $exit, 'A config-write failure must honor the exit contract instead of throwing raw.');
+        Assert::string($output)->contains('Refusing to write the temporary Rector configuration');
+        Assert::string($output)->notContains('Stack trace', 'The failure must surface as a friendly error, not an escaping exception.');
+        Assert::false(\is_file($scratch['report']), 'No report is written when the config cannot be created.');
+    }
+
     /**
      * The shared unreadable-read contract: exit 1 with the named file, no report,
      * and the previously installed error handler still on top after the command

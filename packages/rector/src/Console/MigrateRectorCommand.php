@@ -111,7 +111,13 @@ final class MigrateRectorCommand extends Command
         }
 
         try {
-            $config = $this->configWriter->write($targetMode, $paths, $extraBases);
+            try {
+                $config = $this->configWriter->write($targetMode, $paths, $extraBases);
+            } catch (\RuntimeException $failure) {
+                $this->error($failure->getMessage());
+
+                return self::EXIT_FAILURE;
+            }
 
             try {
                 // Re-check the work tree immediately before the Rector process: the
