@@ -12,7 +12,7 @@ use Illuminate\Foundation\Testing\RefreshDatabaseState;
 /** @internal Begins a multi-connection test transaction and unwinds exactly the depth it owns. */
 final class DatabaseTransactionScope
 {
-    /** @var list<array{name: non-empty-string, connection: Connection, floor: int}> */
+    /** @var list<array{name: non-empty-string, connection: Connection, floor: int, manager: object|null}> */
     private array $managed = [];
 
     private bool $closed = false;
@@ -50,8 +50,16 @@ final class DatabaseTransactionScope
                 // The transaction depth this scope owns: close() may only unwind
                 // what it began, so an outer scope's transaction survives.
                 $floor = $connection->transactionLevel();
+                // The manager embedded in the connection belongs to an outer
+                // scope or the application itself: close() must hand it back.
+                $priorManager = self::connectionTransactionManager($connection);
                 $connection->setTransactionManager($manager);
-                $this->managed[] = ['name' => $name, 'connection' => $connection, 'floor' => $floor];
+                $this->managed[] = [
+                    'name' => $name,
+                    'connection' => $connection,
+                    'floor' => $floor,
+                    'manager' => $priorManager,
+                ];
 
                 $dispatcher = $connection->getEventDispatcher();
                 $connection->unsetEventDispatcher();
@@ -107,7 +115,15 @@ final class DatabaseTransactionScope
                 $firstFailure ??= $failure;
                 $this->guardsRefreshState and RefreshDatabaseState::$migrated = false;
             } finally {
-                $connection->unsetTransactionManager();
+                // Hand the connection back exactly what begin() replaced: an
+                // outer scope's manager or the application's own, so afterCommit
+                // keeps working after a nested scope closes — success or failure.
+                if ($owned['manager'] === null) {
+                    $connection->unsetTransactionManager();
+                } else {
+                    $connection->setTransactionManager($owned['manager']);
+                }
+
                 $connection->setEventDispatcher($dispatcher);
             }
         }
@@ -179,5 +195,22 @@ final class DatabaseTransactionScope
 
         // Otherwise only the scope-owned instance is forgotten: the original
         // binding stays intact and keeps its exact resolution semantics.
+    }
+
+    /**
+     * Read the manager currently embedded in the connection. Connection ships
+     * no public getter for its `$transactionsManager`, but begin() must know
+     * the exact prior value — an outer scope's or the application's own
+     * manager — to hand back at close(); only the reflection view provides it.
+     */
+    private static function connectionTransactionManager(Connection $connection): ?object
+    {
+        $property = new \ReflectionProperty(Connection::class, 'transactionsManager');
+
+        $manager = $property->getValue($connection);
+
+        \assert($manager === null || \is_object($manager));
+
+        return $manager;
     }
 }

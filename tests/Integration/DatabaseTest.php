@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Laratesto\Tests\Integration;
 
 use App\Database\ThingsSeeder;
+use Illuminate\Database\Connection;
+use Illuminate\Database\SQLiteConnection;
+use Illuminate\Events\Dispatcher;
 use Illuminate\Foundation\Testing\DatabaseTransactionsManager;
 use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\DB;
@@ -243,6 +246,115 @@ final class DatabaseTest
         Assert::true($application->bound('db.transactions'));
         Assert::same($application->make('db.transactions'), $frameworkManager);
         Assert::same($this->make('db')->connection('sqlite')->transactionLevel(), 0);
+    }
+
+    public function testNestedScopesRestoreTheConnectionTransactionManager(): void
+    {
+        $application = $this->app();
+        $connection = $this->make('db')->connection('sqlite');
+
+        $outer = new DatabaseTransactionScope($application, ['sqlite']);
+        $outer->begin();
+
+        $inner = new DatabaseTransactionScope($application, ['sqlite']);
+        $inner->begin();
+        $inner->close();
+
+        // The inner close must hand the outer scope's manager back to the
+        // connection itself, so afterCommit keeps registering through it
+        // instead of failing with "Transactions Manager has not been set.".
+        // The testing manager runs the callback immediately while only the
+        // wrapping transaction is pending.
+        $ran = false;
+        $connection->afterCommit(static function () use (&$ran): void {
+            $ran = true;
+        });
+
+        Assert::true($ran, 'afterCommit must route through the restored outer manager.');
+
+        $outer->close();
+
+        Assert::same($connection->transactionLevel(), 0);
+    }
+
+    public function testScopeHandsBackACustomConnectionManager(): void
+    {
+        $application = $this->app();
+        $database = $this->make('db');
+        $connection = $database->connection('sqlite');
+
+        $managerProperty = new \ReflectionProperty(Connection::class, 'transactionsManager');
+        $originalManager = $managerProperty->getValue($connection);
+
+        try {
+            $custom = new DatabaseTransactionsManager(['sqlite']);
+            $connection->setTransactionManager($custom);
+
+            $scope = new DatabaseTransactionScope($application, ['sqlite']);
+            $scope->begin();
+
+            $manager = $managerProperty->getValue($connection);
+            Assert::notSame($manager, $custom);
+
+            $scope->close();
+
+            // The application's own native manager survives the scope on the
+            // connection itself, not just in the container.
+            $manager = $managerProperty->getValue($connection);
+            Assert::same($manager, $custom);
+        } finally {
+            // Restore the pre-test stamp even when an assertion fails, so the
+            // shared fixture connection never keeps this test's custom manager.
+            $connection->setTransactionManager($originalManager);
+        }
+
+        Assert::same($connection->transactionLevel(), 0);
+    }
+
+    public function testCloseFailureStillHandsBackThePriorConnectionManager(): void
+    {
+        $application = $this->app();
+        $database = $this->make('db');
+
+        $config = $application['config']->get('database.connections.secondary');
+        $connection = new class(
+            new \PDO('sqlite:' . $config['database']),
+            $config['database'],
+            $config['prefix'] ?? '',
+            ['name' => 'secondary'],
+        ) extends SQLiteConnection {
+            public function rollBack($toLevel = null): void
+            {
+                throw new \RuntimeException('Simulated rollback failure.');
+            }
+        };
+        $connection->setEventDispatcher(new Dispatcher($application));
+        $database->extend('secondary', static fn (): Connection => $connection);
+
+        // Materialize the connection once: DatabaseManager::configure() stamps
+        // the container's own manager onto every freshly resolved connection,
+        // so the custom stamp must come after the first resolution.
+        Assert::same($database->connection('secondary'), $connection);
+
+        $custom = new DatabaseTransactionsManager(['secondary']);
+        $connection->setTransactionManager($custom);
+
+        $scope = new DatabaseTransactionScope($application, ['secondary']);
+        $scope->begin();
+
+        $threw = false;
+        try {
+            $scope->close();
+        } catch (\RuntimeException) {
+            $threw = true;
+        }
+
+        Assert::true($threw, 'The simulated rollback failure must surface from close().');
+
+        // Even a failing close restores exactly the manager begin() replaced.
+        $manager = (new \ReflectionProperty(Connection::class, 'transactionsManager'))
+            ->getValue($connection);
+        Assert::same($manager, $custom);
     }
 
     public function testCloseWithoutBeginLeavesTheContainerUntouched(): void
