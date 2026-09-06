@@ -114,6 +114,7 @@ PHP);
 
             $paths = var_export($tmpDir . '/corpus', true);
             $set = var_export(LaratestoRectorSetList::LARAVEL_PHPUNIT_TO_LARATESTO, true);
+            $cache = var_export($tmpDir . '/rector-cache', true);
             file_put_contents($tmpDir . '/rector.php', <<<PHP
 <?php
 
@@ -123,7 +124,8 @@ use Rector\\Config\\RectorConfig;
 
 return RectorConfig::configure()
     ->withPaths([{$paths}])
-    ->withSets([{$set}]);
+    ->withSets([{$set}])
+    ->withCache(cacheDirectory: {$cache});
 PHP);
 
             $this->runRector($rootDir, $tmpDir);
@@ -131,33 +133,37 @@ PHP);
             $support = (string) file_get_contents($tmpDir . '/corpus/ASupport.php');
             $tests = (string) file_get_contents($tmpDir . '/corpus/BTests.php');
 
-            // Each window starts at the marker reason (the marker itself sits above
-            // the class declaration) and ends at the next class, so every assertion
-            // below is provably about the right class.
-            $mixedBlock = self::between($tests, 'trait Tests\Feature\MixedBooting provides tearDown()', 'final class CrossFileTraitTest');
-            $crossFileBlock = self::between($tests, 'trait Tests\Support\CrossFileBooting provides setUp()', 'final class SafeTraitTest');
+            // Markers sit above class declarations and other lanes may add their
+            // own markers between classes, so marker reasons are asserted
+            // file-wide while structural assertions use tight class-body windows.
+            $mixedBlock = self::between($tests, 'final class MixedTraitTest', 'final class CrossFileTraitTest');
+            $crossFileBlock = self::between($tests, 'final class CrossFileTraitTest', 'final class SafeTraitTest');
             $safeBlock = self::between($tests, 'final class SafeTraitTest', "\0");
 
             // The mixed-file trait lifecycle blocks its consumer: preserved class,
-            // residual marker, no rename in the block. The upstream
+            // residual marker, no rename in the class body. The upstream
             // LifecycleMethodToTestoRector still decorates the trait's tearDown with
             // the AfterTest attribute - harmless here: the preserved class stays on
             // the PHPUnit hierarchy where its parent::tearDown() keeps resolving,
             // and the marker demands the manual migration.
-            Assert::string($mixedBlock)->contains('laratesto-residual(code=LIFECYCLE_UNSUPPORTED');
+            Assert::string($tests)->contains('trait Tests\Feature\MixedBooting provides tearDown()');
             Assert::string($mixedBlock)->contains('use MixedBooting;');
+            Assert::string($mixedBlock)->contains('extends \Tests\TestCase');
             Assert::string($mixedBlock)->notContains('tearDownLaravel');
             Assert::string($mixedBlock)->notContains('extends \Laratesto\Testing\LaravelTestCase');
 
             // The cross-file trait (resolved from another processed file) blocks too.
+            Assert::string($tests)->contains('trait Tests\Support\CrossFileBooting provides setUp()');
             Assert::string($crossFileBlock)->contains('use CrossFileBooting;');
-            Assert::string($crossFileBlock)->notContains('setUpLaravel');
+            Assert::string($crossFileBlock)->contains('extends \Tests\TestCase');
+            Assert::string($crossFileBlock)->notContains('#[\Testo\Test]');
 
             // The untouched trait provider file keeps its lifecycle declaration and
             // gains no Laratesto conversion.
             Assert::string($support)->notContains('Laratesto');
             Assert::string($support)->contains('protected function setUp(): void');
             Assert::string($tests)->contains('abstract class TestCase extends \Laratesto\Testing\LaravelTestCase');
+
             // Control: a trait without lifecycle/bootstrap declarations does not
             // block - the safe class converts fully.
             Assert::string($safeBlock)->notContains('laratesto-residual');
@@ -218,7 +224,7 @@ PHP);
         // cannot deadlock the run. Finite timeout so a hung binary fails the test
         // instead of stalling it forever.
         $process = new Process(
-            [PHP_BINARY, $rectorBin, 'process', '--config', $tmpDir . '/rector.php', '--no-progress-bar', '--no-ansi'],
+            [PHP_BINARY, $rectorBin, 'process', '--config', $tmpDir . '/rector.php', '--no-progress-bar', '--no-ansi', '--clear-cache'],
             $rootDir,
             timeout: 300.0,
         );
