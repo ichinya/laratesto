@@ -205,6 +205,16 @@ final class DatabaseConfigurationAnalyzer
         }
 
         if ($uses === [] && $nestedUses === []) {
+            $hidden = $this->hiddenComposedStrategyReason($class, $localClasses);
+
+            if ($hidden !== null) {
+                return new DatabaseConfigurationAnalysis(
+                    sourceTrait: $hidden['trait'],
+                    targetAttribute: self::TRAITS[$hidden['trait']],
+                    unsupportedReason: $hidden['reason'],
+                );
+            }
+
             return new DatabaseConfigurationAnalysis();
         }
 
@@ -405,7 +415,17 @@ final class DatabaseConfigurationAnalyzer
             return $this->unsupported($base, $directTraitReason);
         }
 
+        // A direct use does not make hidden duplicates harmless: the composed
+        // trait's framework use flattens into the class too, so the conversion
+        // would add the attribute on top of machinery that survives it.
+        $hiddenDuplicate = $this->hiddenComposedStrategyReason($class, $localClasses);
+
+        if ($hiddenDuplicate !== null) {
+            return $this->unsupported($base, $hiddenDuplicate['reason']);
+        }
+
         $mergeIntoAncestor = false;
+
         $ancestorReason = $this->ancestorConflictReason(
             $class,
             $localClasses,
@@ -1627,6 +1647,162 @@ final class DatabaseConfigurationAnalyzer
         }
 
         return false;
+    }
+
+    /**
+     * Why a framework database strategy the class itself never `use`s still
+     * requires a manual migration, or null when none is visible.
+     *
+     * PHP flattens a project trait's whole composition tree — its framework
+     * trait uses included — into every consuming class, and the extends chain
+     * flattens the ancestor's composition the same way. A `RefreshDatabase`
+     * use that lives only inside a project trait therefore ran live machinery
+     * for the class before the migration, yet the class carries no trait use
+     * this rule converts: converting the class would drop the machinery
+     * silently, so the strategy must stay visible through a residual instead.
+     * The same scan runs for classes that DO use a framework trait directly,
+     * where a second hidden use is a duplication the conversion cannot remove
+     * (the project trait survives in source and keeps flattening).
+     *
+     * Scanned: the class's project-trait composition tree and, through every
+     * resolvable ancestor, the ancestor's own subtree and composition tree —
+     * any TraitUse naming a framework database trait inside those subtrees
+     * counts, including uses inside nested class-likes. An ancestor that also
+     * carries the migrated attribute for a found strategy is NOT skipped:
+     * attribute presence never proves the project trait was rewritten (no
+     * rule rewrites traits), so the composed strategy still flattens into the
+     * hierarchy and must stay flagged. Only the ancestor's DIRECT framework
+     * trait use stays out of scope here: a strategy inherited that way
+     * survives the ancestor's own conversion as attribute inheritance, and a
+     * duplicate of the class's own direct use is the duplicate machinery's
+     * contract.
+     *
+     * A class whose resolvable ancestors carry ONLY migrated attributes and
+     * whose composed traits name no framework strategy passes untouched: the
+     * scan simply returns null.
+     *
+     * Unresolvable ancestors terminate the walk silently, mirroring the other
+     * hierarchy walks. A composed trait that cannot be resolved fails the scan
+     * closed: its composition is unknown, so a hidden strategy cannot be ruled
+     * out for a class that would otherwise migrate clean.
+     *
+     * @param list<ClassLike> $localClasses
+     * @return array{trait: non-empty-string, reason: non-empty-string}|null
+     */
+    private function hiddenComposedStrategyReason(Class_ $class, array $localClasses): ?array
+    {
+        $own = $this->composedTraitsStrategyReason($class, $localClasses, null);
+
+        if ($own !== null) {
+            return $own;
+        }
+
+        $current = $class->extends === null ? null : $this->resolvedName($class->extends);
+        $seen = [];
+
+        for ($depth = 0; $current !== null && $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
+            if ($current === self::FRAMEWORK_BASE || $current === self::TARGET_BASE || isset($seen[$current])) {
+                break;
+            }
+
+            $seen[$current] = true;
+
+            $ancestor = $this->resolveAncestor($current, $localClasses);
+
+            if (! $ancestor instanceof Class_) {
+                break;
+            }
+
+            // No suppression for an ancestor that also carries the migrated
+            // attribute: attribute presence never proves the project trait was
+            // rewritten (no rule rewrites traits), so the composed strategy
+            // still flattens into the hierarchy and must stay flagged.
+            $inherited = $this->composedTraitsStrategyReason($ancestor, $localClasses, $current);
+
+            if ($inherited !== null) {
+                return $inherited;
+            }
+
+            $current = $ancestor->extends === null ? null : $this->resolvedName($ancestor->extends);
+        }
+
+        return null;
+    }
+
+    /**
+     * The first framework database strategy inside the class-like's composed
+     * project traits, as a fail-closed reason carrying the strategy and the
+     * residual wording, or null. $ancestorScope names the ancestor whose
+     * composition is scanned (null for the converting class itself).
+     *
+     * @param list<ClassLike> $localClasses
+     * @param non-empty-string|null $ancestorScope
+     * @return array{trait: non-empty-string, reason: non-empty-string}|null
+     */
+    private function composedTraitsStrategyReason(
+        Class_ $class,
+        array $localClasses,
+        ?string $ancestorScope,
+    ): ?array {
+        $found = null;
+
+        $unresolvable = $this->eachComposedTrait(
+            $class,
+            $localClasses,
+            function (Trait_ $trait, string $traitName) use (&$found, $ancestorScope): void {
+                if ($found !== null) {
+                    return;
+                }
+
+                $strategy = $this->frameworkStrategyInSubtree($trait);
+
+                if ($strategy === null) {
+                    return;
+                }
+
+                $via = $ancestorScope === null
+                    ? sprintf('framework database strategy %s arrives through project trait %s and is not converted automatically - migrate it manually', $strategy, $traitName)
+                    : sprintf('framework database strategy %s arrives through project trait %s on ancestor %s and is not converted automatically - migrate it manually', $strategy, $traitName, $ancestorScope);
+
+                $found = ['trait' => $strategy, 'reason' => $via];
+            },
+        );
+
+        if ($found !== null) {
+            return $found;
+        }
+
+        if ($unresolvable !== null) {
+            return [
+                'trait' => 'Illuminate\Foundation\Testing\RefreshDatabase',
+                'reason' => sprintf(
+                    'used trait %s could not be resolved, so a hidden database strategy cannot be ruled out - migrate it manually',
+                    $unresolvable,
+                ),
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * The first framework database trait used anywhere in the class-like's own
+     * subtree — direct TraitUse statements and uses inside nested class-likes
+     * alike — or null.
+     */
+    private function frameworkStrategyInSubtree(ClassLike $classLike): ?string
+    {
+        foreach ($this->nodeFinder->findInstanceOf($classLike, TraitUse::class) as $traitUse) {
+            foreach ($traitUse->traits as $trait) {
+                $name = $this->resolvedName($trait);
+
+                if ($name !== null && isset(self::TRAITS[$name])) {
+                    return $name;
+                }
+            }
+        }
+
+        return null;
     }
 
     /** @return list<Attribute> */

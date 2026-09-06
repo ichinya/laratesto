@@ -261,6 +261,7 @@ PHP);
 
         // property_exists() sees the static slot, but `$this->stat` warns and
         // yields null instead of the static value: a static option never reached
+        // the trait machinery through instance reads and the scan may skip it.
         Assert::same("gate=true\nread=NULL", $output);
     }
 

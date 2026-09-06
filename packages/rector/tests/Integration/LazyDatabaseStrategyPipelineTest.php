@@ -77,23 +77,28 @@ final class LazyDatabaseStrategyPipelineTest
 
         $lf = Assert::string($snapshot['LazyLfTest.php']);
 
-        // The gap is visible: the canonical residual marker, attributed to the
-        // detector rule, names the lazy strategy.
+        // The gap is visible through TWO canonical markers now: the composed
+        // hidden-strategy residual from the database rule (LazilyRefreshDatabase
+        // composes RefreshDatabase) and the lazy-strategy note from the
+        // residual detector.
         $lf->contains(
             'laratesto-residual(code=DATABASE_UNSUPPORTED_CONFIGURATION, '
-            . 'rule=Laratesto\Rector\Rules\LaravelResidualDetectionRector, severity=manual)',
+            . 'rule=Laratesto\Rector\Rules\LaravelDatabaseTraitsRector, severity=manual)',
         );
         $lf->contains(
             'Illuminate\Foundation\Testing\LazilyRefreshDatabase trait'
             . ' — the lazy database refresh strategy has no automatic conversion; migrate manually',
         );
 
-        // The source trait stays available for the manual migration...
+        // The source trait stays available for the manual migration, and the
+        // hidden composed strategy blocks the lazy consumer's own conversion:
+        // no attribute and no Test attribute land on it.
         $lf->contains('use LazilyRefreshDatabase;');
+        $lf->notContains('#[\Laratesto\Attribute\RefreshDatabase]');
+        $lf->notContains('#[\Testo\Test]');
 
-        // ...while the rest of the class still migrates.
-        $lf->contains('Laratesto\Testing\LaravelTestCase');
-        $lf->contains('#[\Testo\Test]');
+        // The strategy-free abstract base of the same hierarchy still migrates.
+        $lf->contains('abstract class TestCase extends \Laratesto\Testing\LaravelTestCase');
 
         // The same contract on the CRLF corpus, compared after newline
         // normalization; the corpus itself carried raw CRLF bytes in.
@@ -104,7 +109,6 @@ final class LazyDatabaseStrategyPipelineTest
             . ' — the lazy database refresh strategy has no automatic conversion; migrate manually',
         );
         $crlf->contains('use LazilyRefreshDatabase;');
-        $crlf->contains('Laratesto\Testing\LaravelTestCase');
         $crlf->contains("migrate manually */\nfinal class LazyTest extends TestCase");
 
         $control = Assert::string(self::toLf($snapshot['EagerControlTest.php']));
