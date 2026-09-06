@@ -1125,12 +1125,12 @@ final class HttpCompatibilityAnalyzer
     private function markPendingArtisanExecutionGaps(array &$reasons, Class_ $class, array $artisanVariables): void
     {
         foreach ($class->getMethods() as $method) {
-            $this->inspectPendingStatements($reasons, $method->stmts ?? [], $artisanVariables, false);
+            $this->inspectPendingStatements($reasons, $method->stmts ?? [], $artisanVariables, false, $this->escapingPendingVariables($method));
         }
     }
 
     /** @param list<Node\Stmt> $statements */
-    private function inspectPendingStatements(array &$reasons, array $statements, array $variables, bool $hasContinuation): void
+    private function inspectPendingStatements(array &$reasons, array $statements, array $variables, bool $hasContinuation, array $escapingVariables = []): void
     {
         foreach ($statements as $index => $statement) {
             $following = array_slice($statements, $index + 1);
@@ -1140,7 +1140,7 @@ final class HttpCompatibilityAnalyzer
                 && is_string($statement->expr->var->name)
                 && $this->isArtisanProducingExpression($statement->expr->expr, $variables)) {
                 $name = $statement->expr->var->name;
-                $safe = ! $hasContinuation;
+                $safe = ! $hasContinuation && ! in_array($name, $escapingVariables, true);
                 foreach ($following as $next) {
                     $safe = $safe && $next instanceof Node\Stmt\Expression
                         && $this->isPendingExpectation($next->expr, $name);
@@ -1150,17 +1150,17 @@ final class HttpCompatibilityAnalyzer
                 }
                 // The direct assignment was just classified. Inspect its RHS for
                 // independent closure scopes without reclassifying the assignment.
-                $this->inspectPendingNode($reasons, $statement->expr->expr, $variables, true);
+                $this->inspectPendingNode($reasons, $statement->expr->expr, $variables, true, $escapingVariables);
                 continue;
             }
-            $this->inspectPendingNode($reasons, $statement, $variables, $hasContinuation || $following !== []);
+            $this->inspectPendingNode($reasons, $statement, $variables, $hasContinuation || $following !== [], $escapingVariables);
         }
     }
 
-    private function inspectPendingNode(array &$reasons, Node $node, array $variables, bool $hasContinuation): void
+    private function inspectPendingNode(array &$reasons, Node $node, array $variables, bool $hasContinuation, array $escapingVariables = []): void
     {
         if ($node instanceof Expr\Closure) {
-            $this->inspectPendingStatements($reasons, $node->stmts, $variables, false);
+            $this->inspectPendingStatements($reasons, $node->stmts, $variables, false, $this->escapingPendingVariables($node));
             return;
         }
         if ($node instanceof Node\Stmt\ClassLike) {
@@ -1183,14 +1183,81 @@ final class HttpCompatibilityAnalyzer
         foreach ($node->getSubNodeNames() as $key) {
             $child = $node->$key;
             if ($key === 'stmts' && is_array($child)) {
-                $this->inspectPendingStatements($reasons, $child, $variables, $hasContinuation);
+                $this->inspectPendingStatements($reasons, $child, $variables, $hasContinuation, $escapingVariables);
             } elseif ($child instanceof Node) {
-                $this->inspectPendingNode($reasons, $child, $variables, $hasContinuation);
+                $this->inspectPendingNode($reasons, $child, $variables, $hasContinuation, $escapingVariables);
             } elseif (is_array($child)) {
                 foreach ($child as $item) {
                     if ($item instanceof Node) {
-                        $this->inspectPendingNode($reasons, $item, $variables, $hasContinuation);
+                        $this->inspectPendingNode($reasons, $item, $variables, $hasContinuation, $escapingVariables);
                     }
+                }
+            }
+        }
+    }
+
+    /** @return list<string> */
+    private function escapingPendingVariables(Node\Stmt\ClassMethod|Expr\Closure $function): array
+    {
+        $escaping = [];
+        foreach ($function->params as $parameter) {
+            if ($parameter->byRef && $parameter->var instanceof Variable && is_string($parameter->var->name)) {
+                $escaping[] = $parameter->var->name;
+            }
+        }
+        if ($function instanceof Expr\Closure) {
+            foreach ($function->uses as $use) {
+                if ($use->byRef && is_string($use->var->name)) {
+                    $escaping[] = $use->var->name;
+                }
+            }
+        }
+        $aliases = [];
+        foreach ($function->stmts ?? [] as $statement) {
+            $this->collectPendingReferences($statement, $escaping, $aliases);
+        }
+        do {
+            $count = count($escaping);
+            foreach ($aliases as [$left, $right]) {
+                if (in_array($left, $escaping, true) || in_array($right, $escaping, true)) {
+                    $escaping = array_values(array_unique([...$escaping, $left, $right]));
+                }
+            }
+        } while (count($escaping) !== $count);
+
+        return array_values(array_unique($escaping));
+    }
+
+    private function collectPendingReferences(Node $node, array &$escaping, array &$aliases): void
+    {
+        // A nested function has separate local bindings; inspect it when entering
+        // that scope, not as if its variable names belonged to the outer method.
+        if ($node instanceof Node\FunctionLike || $node instanceof Node\Stmt\ClassLike) {
+            return;
+        }
+        if ($node instanceof Node\Stmt\Global_ || $node instanceof Node\Stmt\Static_) {
+            foreach ($node->vars as $slot) {
+                $variable = $slot instanceof Node\StaticVar ? $slot->var : $slot;
+                if ($variable instanceof Variable && is_string($variable->name)) {
+                    $escaping[] = $variable->name;
+                }
+            }
+        }
+        if ($node instanceof Expr\AssignRef) {
+            $left = $node->var instanceof Variable && is_string($node->var->name) ? $node->var->name : null;
+            $right = $node->expr instanceof Variable && is_string($node->expr->name) ? $node->expr->name : null;
+            if ($left !== null && $right !== null) {
+                $aliases[] = [$left, $right];
+            } elseif ($left !== null || $right !== null) {
+                // A reference to a property/offset cannot prove local lifetime.
+                $escaping[] = $left ?? $right;
+            }
+        }
+        foreach ($node->getSubNodeNames() as $key) {
+            $children = $node->$key;
+            foreach (is_array($children) ? $children : [$children] as $child) {
+                if ($child instanceof Node) {
+                    $this->collectPendingReferences($child, $escaping, $aliases);
                 }
             }
         }

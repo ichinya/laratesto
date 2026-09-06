@@ -41,6 +41,14 @@ final class HttpPendingArtisanPipelineTest
             'ForLoop' => 'for ($i = 0; $i < 1; $i++) { ' . $gap . ' }',
             'Closure' => '$callback = function (): void { ' . $gap . ' }; $callback();',
             'DeepUse' => '$pending = $this->artisan("cache:clear"); if (false) { $pending->assertExitCode(0); } $observed = 1; $pending->assertExitCode(0);',
+            'CaptureAlias' => '$outside = null; $callback = function () use (&$outside): void { $pending =& $outside; ' . $immediate . ' }; $callback(); $observed = 1;',
+            'CaptureAliasChain' => '$outside = null; $callback = function () use (&$outside): void { $bridge =& $outside; $pending =& $bridge; ' . $immediate . ' }; $callback(); $observed = 1;',
+            'StaticSlot' => 'static $pending; ' . $immediate,
+            'GlobalSlot' => 'global $pending; ' . $immediate,
+            'LocalReference' => '$pending = null; $alias =& $pending; ' . $immediate,
+            'ClosureReference' => '$pending = null; $callback = function () use (&$pending): void { ' . $immediate . ' }; $callback(); $observed = 1;',
+            'ReferenceParameter' => $immediate,
+            'UnrelatedReference' => '$outside = null; $callback = function () use (&$outside): void { ' . $immediate . ' }; $callback();',
             'CapturedUse' => '$pending = $this->artisan("cache:clear"); $callback = function () use ($pending): void { $pending->assertExitCode(0); }; $observed = 1;',
             'ArrowUse' => '$pending = $this->artisan("cache:clear"); $callback = fn () => $pending->assertExitCode(0); $observed = 1;',
             'ConditionalUse' => '$pending = $this->artisan("cache:clear"); false && $pending->assertExitCode(0); $observed = 1;',
@@ -55,11 +63,11 @@ final class HttpPendingArtisanPipelineTest
             'TerminalBranch' => 'if (true) { ' . $immediate . ' }',
             'TerminalClosure' => '$callback = function (): void { ' . $immediate . ' }; $callback();',
         ];
-        $supported = ['Immediate', 'Inline', 'TerminalBranch', 'TerminalClosure'];
+        $supported = ['Immediate', 'Inline', 'TerminalBranch', 'TerminalClosure', 'UnrelatedReference', 'LocalReference'];
         try {
             foreach ($cases as $name => $body) {
                 \file_put_contents($tmpDir . '/corpus/' . $name . '.php', '<?php namespace HttpPending; final class '
-                    . $name . ' extends \\Illuminate\\Foundation\\Testing\\TestCase { public function testExample(): void { ' . $body . ' } }');
+                    . $name . ' extends \\Illuminate\\Foundation\\Testing\\TestCase { public function testExample(' . ($name === 'ReferenceParameter' ? '&$pending' : '') . '): void { ' . $body . ' } }');
             }
             foreach (\glob($tmpDir . '/corpus/*.php') ?: [] as $file) {
                 $this->assertValidPhp($file);
