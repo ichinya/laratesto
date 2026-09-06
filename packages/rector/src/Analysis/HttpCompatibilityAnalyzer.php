@@ -17,6 +17,7 @@ use PhpParser\Node\Name;
 use PhpParser\Node\Scalar;
 use PhpParser\Node\Stmt\Class_;
 use PHPStan\Analyser\Scope;
+use PHPStan\Type\ObjectType;
 use Rector\NodeNameResolver\NodeNameResolver;
 use Rector\NodeTypeResolver\Node\AttributeKey;
 use Rector\PhpParser\AstResolver;
@@ -283,6 +284,7 @@ final class HttpCompatibilityAnalyzer
         $artisanVariables = $this->artisanVariables($class);
         $hasResponseType = $this->classContainsName($class, self::TEST_RESPONSE);
         $declaredMethods = array_map(static fn(Node\Stmt\ClassMethod $method): string => $method->name->toString(), $class->getMethods());
+        $this->validateResponseCreation($reasons, $class);
 
         /** @var list<MethodCall> $calls */
         $calls = $this->nodeFinder->findInstanceOf($class->stmts, MethodCall::class);
@@ -695,6 +697,47 @@ final class HttpCompatibilityAnalyzer
         }
 
         return null;
+    }
+
+    /** @param array<non-empty-string, list<non-empty-string>> $reasons */
+    private function validateResponseCreation(array &$reasons, Class_ $class): void
+    {
+        foreach ($this->nodeFinder->findInstanceOf($class->stmts, StaticCall::class) as $call) {
+            if (! $this->nodeNameResolver->isName($call->class, self::TEST_RESPONSE)) {
+                continue;
+            }
+
+            $this->addReason($reasons, 'RESPONSE_UNSUPPORTED_API', sprintf(
+                'TestResponse::%s() has no Laratesto static equivalent; preserve the Laravel response type and migrate manually',
+                $this->nodeNameResolver->getName($call->name) ?? '<dynamic>',
+            ));
+        }
+
+        foreach ($this->nodeFinder->findInstanceOf($class->stmts, Expr\New_::class) as $construction) {
+            if (! $this->nodeNameResolver->isName($construction->class, self::TEST_RESPONSE)) {
+                continue;
+            }
+
+            $argument = $construction->args[0] ?? null;
+            if (count($construction->args) === 1
+                && $argument instanceof Arg
+                && ! $argument->unpack
+                && ($argument->name === null || $argument->name->toString() === 'response')
+                && $this->isSymfonyResponse($argument->value)) {
+                continue;
+            }
+
+            $this->addReason($reasons, 'RESPONSE_UNSUPPORTED_API',
+                'new TestResponse() requires exactly one proven Symfony Response argument for conversion; preserve the Laravel response type and migrate manually');
+        }
+    }
+
+    private function isSymfonyResponse(Expr $expression): bool
+    {
+        $scope = $expression->getAttribute(AttributeKey::SCOPE);
+        return $scope instanceof Scope
+            && (new ObjectType('Symfony\\Component\\HttpFoundation\\Response'))
+                ->isSuperTypeOf($scope->getNativeType($expression))->yes();
     }
 
     private function matchesShape(Expr $expression, string $shape): bool
