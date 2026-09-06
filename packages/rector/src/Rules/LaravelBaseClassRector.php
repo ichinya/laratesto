@@ -18,13 +18,16 @@ use PhpParser\Node\Expr\MethodCall;
 use PhpParser\Node\Expr\PropertyFetch;
 use PhpParser\Node\Expr\StaticCall;
 use PhpParser\Node\Identifier;
+use PhpParser\Node\Name;
 use PhpParser\Node\Name\FullyQualified;
 use PhpParser\Node\Stmt;
 use PhpParser\Node\Stmt\ClassLike;
 use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\ClassMethod;
 use PhpParser\Node\Stmt\Expression;
+use PhpParser\Node\Stmt\Trait_;
 use PhpParser\Node\Stmt\TraitUse;
+use PhpParser\Node\Stmt\TraitUseAdaptation;
 use PhpParser\NodeFinder;
 use PHPStan\Analyser\Scope;
 use PHPStan\PhpDocParser\Ast\PhpDoc\GenericTagValueNode;
@@ -102,6 +105,21 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         'resolveApplication',
         'afterApplicationCreated',
         'beforeApplicationDestroyed',
+    ];
+
+    /**
+     * strtolower(UNSUPPORTED_BOOTSTRAP_METHODS): PHP method names are
+     * case-insensitive, so the comparison surface is normalized once here.
+     */
+    private const UNSUPPORTED_BOOTSTRAP_METHODS_LOWER = [
+        'createapplication',
+        'getpackageproviders',
+        'getpackagealiases',
+        'getenvironmentsetup',
+        'defineenvironment',
+        'resolveapplication',
+        'afterapplicationcreated',
+        'beforeapplicationdestroyed',
     ];
 
     private BaseClassConfiguration $configuration;
@@ -420,12 +438,180 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         foreach ($class->getMethods() as $method) {
             $name = $this->getName($method->name);
 
-            if ($name !== null && in_array($name, self::UNSUPPORTED_BOOTSTRAP_METHODS, true)) {
+            // PHP method names are case-insensitive: CreateApplication() provides
+            // createApplication() all the same.
+            if ($name !== null && in_array(strtolower($name), self::UNSUPPORTED_BOOTSTRAP_METHODS_LOWER, true)) {
                 $failures[] = sprintf('custom bootstrap method %s() is not called by the Laratesto target', $name);
             }
         }
 
-        return $failures;
+        $traitFailures = $this->traitProvidedLifecycleFailures($class);
+
+        return array_values(array_unique([...$failures, ...$traitFailures['bootstrap']]));
+    }
+
+    /**
+     * Lifecycle/bootstrap overrides provided by used traits are invisible to
+     * Class_::getMethods(), yet they land in the class's method surface all the
+     * same: after conversion the trait's `parent::setUp()` would target a base
+     * that has no `setUp()`. Every used trait is resolved (same file, other
+     * processed files, vendor) and its declared method names are checked,
+     * recursively through nested trait uses; a trait that cannot be resolved
+     * fails closed.
+     *
+     * @return array{lifecycle: list<non-empty-string>, bootstrap: list<non-empty-string>}
+     */
+    private function traitProvidedLifecycleFailures(Class_ $class): array
+    {
+        $lifecycle = [];
+        $bootstrap = [];
+        $seen = [];
+
+        foreach ($class->stmts as $stmt) {
+            if (! $stmt instanceof TraitUse) {
+                continue;
+            }
+
+            foreach ($stmt->traits as $traitName) {
+                $this->collectTraitLifecycleFailures($traitName, $seen, $lifecycle, $bootstrap, 0);
+            }
+        }
+
+        return ['lifecycle' => $lifecycle, 'bootstrap' => $bootstrap];
+    }
+
+    /**
+     * @param array<string, true> $seen
+     * @param list<non-empty-string> $lifecycle
+     * @param list<non-empty-string> $bootstrap
+     */
+    private function collectTraitLifecycleFailures(
+        Name $traitName,
+        array &$seen,
+        array &$lifecycle,
+        array &$bootstrap,
+        int $depth,
+    ): void {
+        if ($depth > self::MAX_CHAIN_DEPTH) {
+            $lifecycle[] = sprintf(
+                'the trait use chain is deeper than %d traits and cannot be classified safely',
+                self::MAX_CHAIN_DEPTH,
+            );
+
+            return;
+        }
+
+        $traitClass = $this->getName($traitName);
+
+        if ($traitClass === null) {
+            $lifecycle[] = 'a used trait name cannot be resolved, so a lifecycle or bootstrap override it provides cannot be ruled out';
+
+            return;
+        }
+
+        if (isset($seen[$traitClass])) {
+            return;
+        }
+
+        $seen[$traitClass] = true;
+
+        $trait = $this->resolveTraitNode($traitClass);
+
+        if (! $trait instanceof Trait_) {
+            $lifecycle[] = sprintf(
+                'used trait %s cannot be resolved, so a lifecycle or bootstrap override it provides cannot be ruled out',
+                $traitClass,
+            );
+
+            return;
+        }
+
+        foreach ($trait->getMethods() as $method) {
+            $methodName = $this->getName($method->name);
+
+            if ($methodName === null) {
+                continue;
+            }
+
+            $lowerName = strtolower($methodName);
+
+            if ($lowerName === 'setup' || $lowerName === 'teardown') {
+                $lifecycle[] = sprintf(
+                    'trait %s provides %s() which the conversion cannot rename safely',
+                    $traitClass,
+                    $methodName,
+                );
+            }
+
+            if (in_array($lowerName, self::UNSUPPORTED_BOOTSTRAP_METHODS_LOWER, true)) {
+                $bootstrap[] = sprintf(
+                    'trait %s provides custom bootstrap method %s() which is not called by the Laratesto target',
+                    $traitClass,
+                    $methodName,
+                );
+            }
+        }
+
+        // Nested trait uses are followed so a lifecycle override a layer deep is
+        // still caught. Adaptations inside a trait are not gated by the class-level
+        // gate above - and an alias can CREATE a lifecycle/bootstrap name that no
+        // declared method carries (`silent as tearDown`, `boot as createApplication`),
+        // so each alias target name is checked like a declaration.
+        foreach ($trait->stmts as $stmt) {
+            if (! $stmt instanceof TraitUse) {
+                continue;
+            }
+
+            foreach ($stmt->adaptations as $adaptation) {
+                if (! $adaptation instanceof TraitUseAdaptation\Alias
+                    || ! $adaptation->newName instanceof Identifier) {
+                    continue;
+                }
+
+                $newName = $adaptation->newName->toString();
+                $lowerNewName = strtolower($newName);
+
+                if ($lowerNewName === 'setup' || $lowerNewName === 'teardown') {
+                    $lifecycle[] = sprintf(
+                        'trait %s adapts a used trait method to %s(), which the conversion cannot rename safely',
+                        $traitClass,
+                        $newName,
+                    );
+                }
+
+                if (in_array($lowerNewName, self::UNSUPPORTED_BOOTSTRAP_METHODS_LOWER, true)) {
+                    $bootstrap[] = sprintf(
+                        'trait %s adapts a used trait method to custom bootstrap method %s() which is not called by the Laratesto target',
+                        $traitClass,
+                        $newName,
+                    );
+                }
+            }
+
+            foreach ($stmt->traits as $nestedName) {
+                $this->collectTraitLifecycleFailures($nestedName, $seen, $lifecycle, $bootstrap, $depth + 1);
+            }
+        }
+    }
+
+    private function resolveTraitNode(string $traitClass): ?Trait_
+    {
+        $local = (new NodeFinder())->findFirst(
+            $this->getFile()->getNewStmts(),
+            fn(Node $node): bool => $node instanceof Trait_ && $this->isName($node, $traitClass),
+        );
+
+        if ($local instanceof Trait_) {
+            return $local;
+        }
+
+        try {
+            $resolved = $this->astResolver->resolveClassFromName($traitClass);
+        } catch (\Throwable) {
+            $resolved = null;
+        }
+
+        return $resolved instanceof Trait_ ? $resolved : null;
     }
 
     /**
@@ -579,7 +765,9 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             }
         }
 
-        return array_values(array_unique($failures));
+        $traitFailures = $this->traitProvidedLifecycleFailures($class);
+
+        return array_values(array_unique([...$failures, ...$traitFailures['lifecycle']]));
     }
 
     private function hasNestedOrMismatchedParentLifecycleCall(ClassMethod $method, string $expected): bool
