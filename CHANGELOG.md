@@ -8,6 +8,67 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `LaravelResponse::assertHeader()` compares expected values case-insensitively
+  again, matching Laravel while still rejecting differences beyond case.
+- Fluent `assertJson()` callbacks support `Conditionable` and `Macroable`, with
+  assertion failures preserved.
+- Nested database transaction scopes restore each connection's previous
+  transaction manager as well as the application binding, including on cleanup
+  failure.
+- Rector migration safety and report handling:
+  - guarded apply refuses untracked or ignored PHP files in the processed scope
+    as well as tracked modifications; `--allow-dirty` explicitly bypasses the
+    Git guard and requires an independent backup;
+  - unreadable source files and generated-config failures produce a friendly
+    exit `1` and leave the previous report untouched;
+  - dry-run reconstruction handles zero-count insertion anchors and empty
+    files, and rejects hunks beyond EOF without PHP warnings;
+  - residual scanning recognizes only whole canonical PHP marker comments,
+    excluding quoted examples in strings, heredocs and surrounding comment prose;
+  - trait-provided lifecycle/bootstrap behavior and bases excluded by Rector
+    file/glob or base-rule skips block class conversion with residuals;
+  - unsupported `parent::` calls receive `HTTP_UNSUPPORTED_SIGNATURE`, including
+    assertions left by the upstream rules and lifecycle calls outside the exact
+    statement shape the base rule rewrites;
+  - dynamic method names fail the HTTP preflight before signature lookup,
+    including `$this`, `self::`, `static::` and nullsafe calls;
+  - `TestResponse` static factories and unknown/nullable or multi-argument
+    construction preserve their source type with `RESPONSE_UNSUPPORTED_API`;
+    construction with one native-type-proven Symfony `Response` still converts,
+    including inferred variables, typed parameters and named `response:` values;
+  - retained Pending Artisan commands receive a residual across later statements,
+    loop iterations and catch/finally; the check accounts for Laravel's deferred
+    execution even after an assertion and preserves immediate chains and terminal
+    assignments with literal expectations when commands do not escape through
+    references or static/global storage;
+  - Laravel-like method names on proven unrelated native DTO receivers no longer
+    produce false residuals; unknown, broad-object and response-capable union
+    receivers retain conservative markers;
+  - direct application-property writes, references, `isset`/`unset`,
+    destructuring/foreach targets and arguments passed to unresolved or
+    by-reference signatures preserve the source class with a residual, while
+    ordinary reads and proven by-value calls remain convertible;
+  - framework database strategies hidden in project-trait composition stay
+    visible and residual-marked, including across files and the lazy strategy;
+  - own/inherited Laravel `Seed`/`Seeder` attributes lift only with a positively
+    identified installed Laravel 13 framework, preserving precedence and literal
+    class names across files; Laravel 12/unknown contexts retain source metadata
+    with a database residual, as do unsupported metadata shapes;
+  - live constructor-promoted database options on the class, project ancestors and
+    used traits require manual migration, including when an inherited constructor
+    can overwrite a child's literal redeclaration;
+  - database option reads through method-local `$this` aliases now participate in
+    the class/ancestor/composed-trait reader checks, including chained/reference
+    assignments, closures and conditional/coalescing expressions; unrelated DTO
+    and unshadowed private-slot controls remain supported;
+  - the truncation contract's inert connection double accepts Laravel 13's
+    optional `fetchUsing` argument on both `select()` and `cursor()`, while
+    remaining compatible with Laravel 12.
+- The ancestor-static database option probe is now discovered and checks the
+  actual PHP read result instead of remaining an unexecuted contract.
+- Migration documentation scopes database hook blockers to the selected
+  strategy and explains report preservation, partial apply, rollback limits and
+  per-connection migration/seeding for hand-written truncation attributes.
 - Rector migration of Laravel PHPUnit test suites (PR #8 fix plan):
   - the project base `Tests\TestCase` is converted exactly once — it keeps its
     custom helpers and setup, and every descendant keeps extending it while
@@ -66,8 +127,9 @@ versions follow [Semantic Versioning](https://semver.org/).
     answers identically before and after the lift); statically named instance
     reads count, dynamic property names fail closed, and a same-value inherited
     literal still receives a stable residual instead of a value-proof engine;
-  - residual markers reconcile: changed constructs refresh their reason,
-    resolved constructs lose the marker, unchanged runs stay byte-identical;
+  - residual markers reconcile: changed constructs refresh their reason and
+    unchanged runs stay byte-identical; remove resolved markers together with
+    the manual fix, because markers left in source remain reportable;
   - a file-level response-gate block no longer strands an otherwise convertible
     class: when an unsafe sibling blocks the file-wide `TestResponse` swap, the
     safe class is marked with a `RESPONSE_UNSUPPORTED_API` residual naming the
@@ -156,8 +218,12 @@ versions follow [Semantic Versioning](https://semver.org/).
 - End-to-end migration gate: the parity fixture corpus is migrated by the real
   Rector binary, asserted marker-by-marker, verified byte-identical on a second
   apply and executed green under a real `testo run`.
-- CI workflow: Linux + Windows, PHP 8.2 + 8.3 + 8.4, composer validation, whitespace
-  check and the full test suite including the migration gate.
+- CI workflow: locked Laravel 12 on Linux + Windows with PHP 8.2/8.3/8.4,
+  plus separately resolved Laravel 13 on both systems with PHP 8.3/8.4;
+  Composer validation, an installed-framework/platform assertion, whitespace
+  check and the full test suite including the migration gate. Laravel 13 jobs
+  retain their installed vendor after restoring the committed Composer manifests
+  for source-contract checks; the root PHP 8.2 compatibility lock stays unchanged.
 
 ### Changed
 

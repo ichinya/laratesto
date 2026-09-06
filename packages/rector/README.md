@@ -22,14 +22,16 @@ return static function (RectorConfig $rectorConfig): void {
 };
 ```
 
-Review first and apply second. Keep rollback scoped to the migration paths:
+Commit the migration sources first, review the dry-run, then apply. Raw Rector
+does not run the Artisan Git guards or create a backup. Keep rollback scoped to
+the migration paths:
 
 ```bash
 vendor/bin/rector process tests --dry-run   # native diff includes residual markers
 git diff -- tests                           # review only the migration scope
 vendor/bin/rector process tests             # apply in-place
 vendor/bin/rector process tests             # second run must be a no-op
-# restore only after review, if required: git restore -- tests
+# restore committed sources after review, if required: git restore --source=HEAD -- tests
 ```
 
 Raw Rector does not create a residual report file. It exposes
@@ -60,33 +62,68 @@ removed, empty or malformed names are rejected), `--target-mode=base_class|trait
 or safety failure; `2` — success, manual residuals present. Rector's native dry-run
 `2` ("changes found") is normalized as success.
 
-**Report side effect**: a dry-run never touches processed sources, but always
+**Report side effect**: a successful dry-run never touches processed sources, but
 atomically replaces `laratesto-residuals.json` (schema 1: `schema_version`, `mode`,
 `paths`, `residuals[]` with `code`, `severity`, `rule`, `file`, `line`, `reason`;
 stable sort by file/line/code/rule, no timestamp — identical runs produce identical
-bytes). Add it to `.gitignore` if you do not want it committed.
+bytes). Only whole canonical PHP marker comments count, so quoted marker examples
+in strings or comment prose do not produce residuals. Configuration, Git, Rector,
+JSON, source-read and report-write failures return `1` and preserve any previous
+report. A run with manual residuals still writes its report and returns `2`.
+Add the report to `.gitignore` if you do not want it committed.
 
-**Safety**: `--apply` refuses modified (non-untracked) processed paths and non-Git
-environments; `--allow-dirty` overrides this with an explicit warning and no promised
-rollback. Rollback is always scoped to the processed paths
-(`git restore --source=HEAD -- tests`); do not use broad destructive commands
-(`git checkout -- .`, reset, stash drops) for this.
+**Safety**: `--apply` refuses non-Git environments, staged or unstaged changes in
+processed paths, and untracked or ignored PHP files inside those paths. Commit
+the source files first. Untracked/ignored non-PHP files and untracked/ignored
+files outside the scope do not block it. `--allow-dirty` bypasses the Git checks
+with an explicit warning; back up the originals yourself before using it.
+No automatic rollback runs, and a failed apply can leave partial source edits
+even when the previous report is preserved. After review, restore only the
+processed paths (`git restore --source=HEAD -- tests`, substituting your paths).
+This restores committed sources; it cannot recover local edits or files absent
+from HEAD. Avoid broad destructive commands for rollback.
 
 ## What is converted
 
 | Area | Automatic (AUTO) | Left for manual follow-up (RESIDUAL) |
 | --- | --- | --- |
-| Test class | `Tests\TestCase` / `Illuminate\Foundation\Testing\TestCase` → `LaravelTestCase`; `setUp/tearDown` → `setUpLaravel/tearDownLaravel` | unresolved/custom parents, parameterized or static lifecycle (`CLASS_UNSAFE_HIERARCHY`, `LIFECYCLE_UNSUPPORTED`) |
-| Database | trait → attribute (`RefreshDatabase`, `DatabaseTransactions`, `DatabaseMigrations`, `DatabaseTruncation`) with literal options | hooks, dynamic options, multiple traits/adaptations (`DATABASE_UNSUPPORTED_CONFIGURATION`); the lazy `LazilyRefreshDatabase` strategy is never converted — the trait use stays and needs manual migration |
+| Test class | `Tests\TestCase` / `Illuminate\Foundation\Testing\TestCase` → `LaravelTestCase`; `setUp/tearDown` → `setUpLaravel/tearDownLaravel` | unresolved/custom or skipped parents, parameterized/static or trait-provided lifecycle/bootstrap (`CLASS_UNSAFE_HIERARCHY`, `LIFECYCLE_UNSUPPORTED`) |
+| Database | trait → attribute (`RefreshDatabase`, `DatabaseTransactions`, `DatabaseMigrations`, `DatabaseTruncation`) with literal options | overrides of hooks live for the selected strategy, dynamic options, strategies hidden inside project traits, multiple traits/adaptations (`DATABASE_UNSUPPORTED_CONFIGURATION`); the lazy `LazilyRefreshDatabase` strategy is never converted — the trait use stays and needs manual migration |
 | HTTP / responses | common request, header, session, cookie, database and response assertions keep working unchanged | unknown helpers/signatures, unsupported response API (`HTTP_UNSUPPORTED_SIGNATURE`, `RESPONSE_UNSUPPORTED_API`) |
 | Fakes | — | `Mail/Queue/Bus/Event/Notification/Storage/Http::fake()` (`LARAVEL_FAKE_UNSUPPORTED`) |
 | Outside a convertible class | — | Laravel constructs in classes whose base does not resolve (`LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY`) |
-| Artisan chains | `assertExitCode`, `expectsOutput`, … | interactive `expectsQuestion`/choice/search forms (`ARTISAN_INTERACTION_UNSUPPORTED`) |
+| Artisan chains | supported immediate chains or terminal assignments followed only by literal expectations (`assertExitCode`, `expectsOutput`, …) | interactive forms and commands retained across later statements, loop iterations or catch/finally (`ARTISAN_INTERACTION_UNSUPPORTED`) |
 
-Anything not listed defaults to RESIDUAL — the marker
+Recognized unsupported constructs receive a RESIDUAL — the marker
 `/* laratesto-residual(code=…, rule=…, severity=…): reason */` stays next to the
 untouched construct and is reported by the Artisan table/JSON. A resolved residual is
-deleted together with its marker by hand.
+deleted together with its marker by hand. The analysis is bounded to supported
+syntax patterns; an empty report does not prove complete behavioral equivalence.
+Review the full diff and run the migrated tests.
+Residual-marked classes may retain their original PHPUnit parent or database
+strategy trait. Finish their manual migration before treating them as executable
+Laratesto tests.
+
+Response construction converts only when `new TestResponse(...)` has exactly one
+proven non-null Symfony `Response` value (positional or named `response:`),
+including inferred variables and typed parameters. Static factories such as
+`TestResponse::fromBaseResponse()`, unknown/nullable values and extra arguments
+remain on the source type with `RESPONSE_UNSUPPORTED_API`; they can also block a
+sibling's file-wide response type swap. Direct `$this->app` writes and references
+remain on the source class with `HTTP_UNSUPPORTED_SIGNATURE`, including calls to
+resolved by-reference parameters. Unresolved call signatures also receive a
+residual because by-value passing cannot be proven. Ordinary app reads, member
+accesses and calls with proven by-value parameters remain convertible.
+
+Methods with Laravel-like names on a provably unrelated native DTO type remain
+unmarked. Unknown receivers, broad `object` types and unions that may contain a
+Laravel response still receive conservative residuals.
+
+Laravel's retained Pending Artisan commands execute on release, even after an
+`assertExitCode()` call; Laratesto executes them eagerly. Supported terminal cases
+(including branches and independent closures) must keep the command local,
+without escaping through references or static/global storage. Retention across
+continuing control flow requires manual migration.
 
 Upstream `PHPUNIT_TO_TESTO` covers generic PHPUnit constructs as part of the same
 set: assertions, data providers, group/coverage metadata and similar are converted
@@ -114,7 +151,7 @@ $rectorConfig->ruleWithConfiguration(LaravelBaseClassRector::class, [
 2. Laravel-specific rules for test-class/lifecycle conversion, database strategies,
    HTTP/TestResponse compatibility classification, and residual markers.
 
-Unsupported constructions stay semantically untouched and receive
+Laravel constructs classified as unsupported are preserved with
 `laratesto-residual` markers for manual follow-up.
 
 ## Compatibility baseline
@@ -128,12 +165,39 @@ against the candidate Rector version.
 
 The Laratesto runtime these rules migrate to supports PHP `>=8.2`,
 Laravel `^12.0 || ^13.0` and Testo `^0.10.42`. This package declares no Composer
-dependency on the runtime and only suggests it: the rules rewrite database traits
-into the multi-connection attributes (`connections`, `tables`, `exceptTables` on
+dependency on the runtime and only suggests it. Laravel 12 supports PHP 8.2;
+Laravel 13 requires PHP 8.3 or newer. CI tests locked Laravel 12 on PHP 8.2/8.3/8.4
+and separately resolved Laravel 13 on PHP 8.3/8.4, on Linux and Windows, asserting
+the actual installed framework major before running the suite.
+
+The rules rewrite database traits into the multi-connection attributes
+(`connections`, `tables`, `exceptTables` on
 `#[DatabaseTruncation]`; `connections` on `#[RefreshDatabase]`), which the released
 runtime `0.6.9` does not ship. Install `ichinya/laratesto` `dev-main` — or the first
 release that includes those attributes — before running migrated tests; against
 `0.6.9` the generated code cannot run.
+
+Own and inherited Laravel `Seed`/`Seeder` attributes lift only with a positively
+identified installed Laravel 13 framework: inherited `Seed` enables seeding before
+property fallback, and the nearest `Seeder` wins unless the class supplies its
+own. Literal seeder class names are rebuilt for the destination file; duplicate
+declarations and unsupported argument shapes receive a database residual.
+Laravel 12 ignores these attributes, so on Laravel 12 or an unknown framework
+version the relevant metadata stays in source with
+`DATABASE_UNSUPPORTED_CONFIGURATION` for manual migration.
+
+Live constructor-promoted database options on the class, project ancestors or used
+project traits remain residual-marked. A child literal redeclaration does not
+make an inherited promoted option safe to lift: the inherited constructor can
+still overwrite it. Restructure that initialization manually before replacing
+the source configuration with attributes.
+
+Reads of database options through method-local `$this` aliases also block the
+lift, including chained/reference assignments and possible aliases in closures,
+conditionals or coalescing expressions. The check covers the class, project
+ancestors and composed traits; a later assignment does not erase a possible
+alias. Unrelated DTO reads and ancestor readers of their own unshadowed private
+slot do not independently block the lift.
 
 Note that a `$connectionsToTransact` selection of a single `null` entry — the
 provably default-only shape — converts to the bare `#[RefreshDatabase]`
