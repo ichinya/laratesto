@@ -269,6 +269,13 @@ final class DatabaseConfigurationAnalyzer
         $options = [];
         $properties = [];
 
+        foreach ($this->promotedProperties($class) as $parameter) {
+            $name = $parameter->var->name;
+            if (is_string($name) && isset(self::PROPERTY_OPTIONS[$sourceTrait][$name])) {
+                return $this->unsupported($base, sprintf('database option $%s is declared as a promoted constructor property and requires manual migration', $name));
+            }
+        }
+
         foreach (self::PROPERTY_OPTIONS[$sourceTrait] as $propertyName => $argumentName) {
             $matches = array_values(array_filter(
                 $class->getProperties(),
@@ -917,6 +924,14 @@ final class DatabaseConfigurationAnalyzer
         array $optionProperties,
         array $shadowedOptions,
     ): ?string {
+        foreach ($this->promotedProperties($ancestor) as $parameter) {
+            $name = $parameter->var->name;
+            if (($parameter->flags & \PhpParser\Modifiers::PRIVATE) === 0
+                && is_string($name) && isset($optionProperties[$name])) {
+                return sprintf('database option $%s on ancestor %s is declared as a promoted constructor property and requires manual migration', $name, $ancestorName);
+            }
+        }
+
         foreach ($ancestor->getProperties() as $property) {
             if ($property->isPrivate() || $property->isStatic()) {
                 continue;
@@ -1086,6 +1101,14 @@ final class DatabaseConfigurationAnalyzer
         foreach ($class->getProperties() as $property) {
             foreach ($property->props as $item) {
                 $ownNames[$item->name->toString()] = true;
+            }
+        }
+
+        foreach ($this->promotedProperties($trait) as $parameter) {
+            $name = $parameter->var->name;
+            if (($sameClassScope || ($parameter->flags & \PhpParser\Modifiers::PRIVATE) === 0)
+                && is_string($name) && isset($optionProperties[$name])) {
+                return sprintf('database option $%s on trait %s is declared as a promoted constructor property and requires manual migration', $name, $traitName);
             }
         }
 
@@ -1651,8 +1674,26 @@ final class DatabaseConfigurationAnalyzer
         return $found;
     }
 
+    /** @return list<Node\Param> */
+    private function promotedProperties(ClassLike $classLike): array
+    {
+        // PHP-Parser keeps promoted declarations on constructor parameters; they
+        // never appear in getProperties(). Their defaults are parameter defaults,
+        // and callers can replace them, so they are not safe attribute literals.
+        return array_values(array_filter(
+            $classLike->getMethod('__construct')?->params ?? [],
+            static fn (Node\Param $parameter): bool => $parameter->flags !== 0,
+        ));
+    }
+
     private function hasPrivatePropertyItem(ClassLike $classLike, string $propertyName): bool
     {
+        foreach ($this->promotedProperties($classLike) as $parameter) {
+            if (($parameter->flags & \PhpParser\Modifiers::PRIVATE) !== 0 && $parameter->var->name === $propertyName) {
+                return true;
+            }
+        }
+
         foreach ($classLike->getProperties() as $property) {
             if (! $property->isStatic() && $property->isPrivate()) {
                 foreach ($property->props as $item) {

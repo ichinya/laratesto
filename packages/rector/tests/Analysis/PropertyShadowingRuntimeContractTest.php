@@ -362,6 +362,47 @@ PHP);
         Assert::same('[[true,"stdClass"],[true,"ArrayIterator"]]', $output);
     }
 
+    #[Test]
+    public function promotedOptionValuesComeFromConstructorArguments(): void
+    {
+        $autoload = var_export(dirname(__DIR__, 4) . '/vendor/autoload.php', true);
+        $output = $this->runProbe("<?php\nrequire {$autoload};\n" . <<<'PHP'
+            trait PromotedOptions
+            {
+                public function __construct(protected bool $seed = true) {}
+            }
+            class PromotedBase
+            {
+                public function __construct(protected bool $seed = true) {}
+            }
+            class OwnOption
+            {
+                use \Illuminate\Foundation\Testing\Traits\CanConfigureMigrationCommands;
+                public function __construct(private bool $seed = true) {}
+                public function value(): bool { return $this->shouldSeed(); }
+            }
+            class InheritedOption extends PromotedBase
+            {
+                use \Illuminate\Foundation\Testing\Traits\CanConfigureMigrationCommands;
+                public function value(): bool { return $this->shouldSeed(); }
+            }
+            class TraitOption
+            {
+                use PromotedOptions;
+                use \Illuminate\Foundation\Testing\Traits\CanConfigureMigrationCommands;
+                public function value(): bool { return $this->shouldSeed(); }
+            }
+            class ShadowedOption extends InheritedOption
+            {
+                protected bool $seed = false;
+            }
+            foreach ([OwnOption::class, InheritedOption::class, TraitOption::class, ShadowedOption::class] as $class) {
+                echo json_encode([(new $class())->value(), (new $class(false))->value()]), "\n";
+            }
+            PHP);
+        Assert::same("[true,false]\n[true,false]\n[true,false]\n[true,false]", $output);
+    }
+
     /**
      * Runs one probe script with the real runtime and returns its exact stdout.
      */
