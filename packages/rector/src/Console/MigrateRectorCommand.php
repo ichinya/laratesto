@@ -223,7 +223,7 @@ final class MigrateRectorCommand extends Command
                     continue;
                 }
 
-                $original = (string) \file_get_contents($absolute);
+                $original = $this->readProcessedFile($absolute);
 
                 $virtual[$this->toForwardSlashes($absolute)] = $diff['diff'] === ''
                     ? $original
@@ -235,7 +235,7 @@ final class MigrateRectorCommand extends Command
 
         foreach ($this->phpFiles($paths) as $absolute) {
             $contents = $virtual[$this->toForwardSlashes($absolute)]
-                ?? (string) \file_get_contents($absolute);
+                ?? $this->readProcessedFile($absolute);
 
             $residuals = [
                 ...$residuals,
@@ -244,6 +244,46 @@ final class MigrateRectorCommand extends Command
         }
 
         return $residuals;
+    }
+
+    /**
+     * One processed file's contents for the residuals scan. A failed read warns
+     * and returns `false` — or empty/partial content with the warning — and under
+     * Laravel's HandleExceptions that E_WARNING would escalate into an
+     * ErrorException past the command's `catch (RuntimeException)`. The read
+     * therefore runs under a scoped warning collector whose handler is always
+     * restored (`finally`), leaving the global error state and the previously
+     * installed handler untouched, and a warning-flagged or `false` read becomes
+     * the typed failure the exit contract handles. An empty read WITHOUT any
+     * warning is a legitimate zero-byte PHP file and scans to no residuals.
+     *
+     * @throws \RuntimeException When the file cannot be read completely.
+     */
+    private function readProcessedFile(string $absolute): string
+    {
+        $warnings = [];
+
+        \set_error_handler(static function (int $number, string $message) use (&$warnings): bool {
+            $warnings[] = $message;
+
+            return true;
+        });
+
+        try {
+            $contents = \file_get_contents($absolute);
+        } finally {
+            \restore_error_handler();
+        }
+
+        if ($contents === false || $warnings !== []) {
+            throw new \RuntimeException(\sprintf(
+                'Unable to read "%s" for the residuals scan%s.',
+                $absolute,
+                $warnings === [] ? '' : ' (' . \implode('; ', \array_unique($warnings)) . ')',
+            ));
+        }
+
+        return $contents;
     }
 
     /**
