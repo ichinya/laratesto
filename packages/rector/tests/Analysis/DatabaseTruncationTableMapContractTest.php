@@ -43,8 +43,8 @@ $connection = new class implements \Illuminate\Database\ConnectionInterface {
     public function raw($value) {}
     public function selectOne($query, $bindings = [], $useReadPdo = true) {}
     public function scalar($query, $bindings = [], $useReadPdo = true) {}
-    public function select($query, $bindings = [], $useReadPdo = true) {}
-    public function cursor($query, $bindings = [], $useReadPdo = true) {}
+    public function select($query, $bindings = [], $useReadPdo = true, array $fetchUsing = []) {}
+    public function cursor($query, $bindings = [], $useReadPdo = true, array $fetchUsing = []) {}
     public function insert($query, $bindings = []) {}
     public function update($query, $bindings = []) {}
     public function delete($query, $bindings = []) {}
