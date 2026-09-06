@@ -17,7 +17,9 @@ namespace Laratesto\Rector\Residuals;
 final class UnifiedDiffNewFileReconstructor
 {
     /**
-     * @param non-empty-string $originalContent
+     * @param string $originalContent The on-disk content; MAY be empty — a
+     *         zero-byte PHP file is legitimate input, and the diff then builds
+     *         the whole new side.
      * @param non-empty-string $unifiedDiff
      * @return non-empty-string
      * @throws \RuntimeException When the diff cannot be applied to the content.
@@ -28,6 +30,7 @@ final class UnifiedDiffNewFileReconstructor
         // so the reconstruction target is the LF-normalized original.
         $originalContent = \str_replace("\r\n", "\n", $originalContent);
 
+        $originalWasEmpty = $originalContent === '';
         $originalHasTrailingNewline = true;
 
         if (\str_ends_with($originalContent, "\n")) {
@@ -70,7 +73,28 @@ final class UnifiedDiffNewFileReconstructor
             }
 
             $sawHunk = true;
-            $hunkStart = (int) $hunk[1] - 1;
+
+            // Unified-diff anchors: a nonzero old count anchors AT the numbered
+            // line (`@@ -5,2 @@` starts at old line 5), so the 0-based index is
+            // start-1; a zero-count old range anchors AFTER the numbered line
+            // (`@@ -5,0 +6,1 @@` inserts after old line 5 — a pure addition),
+            // so the index is start itself, and `@@ -0,0 +1,N @@` (an empty old
+            // side) anchors before everything at index 0. A missing count means
+            // one line.
+            $oldCount = isset($hunk[2]) && $hunk[2] !== '' ? (int) $hunk[2] : 1;
+            $hunkStart = $oldCount === 0 ? (int) $hunk[1] : (int) $hunk[1] - 1;
+
+            // A hunk anchored beyond the last original line has nothing to anchor
+            // to: the copy loop below would read undefined offsets (a PHP warning
+            // instead of the documented RuntimeException), so refuse it up front.
+            // A start exactly at the end is legal — that is an append at EOF.
+            if ($hunkStart > \count($original)) {
+                throw new \RuntimeException(\sprintf(
+                    'The diff hunk starts at original line %d, past the end of the %d-line content.',
+                    $hunk[1],
+                    \count($original),
+                ));
+            }
 
             // Copy everything before the hunk verbatim.
             if ($hunkStart < $position) {
@@ -144,9 +168,11 @@ final class UnifiedDiffNewFileReconstructor
 
         // A sentinel after a removed line means the old no-newline EOF was
         // consumed, so the reconstructed tail ends with a fresh newline; an
-        // untouched EOF keeps the original's trailing newline.
+        // untouched EOF keeps the original's trailing newline. A GENUINELY
+        // EMPTY original carries no EOF state of its own — the new side ends
+        // with a newline unless a new-side sentinel says otherwise.
         $trailingNewline = ! $newEofMissingNewline
-            && ($oldEofMissingNewline || $originalHasTrailingNewline);
+            && ($oldEofMissingNewline || $originalHasTrailingNewline || $originalWasEmpty);
 
         return $trailingNewline ? $content . "\n" : $content;
     }
