@@ -30,6 +30,13 @@ final class HttpCompatibilityAnalyzer
 
     public const ASSERTABLE_JSON = 'Laratesto\Testing\AssertableJson';
 
+    /**
+     * Guard against cyclic or pathologically deep extends chains while proving
+     * project-parent declarations for `parent::` calls; deeper chains are not
+     * provable and fail closed.
+     */
+    private const MAX_CHAIN_DEPTH = 10;
+
     private const REQUEST_SIGNATURES = [
         'get' => [1, 2, ['string', 'array']],
         'getJson' => [1, 2, ['string', 'array']],
@@ -357,36 +364,67 @@ final class HttpCompatibilityAnalyzer
         // never reach the $this-> pass above, yet the upstream bridge-rector rewrites exactly
         // its matrix for them: a supported call converts, an unsupported one survives onto the
         // converted base and fatals at runtime. Classify them through the same carve-outs, and
-        // leave every other receiver (FQCN, imported, relative, parent::) alone - external
-        // static calls never touch the converted base.
-        /** @var list<StaticCall> $staticCalls */
-        $staticCalls = $this->nodeFinder->findInstanceOf($class->stmts, StaticCall::class);
-        foreach ($staticCalls as $staticCall) {
-            if (! $this->nodeNameResolver->isName($staticCall->class, 'self')
-                && ! $this->nodeNameResolver->isName($staticCall->class, 'static')) {
-                continue;
-            }
+        // `parent::` calls ALSO land on the converted base - the class extends the framework
+        // TestCase, whose converted form is Laratesto\Testing\LaravelTestCase - but the
+        // upstream assert rewrite skips parent receivers entirely, so they classify through
+        // the parent-specific carve-outs (classifyParentCall()).
+        // The classification runs PER METHOD: the parent lifecycle carve-out only
+        // covers a parent::setUp()/tearDown() call inside the matching lifecycle
+        // override itself - the one location the base rule rewrites. The same
+        // call inside any other method survives onto the converted base, which
+        // provides no such hook, and fails closed.
+        foreach ($class->getMethods() as $method) {
+            $methodName = $method->name->toString();
 
-            $staticMethod = $staticCall->name instanceof Identifier
-                ? $staticCall->name->toString()
-                : null;
-            if ($staticMethod === null) {
-                $this->addReason(
+            /** @var list<StaticCall> $staticCalls */
+            $staticCalls = $this->nodeFinder->findInstanceOf($method->stmts ?? [], StaticCall::class);
+
+            foreach ($staticCalls as $staticCall) {
+                $isSelf = $this->nodeNameResolver->isName($staticCall->class, 'self');
+                $isStatic = $this->nodeNameResolver->isName($staticCall->class, 'static');
+                $isParent = ! $isSelf && ! $isStatic && $this->nodeNameResolver->isName($staticCall->class, 'parent');
+
+                if (! $isSelf && ! $isStatic && ! $isParent) {
+                    continue;
+                }
+
+                $staticMethod = $staticCall->name instanceof Identifier
+                    ? $staticCall->name->toString()
+                    : null;
+
+                if ($staticMethod === null) {
+                    $this->addReason(
+                        $reasons,
+                        'HTTP_UNSUPPORTED_SIGNATURE',
+                        $isParent
+                            ? 'dynamic parent:: method call cannot be classified; the upstream assert rewrite skips parent receivers, so the call would survive onto the converted base'
+                            : 'dynamic self/static method cannot be classified',
+                    );
+
+                    continue;
+                }
+
+                if ($isParent) {
+                    $this->classifyParentCall(
+                        $reasons,
+                        $class,
+                        $this->isRewrittenParentLifecycleCall($method, $staticCall),
+                        $staticMethod,
+                        $staticCall->args,
+                        $localClasses,
+                    );
+
+                    continue;
+                }
+
+                $this->classifyAgainstUpstreamRewrites(
                     $reasons,
-                    'HTTP_UNSUPPORTED_SIGNATURE',
-                    'dynamic self/static method cannot be classified',
+                    $isStatic ? 'static::' : 'self::',
+                    $staticMethod,
+                    $staticCall->args,
+                    $declaredMethods,
                 );
-
-                continue;
             }
-
-            $this->classifyAgainstUpstreamRewrites(
-                $reasons,
-                $this->nodeNameResolver->isName($staticCall->class, 'static') ? 'static::' : 'self::',
-                $staticMethod,
-                $staticCall->args,
-                $declaredMethods,
-            );
         }
 
         /** @var list<PropertyFetch> $properties */
@@ -499,6 +537,164 @@ final class HttpCompatibilityAnalyzer
                 sprintf('%s%s() is outside the supported helper matrix', $receiver, $method),
             );
         }
+    }
+
+    /**
+     * `parent::` calls land on the converted base: the analyzed class extends the
+     * framework TestCase, whose converted form is Laratesto\Testing\LaravelTestCase
+     * (or a converted project base below it), and the upstream assert rewrite skips
+     * parent receivers entirely. Three carve-outs stay supported, everything else
+     * fails closed:
+     *
+     * 1. setUp()/tearDown() - but ONLY when the call sits inside the MATCHING
+     *    lifecycle override, as a direct statement with the exact hook name: that exact
+     *    statement location is what the base rule rewrites (the framework
+     *    parent call is dropped on a direct framework parent, or renamed to
+     *    setUpLaravel()/tearDownLaravel() below a converted project base).
+     *    The same call from any other method is not rewritten and fails closed.
+     * 1b. The converted base's own helper/request surface, which the
+     *    HELPER_SIGNATURES/REQUEST_SIGNATURES matrices mirror exactly.
+     * 1c. A method provably declared by a PROJECT class in the parent chain
+     *    (same-file or autoload-resolvable): project-declared methods survive
+     *    conversion. The walk stops at the framework TestCase itself - its
+     *    surface does not survive - and returns not-provable on unresolvable
+     *    hops, which fails closed.
+     *
+     * @param array<non-empty-string, list<non-empty-string>> $reasons
+     * @param list<Arg> $arguments
+     * @param list<Class_> $localClasses
+     */
+    private function classifyParentCall(
+        array &$reasons,
+        Class_ $class,
+        bool $rewrittenLifecycleCall,
+        string $method,
+        array $arguments,
+        array $localClasses,
+    ): void
+    {
+        if ($rewrittenLifecycleCall) {
+            return;
+        }
+
+        if (isset(self::REQUEST_SIGNATURES[$method])) {
+            $this->validate($reasons, 'HTTP_UNSUPPORTED_SIGNATURE', $method, $arguments, self::REQUEST_SIGNATURES[$method]);
+
+            return;
+        }
+
+        if (isset(self::HELPER_SIGNATURES[$method])) {
+            $this->validate($reasons, 'HTTP_UNSUPPORTED_SIGNATURE', $method, $arguments, self::HELPER_SIGNATURES[$method]);
+
+            return;
+        }
+
+        if (! in_array(strtolower($method), ['setup', 'teardown'], true)
+            && $this->parentChainDeclares($class, $method, $localClasses) === true) {
+            return;
+        }
+
+        $this->addReason(
+            $reasons,
+            'HTTP_UNSUPPORTED_SIGNATURE',
+            sprintf('parent::%s() lands on the converted Laratesto base, which provides no such method; the upstream assert rewrite skips parent receivers - migrate manually', $method),
+        );
+    }
+
+    private function isRewrittenParentLifecycleCall(Node\Stmt\ClassMethod $method, StaticCall $call): bool
+    {
+        $name = $method->name->toString();
+        if (! in_array($name, ['setUp', 'tearDown'], true)
+            || ! $this->nodeNameResolver->isName($call->name, $name)) {
+            return false;
+        }
+
+        foreach ($method->stmts ?? [] as $statement) {
+            if ($statement instanceof Node\Stmt\Expression && $statement->expr === $call) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether a method is provably declared by a PROJECT class in the parent
+     * chain of $class. True: declared before the chain reaches the framework
+     * TestCase. False: the chain reached the framework TestCase without a
+     * declaration (its surface does not survive conversion). Null: not provable
+     * (unresolvable, cyclic, over-deep) - callers fail closed.
+     *
+     * @param list<Class_> $localClasses
+     */
+    private function parentChainDeclares(Class_ $class, string $method, array $localClasses): ?bool
+    {
+        if (! $class->extends instanceof Name) {
+            return null;
+        }
+
+        $current = $this->nodeNameResolver->getName($class->extends);
+
+        if ($current === null) {
+            return null;
+        }
+
+        $seen = [];
+
+        for ($depth = 0; $depth < self::MAX_CHAIN_DEPTH; $depth++) {
+            if (strcasecmp($current, 'Illuminate\\Foundation\\Testing\\TestCase') === 0) {
+                return false;
+            }
+
+            if (isset($seen[$current])) {
+                return null;
+            }
+
+            $seen[$current] = true;
+
+            $resolved = null;
+
+            foreach ($localClasses as $local) {
+                if ($local->namespacedName !== null
+                    && strcasecmp($local->namespacedName->toString(), $current) === 0) {
+                    $resolved = $local;
+
+                    break;
+                }
+            }
+
+            if ($resolved === null) {
+                try {
+                    $resolved = $this->astResolver->resolveClassFromName($current);
+                } catch (\Throwable) {
+                    $resolved = null;
+                }
+            }
+
+            if (! $resolved instanceof Class_) {
+                return null;
+            }
+
+            foreach ($resolved->getMethods() as $declared) {
+                if (strcasecmp($declared->name->toString(), $method) === 0) {
+                    return true;
+                }
+            }
+
+            if (! $resolved->extends instanceof Name) {
+                return null;
+            }
+
+            $parent = $this->nodeNameResolver->getName($resolved->extends);
+
+            if ($parent === null) {
+                return null;
+            }
+
+            $current = $parent;
+        }
+
+        return null;
     }
 
     private function matchesShape(Expr $expression, string $shape): bool
@@ -680,6 +876,15 @@ final class HttpCompatibilityAnalyzer
             && $this->isThisVariable($expression->var)
             && $expression->name instanceof Node\Identifier) {
             return in_array($expression->name->toString(), $responseProperties, true);
+        }
+
+        if ($expression instanceof StaticCall
+            && $this->nodeNameResolver->isName($expression->class, 'parent')
+            && $this->nodeNameResolver->getName($expression->name) !== null
+            && isset(self::REQUEST_SIGNATURES[$this->nodeNameResolver->getName($expression->name)])) {
+            // `parent::get()`/`parent::post()`-style calls produce a response on
+            // the converted base exactly like their `$this->` siblings.
+            return true;
         }
 
         if (! $expression instanceof MethodCall) {
