@@ -1113,65 +1113,112 @@ final class HttpCompatibilityAnalyzer
     }
 
     /**
-     * Pending Artisan parity: Laravel's PendingCommand is lazy and runs the command
-     * on the first assertion (or scope-end), while PendingArtisanCommand executes
-     * eagerly in its constructor. Statements between `$pending = $this->artisan()`
-     * and the first use of $pending therefore already observe the command's side
-     * effects, unlike the Laravel original. Immediate use stays marker-free.
+     * Laravel retains PendingCommand until destruction: even assertExitCode()
+     * merely stores an expectation. Only a terminal sequence of expectation
+     * calls on a local command is safe. Branches are not PHP variable scopes;
+     * their locals survive into following statements, loop iterations and finally.
+     * Closures have their own lifetime and are inspected independently.
      *
      * @param array<non-empty-string, list<non-empty-string>> $reasons
      * @param list<non-empty-string> $artisanVariables
      */
-    private function markPendingArtisanExecutionGaps(
-        array &$reasons,
-        Class_ $class,
-        array $artisanVariables,
-    ): void
+    private function markPendingArtisanExecutionGaps(array &$reasons, Class_ $class, array $artisanVariables): void
     {
-        if ($artisanVariables === []) {
+        foreach ($class->getMethods() as $method) {
+            $this->inspectPendingStatements($reasons, $method->stmts ?? [], $artisanVariables, false);
+        }
+    }
+
+    /** @param list<Node\Stmt> $statements */
+    private function inspectPendingStatements(array &$reasons, array $statements, array $variables, bool $hasContinuation): void
+    {
+        foreach ($statements as $index => $statement) {
+            $following = array_slice($statements, $index + 1);
+            if ($statement instanceof Node\Stmt\Expression
+                && $statement->expr instanceof Expr\Assign
+                && $statement->expr->var instanceof Variable
+                && is_string($statement->expr->var->name)
+                && $this->isArtisanProducingExpression($statement->expr->expr, $variables)) {
+                $name = $statement->expr->var->name;
+                $safe = ! $hasContinuation;
+                foreach ($following as $next) {
+                    $safe = $safe && $next instanceof Node\Stmt\Expression
+                        && $this->isPendingExpectation($next->expr, $name);
+                }
+                if (! $safe) {
+                    $this->markPendingGap($reasons, $name);
+                }
+                // The direct assignment was just classified. Inspect its RHS for
+                // independent closure scopes without reclassifying the assignment.
+                $this->inspectPendingNode($reasons, $statement->expr->expr, $variables, true);
+                continue;
+            }
+            $this->inspectPendingNode($reasons, $statement, $variables, $hasContinuation || $following !== []);
+        }
+    }
+
+    private function inspectPendingNode(array &$reasons, Node $node, array $variables, bool $hasContinuation): void
+    {
+        if ($node instanceof Expr\Closure) {
+            $this->inspectPendingStatements($reasons, $node->stmts, $variables, false);
             return;
         }
+        if ($node instanceof Node\Stmt\ClassLike) {
+            return;
+        }
+        if (($node instanceof Node\Stmt\Return_ || $node instanceof Expr\ArrowFunction)
+            && $node->expr instanceof Expr && $this->isArtisanProducingExpression($node->expr, $variables)) {
+            $this->markPendingGap($reasons, 'command');
+        }
+        if ($node instanceof Expr\Assign && $this->isArtisanProducingExpression($node->expr, $variables)) {
+            $this->markPendingGap($reasons, $node->var instanceof Variable && is_string($node->var->name) ? $node->var->name : 'command');
+        }
 
-        foreach ($class->getMethods() as $method) {
-            $awaiting = null;
-            foreach ($method->stmts ?? [] as $statement) {
-                if ($awaiting !== null) {
-                    if (! $this->statementUsesVariable($statement, $awaiting)) {
-                        $this->addReason(
-                            $reasons,
-                            'ARTISAN_INTERACTION_UNSUPPORTED',
-                            sprintf('$%s holds an eagerly executed Pending Artisan command; the statements before its first use already observe the command side effects (Laravel PendingCommand runs lazily)', $awaiting),
-                        );
+        // A loop may keep its last command alive into the next iteration. A try
+        // body may continue through catch/finally before its locals are released.
+        $hasContinuation = $hasContinuation || $node instanceof Node\Stmt\For_
+            || $node instanceof Node\Stmt\Foreach_ || $node instanceof Node\Stmt\While_
+            || $node instanceof Node\Stmt\Do_ || $node instanceof Node\Stmt\TryCatch
+            || $node instanceof Node\Stmt\Switch_;
+        foreach ($node->getSubNodeNames() as $key) {
+            $child = $node->$key;
+            if ($key === 'stmts' && is_array($child)) {
+                $this->inspectPendingStatements($reasons, $child, $variables, $hasContinuation);
+            } elseif ($child instanceof Node) {
+                $this->inspectPendingNode($reasons, $child, $variables, $hasContinuation);
+            } elseif (is_array($child)) {
+                foreach ($child as $item) {
+                    if ($item instanceof Node) {
+                        $this->inspectPendingNode($reasons, $item, $variables, $hasContinuation);
                     }
-
-                    $awaiting = null;
-                }
-
-                if (! $statement instanceof Node\Stmt\Expression
-                    || ! $statement->expr instanceof Expr\Assign
-                    || ! $statement->expr->var instanceof Variable
-                    || ! is_string($statement->expr->var->name)) {
-                    continue;
-                }
-
-                if ($this->isArtisanProducingExpression($statement->expr->expr, $artisanVariables)) {
-                    $awaiting = $statement->expr->var->name;
                 }
             }
         }
     }
 
-    private function statementUsesVariable(Node\Stmt $statement, string $name): bool
+    private function isPendingExpectation(Expr $expression, string $name): bool
     {
-        /** @var list<Variable> $variables */
-        $variables = $this->nodeFinder->findInstanceOf($statement, Variable::class);
-        foreach ($variables as $variable) {
-            if ($variable->name === $name) {
-                return true;
+        if (! $expression instanceof MethodCall || ! $expression->name instanceof Identifier
+            || ! isset(self::PENDING_ARTISAN_SIGNATURES[$expression->name->toString()])) {
+            return false;
+        }
+        // An expression in the arguments can observe side effects before the
+        // pending command is released, even in an otherwise terminal assertion.
+        foreach ($expression->args as $argument) {
+            if (! $argument instanceof Arg || $argument->unpack
+                || (! $argument->value instanceof Scalar && ! $argument->value instanceof Expr\ConstFetch)) {
+                return false;
             }
         }
+        return ($expression->var instanceof Variable && $expression->var->name === $name)
+            || $this->isPendingExpectation($expression->var, $name);
+    }
 
-        return false;
+    private function markPendingGap(array &$reasons, string $name): void
+    {
+        $this->addReason($reasons, 'ARTISAN_INTERACTION_UNSUPPORTED', sprintf(
+            '$%s retains a Pending Artisan command across statements or control flow; Laravel executes it on release, while Laratesto executes it eagerly', $name,
+        ));
     }
 
     /** @return list<non-empty-string> */
@@ -1197,6 +1244,11 @@ final class HttpCompatibilityAnalyzer
     /** @param list<non-empty-string> $artisanVariables */
     private function isArtisanProducingExpression(Expr $expression, array $artisanVariables): bool
     {
+        if ($expression instanceof StaticCall
+            && $this->nodeNameResolver->isName($expression->class, 'parent')
+            && $this->nodeNameResolver->isName($expression->name, 'artisan')) {
+            return true;
+        }
         if ($expression instanceof Variable && is_string($expression->name)) {
             return in_array($expression->name, $artisanVariables, true);
         }
@@ -1219,6 +1271,11 @@ final class HttpCompatibilityAnalyzer
     /** @param list<non-empty-string> $artisanVariables */
     private function isArtisanReceiver(Expr $expression, array $artisanVariables): bool
     {
+        if ($expression instanceof StaticCall
+            && $this->nodeNameResolver->isName($expression->class, 'parent')
+            && $this->nodeNameResolver->isName($expression->name, 'artisan')) {
+            return true;
+        }
         if ($expression instanceof Variable && is_string($expression->name)) {
             return in_array($expression->name, $artisanVariables, true);
         }

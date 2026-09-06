@@ -31,7 +31,7 @@ namespace Tests\Feature;
 
 use Laratesto\Testing\LaravelTestCase;
 
-/* laratesto-residual(code=ARTISAN_INTERACTION_UNSUPPORTED, rule=Laratesto\Rector\Rules\LaravelSourceCompatibleCallsRector, severity=manual): $pending holds an eagerly executed Pending Artisan command; the statements before its first use already observe the command side effects (Laravel PendingCommand runs lazily) */
+/* laratesto-residual(code=ARTISAN_INTERACTION_UNSUPPORTED, rule=Laratesto\Rector\Rules\LaravelSourceCompatibleCallsRector, severity=manual): $pending retains a Pending Artisan command across statements or control flow; Laravel executes it on release, while Laratesto executes it eagerly */
 final class EagerPendingArtisanTest extends LaravelTestCase
 {
     public function test_side_effects_land_before_first_use(): void
