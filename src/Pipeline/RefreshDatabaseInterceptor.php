@@ -34,7 +34,8 @@ final readonly class RefreshDatabaseInterceptor implements TestRunInterceptor
 
             DatabaseRuntime::restoreInMemoryConnections($application, $connections);
 
-            if (! RefreshDatabaseState::$migrated || ! $this->allSchemasMigrated($connections)) {
+            // An empty selection cannot certify that this process refreshed a schema.
+            if ($connections !== [] && (! RefreshDatabaseState::$migrated || ! $this->allSchemasMigrated($connections))) {
                 $this->migrateFresh($connections);
                 DatabaseRuntime::cacheInMemoryConnections($application, $connections);
                 RefreshDatabaseState::$migrated = true;

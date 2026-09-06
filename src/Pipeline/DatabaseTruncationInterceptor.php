@@ -43,7 +43,8 @@ final readonly class DatabaseTruncationInterceptor implements TestRunInterceptor
         $connections = DatabaseRuntime::connectionNames($application, $this->attribute->connections);
         DatabaseRuntime::restoreInMemoryConnections($application, $connections);
 
-        if (! RefreshDatabaseState::$migrated || ! $this->allSchemasMigrated($connections)) {
+        // An empty selection cannot certify that this process refreshed a schema.
+        if ($connections !== [] && (! RefreshDatabaseState::$migrated || ! $this->allSchemasMigrated($connections))) {
             try {
                 $this->migrateFresh($connections);
                 DatabaseRuntime::cacheInMemoryConnections($application, $connections);
