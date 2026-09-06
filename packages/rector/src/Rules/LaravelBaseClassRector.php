@@ -41,6 +41,7 @@ use Rector\Contract\Rector\ConfigurableRectorInterface;
 use Rector\NodeTypeResolver\Node\AttributeKey;
 use Rector\PhpParser\AstResolver;
 use Rector\Rector\AbstractRector;
+use Rector\Skipper\FileSystem\PathNormalizer;
 use Symplify\RuleDocGenerator\ValueObject\CodeSample\CodeSample;
 use Symplify\RuleDocGenerator\ValueObject\RuleDefinition;
 use Testo\Bridge\Rector\Testing\TestRectorFixtures;
@@ -347,6 +348,13 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             if (! $fromCurrentFile && ! $this->isWithinProcessedPaths($parentClass)) {
                 return [null, sprintf(
                     'project base %s is outside the processed paths - migrate it in the same run first',
+                    $current,
+                )];
+            }
+
+            if (! $fromCurrentFile && $this->isExcludedBySkip($parentClass)) {
+                return [null, sprintf(
+                    'project base %s is excluded from this Rector run by the skip configuration',
                     $current,
                 )];
             }
@@ -738,6 +746,43 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
 
         // Windows file paths are case-insensitive; compare them consistently.
         return \DIRECTORY_SEPARATOR === '\\' ? \strtolower($normalized) : $normalized;
+    }
+
+    /**
+     * Rector filters the processed file set before any rule runs: FilesFinder drops
+     * globally skipped files (withSkip paths/globs) and the node traverser drops
+     * rule-scoped skips (withSkip([self::class => path])). Either way a project base
+     * on such a file never converts - and neither may its descendants, which would
+     * rename parent::setUp() against a base that still only knows setUp().
+     */
+    private function isExcludedBySkip(Class_ $class): bool
+    {
+        $scope = $class->getAttribute(AttributeKey::SCOPE);
+
+        $file = $scope instanceof Scope ? $scope->getFile() : null;
+
+        if ($file === null || $file === '') {
+            return false;
+        }
+
+        $realFile = \realpath($file);
+
+        if ($realFile === false) {
+            return false;
+        }
+
+        // No catch here: a failure to EVALUATE the excludes must not silently
+        // authorize conversion. Let Rector report the processing failure instead.
+
+        // The skip matcher compares against the same form FilesFinder feeds it:
+        // the realpath with Rector's own slash normalization, original casing.
+        $normalized = PathNormalizer::normalize($realFile);
+
+        if ($this->skipper->shouldSkipFilePath($normalized)) {
+            return true;
+        }
+
+        return $this->skipper->shouldSkipElementAndFilePath(self::class, $normalized);
     }
 
     /** @return list<non-empty-string> */
