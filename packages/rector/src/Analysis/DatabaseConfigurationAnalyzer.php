@@ -371,6 +371,12 @@ final class DatabaseConfigurationAnalyzer
                 return $this->unsupported($base, 'duplicate Laravel Seed/Seeder attributes require manual migration');
             }
 
+            $inherited = $this->inheritedSeedAttributes($class, $localClasses);
+
+            if ($inherited['conflict'] !== null) {
+                return $this->unsupported($base, $inherited['conflict']);
+            }
+
             if ($seedAttributes !== []) {
                 if ($seedAttributes[0]->args !== []) {
                     return $this->unsupported($base, 'Laravel Seed attribute arguments are not supported');
@@ -378,6 +384,12 @@ final class DatabaseConfigurationAnalyzer
 
                 $options['seed'] = new Expr\ConstFetch(new Name('true'));
                 $attributes[] = $seedAttributes[0];
+            } elseif ($inherited['seed']) {
+                // Laravel 13's shouldSeed() walks every ancestor for the Seed
+                // attribute and answers true before the property fallback: the
+                // inherited attribute seeds, and it also shadows the class's
+                // own literal $seed declaration.
+                $options['seed'] = new Expr\ConstFetch(new Name('true'));
             }
 
             if ($seederAttributes !== []) {
@@ -391,6 +403,11 @@ final class DatabaseConfigurationAnalyzer
 
                 $options['seeder'] = $attribute->args[0]->value;
                 $attributes[] = $attribute;
+            } elseif ($inherited['seeder'] !== null) {
+                // Laravel 13's seeder() walks nearest-first and answers before
+                // the property fallback: the inherited attribute shadows the
+                // class's own literal $seeder as well.
+                $options['seeder'] = $inherited['seeder'];
             }
         }
 
@@ -1819,5 +1836,125 @@ final class DatabaseConfigurationAnalyzer
         }
 
         return $attributes;
+    }
+
+    /**
+     * The Laravel Seed/Seeder attribute situation on the resolved ancestors
+     * above the class.
+     *
+     * Laravel 13's CanConfigureMigrationCommands reads both attributes through
+     * the whole reflection chain: shouldSeed() answers true as soon as ANY
+     * level carries a Seed attribute (before the property fallback), and
+     * seeder() takes the NEAREST level's first Seeder attribute (also before
+     * the property fallback, so an inherited Seeder shadows the class's own
+     * literal $seeder). Laravel 12 ignores both attributes entirely and reads
+     * only the properties; the conversion targets the newer supported
+     * semantics, consistent with the existing own-level attribute lift.
+     *
+     * Walk contract: same-file ancestors first, then AstResolver; the walk
+     * stops at the framework and target bases (no project attributes above
+     * them), at cycles and at the chain-depth cap (the hierarchy rule owns
+     * those diagnostics), and terminates silently on an unresolvable ancestor
+     * like the other hierarchy walks. A nearest Seeder is validated with the
+     * own-level rules (one attribute, one non-unpacked literal class argument);
+     * deeper shadowed levels are dead code and are not validated.
+     *
+     * @param list<ClassLike> $localClasses
+     * @return array{seed: bool, seeder: ?Expr, conflict: ?non-empty-string}
+     */
+    private function inheritedSeedAttributes(Class_ $class, array $localClasses): array
+    {
+        $result = ['seed' => false, 'seeder' => null, 'conflict' => null];
+
+        $current = $class->extends === null ? null : $this->resolvedName($class->extends);
+        $seen = [];
+
+        for ($depth = 0; $current !== null && $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
+            if ($current === self::FRAMEWORK_BASE || $current === self::TARGET_BASE || isset($seen[$current])) {
+                break;
+            }
+
+            $seen[$current] = true;
+
+            $ancestor = $this->resolveAncestor($current, $localClasses);
+
+            if (! $ancestor instanceof Class_) {
+                break;
+            }
+
+            $seedAttributes = $this->attributesNamed($ancestor, self::SEED_ATTRIBUTE);
+
+            if ($seedAttributes !== []) {
+                if (count($seedAttributes) > 1) {
+                    $result['conflict'] = sprintf('duplicate Laravel Seed attributes on ancestor %s require manual migration', $current);
+
+                    return $result;
+                }
+
+                if ($seedAttributes[0]->args !== []) {
+                    $result['conflict'] = sprintf('Laravel Seed attribute arguments on ancestor %s are not supported', $current);
+
+                    return $result;
+                }
+
+                $result['seed'] = true;
+            }
+
+            if ($result['seeder'] === null) {
+                $seederAttributes = $this->attributesNamed($ancestor, self::SEEDER_ATTRIBUTE);
+
+                if ($seederAttributes !== []) {
+                    $attribute = $seederAttributes[0];
+
+                    if (count($seederAttributes) > 1) {
+                        $result['conflict'] = sprintf('duplicate Laravel Seeder attributes on ancestor %s require manual migration', $current);
+
+                        return $result;
+                    }
+
+                    if (count($attribute->args) !== 1
+                        || $attribute->args[0]->unpack
+                        || ($attribute->args[0]->name !== null && $attribute->args[0]->name->toString() !== 'class')
+                        || ! $this->isSeederLiteral($attribute->args[0]->value)) {
+                        $result['conflict'] = sprintf('Laravel Seeder attribute on ancestor %s must contain one literal class', $current);
+
+                        return $result;
+                    }
+
+                    $value = $attribute->args[0]->value;
+                    if ($value instanceof Scalar\String_) {
+                        $result['seeder'] = new Scalar\String_($value->value);
+                    } elseif ($value instanceof Expr\ClassConstFetch && $value->class instanceof Name) {
+                        $name = match (strtolower($value->class->toString())) {
+                            'self' => $current,
+                            'parent' => $ancestor->extends === null ? null : $this->resolvedName($ancestor->extends),
+                            default => $this->resolvedName($value->class),
+                        };
+                        if ($name === null || strtolower($name) === 'static') {
+                            $result['conflict'] = sprintf('Laravel Seeder attribute on ancestor %s must contain one literal class', $current);
+
+                            return $result;
+                        }
+
+                        // A node from another file carries offsets into THAT file.
+                        // Rebuild the literal to avoid reusing those tokens in the
+                        // child's format-preserving printer or its namespace scope.
+                        $result['seeder'] = new Expr\ClassConstFetch(new Name\FullyQualified($name), 'class');
+                    } else {
+                        $result['conflict'] = sprintf('Laravel Seeder attribute on ancestor %s must contain one literal class', $current);
+
+                        return $result;
+                    }
+                }
+            }
+
+            if ($ancestor->extends === null) {
+                break;
+            }
+
+            $current = $this->resolvedName($ancestor->extends);
+        }
+
+        return $result;
     }
 }

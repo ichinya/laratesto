@@ -336,6 +336,32 @@ PHP);
         Assert::string($output)->contains('define the same property');
     }
 
+    #[Test]
+    public function laravel13InheritedAttributesPrecedePropertyFallbacks(): void
+    {
+        if (! class_exists(\Illuminate\Foundation\Testing\Attributes\Seed::class)) {
+            throw new \Testo\Core\Exception\SkipTest('Laravel 13 Seed/Seeder attributes are not installed.');
+        }
+
+        $autoload = var_export(dirname(__DIR__, 4) . '/vendor/autoload.php', true);
+        $output = $this->runProbe("<?php\nrequire {$autoload};\n" . <<<'PHP'
+            #[\Illuminate\Foundation\Testing\Attributes\Seed]
+            #[\Illuminate\Foundation\Testing\Attributes\Seeder(\stdClass::class)]
+            class SeedBase {}
+            class SeedChild extends SeedBase
+            {
+                use \Illuminate\Foundation\Testing\Traits\CanConfigureMigrationCommands;
+                protected bool $seed = false;
+                protected string $seeder = \SplObjectStorage::class;
+                public function options(): array { return [$this->shouldSeed(), $this->seeder()]; }
+            }
+            #[\Illuminate\Foundation\Testing\Attributes\Seeder(\ArrayIterator::class)]
+            class NearestSeedChild extends SeedChild {}
+            echo json_encode([(new SeedChild())->options(), (new NearestSeedChild())->options()]);
+            PHP);
+        Assert::same('[[true,"stdClass"],[true,"ArrayIterator"]]', $output);
+    }
+
     /**
      * Runs one probe script with the real runtime and returns its exact stdout.
      */
