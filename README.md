@@ -228,9 +228,16 @@ HEAD. Substitute the paths you actually processed.
 
 A project base excluded by Rector's file/path/glob or base-rule `withSkip`
 configuration is outside the conversion scope: descendants retain their source
-hierarchy and receive a residual. Trait-provided lifecycle or custom bootstrap
-methods also block conversion, including nested trait uses and lifecycle aliases;
-move the required behavior into an explicitly reviewed class lifecycle first.
+hierarchy and receive a residual. Excluding a required database conversion with
+`withSkip` also preserves the class carrying the strategy and its descendants.
+
+Shared traits are not rewritten. Trait-provided PHPUnit tests, helpers that
+depend on the source testing API, and Laravel `setUp<Trait>`/`tearDown<Trait>`
+hooks require manual migration, including nested uses and aliases. Ordinary
+traits with proven local helper implementations remain supported. When a
+processed descendant has an unsupported trait dependency, its shared source
+base is preserved too. Move and review the required behavior before converting
+the hierarchy.
 
 ### Fail-closed residuals
 
@@ -369,6 +376,13 @@ aliases in conditional or coalescing expressions. The same checks apply in
 project ancestors and composed traits. Alias tracking is conservative: a later
 assignment does not automatically erase a possible alias. Unrelated DTO reads
 and the proven private-slot exemption above remain outside this blocker.
+
+A descendant can inherit a database strategy without repeating its trait. Its
+effective options must still match the single attribute inherited from the
+converted base. Changed options, live hook overrides and dynamic configuration
+receive a database residual; the shared strategy owner in the processed scope
+is preserved as well. Proven unchanged defaults and irrelevant options remain
+supported. Include the complete test hierarchy in the migration inputs.
 
 When a class re-declares the same database trait a project ancestor already
 uses, that is a duplicate of one strategy, not a second one — Laravel collapsed
@@ -531,8 +545,10 @@ truncates and, when seeding is requested, seeds each selected connection.
 Laravel's source trait keeps its initial `migrate:fresh` and subsequent `db:seed`
 on the default connection, so
 the migrator leaves named connection selections residual-marked for manual
-review. An explicit empty `connections: []` selection touches no connections;
-a later default refresh still checks whether its schema needs migration.
+review. An explicit empty `connections: []` selection touches no connections
+and preserves the previous migration state. A later default refresh still
+performs this process's first migration, even if a migrations table already
+exists from a previous run.
 Nested transaction scopes restore the previous transaction manager on each
 connection as well as the application's binding, including when cleanup fails.
 

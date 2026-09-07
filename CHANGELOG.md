@@ -8,6 +8,10 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Empty `RefreshDatabase` and `DatabaseTruncation` connection selections preserve
+  process-wide migration state, so a later default refresh still performs its
+  first migration against an existing schema.
+- `composer test` disables Composer's outer process timeout for the test script.
 - `LaravelResponse::assertHeader()` compares expected values case-insensitively
   again, matching Laravel while still rejecting differences beyond case.
 - Fluent `assertJson()` callbacks support `Conditionable` and `Macroable`, with
@@ -25,8 +29,14 @@ versions follow [Semantic Versioning](https://semver.org/).
     files, and rejects hunks beyond EOF without PHP warnings;
   - residual scanning recognizes only whole canonical PHP marker comments,
     excluding quoted examples in strings, heredocs and surrounding comment prose;
-  - trait-provided lifecycle/bootstrap behavior and bases excluded by Rector
-    file/glob or base-rule skips block class conversion with residuals;
+  - trait-provided test discovery, source API dependencies and lifecycle hooks
+    block class conversion with residuals, including Laravel trait-basename
+    hooks; processed descendants with unsafe traits preserve their shared base;
+  - file/glob, base-rule and required database-rule exclusions cannot leave a
+    partially converted hierarchy without active database isolation;
+  - inherited database strategies check descendant options, hooks and writes
+    against the ancestor attribute and preserve the shared source strategy when
+    equivalence cannot be established; unchanged inherited defaults remain safe;
   - unsupported `parent::` calls receive `HTTP_UNSUPPORTED_SIGNATURE`, including
     assertions left by the upstream rules and lifecycle calls outside the exact
     statement shape the base rule rewrites;

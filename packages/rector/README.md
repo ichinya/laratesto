@@ -94,6 +94,19 @@ from HEAD. Avoid broad destructive commands for rollback.
 | Outside a convertible class | — | Laravel constructs in classes whose base does not resolve (`LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY`) |
 | Artisan chains | supported immediate chains or terminal assignments followed only by literal expectations (`assertExitCode`, `expectsOutput`, …) | interactive forms and commands retained across later statements, loop iterations or catch/finally (`ARTISAN_INTERACTION_UNSUPPORTED`) |
 
+Shared traits are not rewritten: PHPUnit test discovery in traits, source
+testing APIs in trait helpers, and Laravel `setUp<Trait>`/`tearDown<Trait>` hooks
+require manual migration. A processed descendant with an unsupported trait
+dependency also keeps its shared source base unchanged. A database-rule `withSkip` exclusion for a strategy owner
+likewise preserves the hierarchy, rather than leaving an inactive Laravel
+database trait on a converted class.
+
+Descendants that inherit a database strategy without repeating its trait are
+checked against the ancestor attribute's fixed options. Changed options, live
+hooks and dynamic configuration preserve the shared source strategy with a
+database residual; proven unchanged inherited defaults remain supported. Review
+the complete hierarchy within the migration inputs.
+
 Recognized unsupported constructs receive a RESIDUAL — the marker
 `/* laratesto-residual(code=…, rule=…, severity=…): reason */` stays next to the
 untouched construct and is reported by the Artisan table/JSON. A resolved residual is

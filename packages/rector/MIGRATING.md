@@ -100,6 +100,20 @@ reason, sorted by rule.
 | `LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY` | helper class using `$this->app` or a database trait | decide whether the class should become a Laratesto test or drop the test constructs |
 | `ARTISAN_INTERACTION_UNSUPPORTED` | interactive prompts, or a Pending Artisan command retained across later statements, loop iterations or catch/finally | review execution order: Laravel executes retained commands on release, while Laratesto is eager; supported immediate chains and terminal assignments followed only by literal expectations convert when the command does not escape through references or static/global storage |
 
+Trait declarations are shared and are not rewritten. Move or manually migrate
+trait-provided PHPUnit tests, source testing APIs in helpers, and Laravel
+`setUp<Trait>`/`tearDown<Trait>` hooks before removing their hierarchy residuals.
+Nested traits and aliases participate in this check. The shared base stays in
+source when a processed descendant has such an unsupported dependency. Check
+`withSkip` for the database rule as well as the base rule: a required strategy
+conversion must be enabled in the same run.
+
+A child that inherits a strategy without repeating its trait may still change
+Laravel's effective options. If these differ from the inherited target attribute,
+or depend on live hooks or writes, migrate that strategy manually together with
+its shared base. Proven unchanged inherited defaults remain automatic; include
+the whole hierarchy in the migration inputs.
+
 An assertion-like method name on a proven unrelated native DTO type does not
 create a response residual. Unknown receivers, broad `object` types and unions
 that may contain a Laravel response remain conservative residuals.
