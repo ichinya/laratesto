@@ -18,7 +18,10 @@ use PhpParser\Node\Stmt\ClassMethod;
 use PhpParser\Node\Stmt\Property;
 use PhpParser\Node\Stmt\TraitUse;
 use PhpParser\Node\Stmt\Trait_;
+use PHPStan\BetterReflection\Reflector\DefaultReflector;
+use PHPStan\BetterReflection\SourceLocator\Type\SourceLocator;
 use Rector\NodeNameResolver\NodeNameResolver;
+use Rector\NodeTypeResolver\Reflection\BetterReflection\SourceLocatorProvider\DynamicSourceLocatorProvider;
 use Rector\PhpParser\AstResolver;
 
 /** @internal Whole-hierarchy preflight for Laravel database strategy conversion. */
@@ -164,18 +167,20 @@ final class DatabaseConfigurationAnalyzer
     /** @var array<non-empty-string, list<lowercase-string&non-empty-string>> */
     private array $unsupportedOverrides;
 
-    /** @var array<string, list<ClassLike>> */
-    private array $configuredClasses = [];
+    /** @var \WeakMap<SourceLocator, list<ClassLike>> */
+    private \WeakMap $projectClasses;
 
     private bool $checkingDescendants = false;
 
     public function __construct(
         private readonly NodeNameResolver $nodeNameResolver,
         private readonly AstResolver $astResolver,
+        private readonly DynamicSourceLocatorProvider $dynamicSourceLocatorProvider,
     )
     {
         $this->nodeFinder = new NodeFinder();
         $this->prettyPrinter = new Standard();
+        $this->projectClasses = new \WeakMap();
         $this->unsupportedOverrides = array_map(
             static fn (array $hooks): array => array_map('strtolower', $hooks),
             self::UNSUPPORTED_OVERRIDES,
@@ -520,7 +525,7 @@ final class DatabaseConfigurationAnalyzer
         if ($name === null) {
             return null;
         }
-        $classes = [...$localClasses, ...$this->classesInConfiguredPaths()];
+        $classes = [...$localClasses, ...$this->classesInProjectSources()];
         $this->checkingDescendants = true;
         try {
             foreach ($classes as $candidate) {
@@ -559,32 +564,34 @@ final class DatabaseConfigurationAnalyzer
         return null;
     }
 
-    /** @return list<ClassLike> */
-    private function classesInConfiguredPaths(): array
+    /**
+     * Snapshot the actual project inputs, including positional CLI sources that
+     * ConfigurationFactory never stores in the PATHS/SOURCE parameters. This
+     * locator contains only dynamically registered project files/directories;
+     * using the global reflection provider would also enumerate vendor classes.
+     * The provider resets its locator between test inputs, even when filenames
+     * repeat. Locator identity keeps one original snapshot during conversion and
+     * avoids reusing stale declarations after a same-container reset.
+     *
+     * @return list<ClassLike>
+     */
+    private function classesInProjectSources(): array
     {
-        $paths = array_values(array_unique([
-            ...\Rector\Configuration\Parameter\SimpleParameterProvider::provideArrayParameter(\Rector\Configuration\Option::PATHS),
-            ...\Rector\Configuration\Parameter\SimpleParameterProvider::provideArrayParameter(\Rector\Configuration\Option::SOURCE),
-        ]));
-        $key = json_encode($paths, JSON_THROW_ON_ERROR);
-        if (isset($this->configuredClasses[$key])) {
-            return $this->configuredClasses[$key];
+        $locator = $this->dynamicSourceLocatorProvider->provide();
+        if (isset($this->projectClasses[$locator])) {
+            return $this->projectClasses[$locator];
         }
         $files = [];
-        foreach ($paths as $path) {
-            if (is_file($path)) {
-                $files[$path] = true;
-            } elseif (is_dir($path)) {
-                foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS)) as $file) {
-                    if ($file->isFile() && $file->getExtension() === 'php') {
-                        $files[$file->getPathname()] = true;
-                    }
-                }
+        foreach ((new DefaultReflector($locator))->reflectAllClasses() as $reflection) {
+            $file = $reflection->getFileName();
+            if ($file !== null) {
+                $key = str_replace('\\', '/', $file);
+                $files[DIRECTORY_SEPARATOR === '\\' ? strtolower($key) : $key] = $file;
             }
         }
         $classes = [];
         $parser = (new \PhpParser\ParserFactory())->createForNewestSupportedVersion();
-        foreach (array_keys($files) as $file) {
+        foreach ($files as $file) {
             $source = file_get_contents($file);
             if ($source === false) {
                 throw new \RuntimeException(sprintf('Cannot inspect database descendants in %s', $file));
@@ -598,7 +605,7 @@ final class DatabaseConfigurationAnalyzer
             }
             $classes = [...$classes, ...$this->nodeFinder->findInstanceOf($nodes, ClassLike::class)];
         }
-        return $this->configuredClasses[$key] = $classes;
+        return $this->projectClasses[$locator] = $classes;
     }
 
     /**

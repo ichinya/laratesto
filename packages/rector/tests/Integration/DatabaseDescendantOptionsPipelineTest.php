@@ -183,8 +183,161 @@ final class DatabaseDescendantOptionsPipelineTest
         Assert::string($output)->notContains('#[\\Laratesto\\Attribute\\RefreshDatabase');
     }
 
+    #[Test]
+    public function positionalCliSourcesPreserveChangedOptionsAndConvertUnchangedOptions(): void
+    {
+        foreach ([false, true] as $explicitFiles) {
+            foreach ([false, true] as $sameFile) {
+                foreach ([false, true] as $seed) {
+                    $base = <<<'PHP'
+                        <?php
+                        namespace Tests;
+                        abstract class TestCase extends \Illuminate\Foundation\Testing\TestCase
+                        { use \Illuminate\Foundation\Testing\RefreshDatabase; }
+                        PHP;
+                    $child = 'class ChildTest extends TestCase { protected bool $seed = '
+                        . ($seed ? 'true' : 'false')
+                        . '; public function testValue(): void { $this->assertTrue(true); } }';
+                    $files = $sameFile
+                        ? ['Tests.php' => $base . "\n" . $child]
+                        : ['ABase.php' => $base, 'ZChild.php' => '<?php namespace Tests; ' . $child];
+                    $output = $this->cliPipeline($files, $explicitFiles);
+                    $combined = implode("\n", $output);
+                    if ($seed) {
+                        Assert::string($combined)->contains('extends \\Illuminate\\Foundation\\Testing\\TestCase');
+                        Assert::string($combined)->contains('use \\Illuminate\\Foundation\\Testing\\RefreshDatabase;');
+                        Assert::string($combined)->notContains('#[\\Laratesto\\Attribute\\RefreshDatabase');
+                        Assert::same(2, substr_count($combined, 'code=DATABASE_UNSUPPORTED_CONFIGURATION'));
+                        Assert::string($combined)->contains('migrate the shared database strategy manually');
+                    } else {
+                        Assert::string($combined)->notContains('code=DATABASE_UNSUPPORTED_CONFIGURATION');
+                        Assert::string($combined)->notContains('use \\Illuminate\\Foundation\\Testing\\RefreshDatabase;');
+                        Assert::same(1, substr_count($combined, '#[\\Laratesto\\Attribute\\RefreshDatabase'));
+                    }
+                    // Execute Laravel's inherited option readers, or the inherited target
+                    // metadata when conversion is supported, against the same class.
+                    $runtimeSource = static fn (array $sources): string => '<?php ' . implode("\n",
+                        array_map(static fn (string $source): string => substr($source, strlen('<?php')), $sources));
+                    Assert::same(
+                        $this->runtimeOptions($runtimeSource($files), 'Tests\\ChildTest', false, seedOnly: true),
+                        $this->runtimeOptions($runtimeSource($output), 'Tests\\ChildTest', ! $seed, seedOnly: true),
+                    );
+                }
+            }
+        }
+    }
+
+    #[Test]
+    public function sourceSnapshotsFollowLocatorResetsWithinOneContainer(): void
+    {
+        $tmp = sys_get_temp_dir() . '/laratesto-db-snapshot-' . bin2hex(random_bytes(8));
+        Assert::true(mkdir($tmp));
+        try {
+            $probe = <<<'PHP'
+                require $argv[1] . '/vendor/autoload.php';
+                require $argv[1] . '/vendor/rector/rector/vendor/autoload.php';
+                $container = (new \Rector\DependencyInjection\LazyContainerFactory())->create();
+                $container->boot();
+                $analyzer = $container->make(\Laratesto\Rector\Analysis\DatabaseConfigurationAnalyzer::class);
+                $provider = $container->make(\Rector\NodeTypeResolver\Reflection\BetterReflection\SourceLocatorProvider\DynamicSourceLocatorProvider::class);
+                $base = '<?php namespace Tests; abstract class TestCase extends \\Illuminate\\Foundation\\Testing\\TestCase { use \\Illuminate\\Foundation\\Testing\\RefreshDatabase; }';
+                $unsafe = '<?php namespace Tests; class ChildTest extends TestCase { protected bool $seed = true; }';
+                $baseFile = $argv[2] . '/Base.php';
+                $childFile = $argv[2] . '/Child.php';
+                file_put_contents($baseFile, $base);
+                file_put_contents($childFile, $unsafe);
+                // Configured paths remain constant while actual project inputs change.
+                \Rector\Configuration\Parameter\SimpleParameterProvider::setParameter(\Rector\Configuration\Option::PATHS, [$argv[2]]);
+                $parser = (new \PhpParser\ParserFactory())->createForNewestSupportedVersion();
+                $nodes = (new \PhpParser\NodeTraverser(new \PhpParser\NodeVisitor\NameResolver()))->traverse($parser->parse($base));
+                $classes = (new \PhpParser\NodeFinder())->findInstanceOf($nodes, \PhpParser\Node\Stmt\Class_::class);
+                $supported = static fn (): bool => $analyzer->analyze($classes[0], $classes)->supported();
+                $provider->addFiles([$baseFile, $childFile]);
+                $results = [$supported()];
+                file_put_contents($childFile, str_replace('true', 'false', $unsafe));
+                $results[] = $supported(); // Original declarations stay stable during a run.
+                $provider->reset();
+                $provider->addFiles([$baseFile, $childFile]);
+                $results[] = $supported(); // Same filenames, fresh declarations after reset.
+                file_put_contents($childFile, $unsafe);
+                $provider->reset();
+                $provider->addFiles([$baseFile]);
+                $results[] = $supported(); // The excluded child must not enter this source set.
+                $provider->reset();
+                $provider->addFiles([$baseFile, $childFile]);
+                $results[] = $supported();
+                echo json_encode($results, JSON_THROW_ON_ERROR);
+                PHP;
+            $root = dirname(__DIR__, 4);
+            $process = new Process([PHP_BINARY, '-r', $probe, $root, $tmp], $root, timeout: 60.0);
+            $process->run();
+            Assert::same(0, $process->getExitCode(), $process->getOutput() . $process->getErrorOutput());
+            Assert::same([false, false, true, true, false], json_decode($process->getOutput(), true, flags: JSON_THROW_ON_ERROR));
+        } finally {
+            $this->removeTemporaryCorpus($tmp);
+        }
+    }
+
+    /** @param array<string, string> $files @return array<string, string> */
+    private function cliPipeline(array $files, bool $explicitFiles): array
+    {
+        $root = dirname(__DIR__, 4);
+        $tmp = sys_get_temp_dir() . '/laratesto-db-cli-' . bin2hex(random_bytes(8));
+        Assert::true(mkdir($tmp . '/corpus', 0777, true));
+        $run = static function (array $command) use ($root): void {
+            $process = new Process($command, $root, timeout: 300.0);
+            $process->run();
+            Assert::same(0, $process->getExitCode(), $process->getOutput() . $process->getErrorOutput());
+        };
+        try {
+            foreach ($files as $file => $source) {
+                Assert::true(file_put_contents($tmp . '/corpus/' . $file, $source) !== false);
+                $run([PHP_BINARY, '-l', $tmp . '/corpus/' . $file]);
+            }
+            $set = var_export(\Laratesto\Rector\Set\LaratestoRectorSetList::LARAVEL_PHPUNIT_TO_LARATESTO, true);
+            $cache = var_export($tmp . '/cache', true);
+            // Deliberately no withPaths: ConfigurationFactory reads positional CLI
+            // inputs directly, without copying them into PATHS or SOURCE parameters.
+            file_put_contents($tmp . '/rector.php', <<<PHP
+                <?php
+                return \Rector\Config\RectorConfig::configure()
+                    ->withSets([{$set}])->withCache(cacheDirectory: {$cache})->withoutParallel();
+                PHP);
+            $inputs = $explicitFiles
+                ? array_map(static fn (string $file): string => $tmp . '/corpus/' . $file, array_keys($files))
+                : [$tmp . '/corpus'];
+            $command = [PHP_BINARY, $root . '/vendor/rector/rector/bin/rector', 'process', ...$inputs,
+                '--config', $tmp . '/rector.php', '--no-progress-bar', '--no-ansi', '--clear-cache'];
+            $run($command);
+            $snapshot = [];
+            foreach ($files as $file => $_source) {
+                $run([PHP_BINARY, '-l', $tmp . '/corpus/' . $file]);
+                $snapshot[$file] = file_get_contents($tmp . '/corpus/' . $file);
+            }
+            Assert::true($files !== $snapshot, 'The public set must transform the corpus.');
+            $run($command); // Clears the private cache again before the second pass.
+            foreach ($snapshot as $file => $bytes) {
+                Assert::same($bytes, file_get_contents($tmp . '/corpus/' . $file), $file . ' changed on the fresh-cache second pass');
+            }
+            return $snapshot;
+        } finally {
+            $this->removeTemporaryCorpus($tmp);
+        }
+    }
+
+    private function removeTemporaryCorpus(string $directory): void
+    {
+        foreach (new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        ) as $item) {
+            $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
+        }
+        rmdir($directory);
+    }
+
     /** Read the actual Laravel methods and the actual Testo hierarchy metadata. */
-    private function runtimeOptions(string $source, string $class, bool $target): array
+    private function runtimeOptions(string $source, string $class, bool $target, bool $seedOnly = false): array
     {
         $probe = <<<'PHP'
             namespace PHPUnit\Framework { abstract class TestCase {} }
@@ -202,16 +355,18 @@ final class DatabaseDescendantOptionsPipelineTest
                 } else {
                     $instance = (new \ReflectionClass($argv[3]))->newInstanceWithoutConstructor();
                     $options = [];
-                    foreach (['shouldSeed', 'seeder', 'shouldDropViews', 'shouldDropTypes', 'connectionsToTransact'] as $method) {
+                    $methods = $argv[5] === 'seed' ? ['shouldSeed']
+                        : ['shouldSeed', 'seeder', 'shouldDropViews', 'shouldDropTypes', 'connectionsToTransact'];
+                    foreach ($methods as $method) {
                         $options[] = (new \ReflectionMethod($instance, $method))->invoke($instance);
                     }
                 }
-                echo json_encode($options, JSON_THROW_ON_ERROR);
+                echo json_encode($argv[5] === 'seed' ? [$options[0]] : $options, JSON_THROW_ON_ERROR);
             }
             PHP;
         $root = dirname(__DIR__, 4);
         $process = new Process([PHP_BINARY, '-r', $probe, $root . '/vendor/autoload.php',
-            base64_encode($source), $class, $target ? 'target' : 'source'], $root, timeout: 60.0);
+            base64_encode($source), $class, $target ? 'target' : 'source', $seedOnly ? 'seed' : 'all'], $root, timeout: 60.0);
         $process->run();
         Assert::same(0, $process->getExitCode(), $process->getOutput() . $process->getErrorOutput());
         return json_decode($process->getOutput(), true, flags: JSON_THROW_ON_ERROR);
