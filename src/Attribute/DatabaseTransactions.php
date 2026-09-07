@@ -23,4 +23,12 @@ use Testo\Pipeline\Attribute\Interceptable;
  */
 #[\Attribute(\Attribute::TARGET_METHOD | \Attribute::TARGET_FUNCTION | \Attribute::TARGET_CLASS)]
 #[FallbackInterceptor(DatabaseTransactionsInterceptor::class)]
-final readonly class DatabaseTransactions implements Interceptable {}
+final readonly class DatabaseTransactions implements Interceptable
+{
+    /**
+     * @param list<non-empty-string|null>|null $connections Connections to wrap; null selects the default connection, an empty list selects none.
+     */
+    public function __construct(
+        public ?array $connections = null,
+    ) {}
+}

@@ -11,6 +11,10 @@ use Symfony\Component\Console\Command\Command as SymfonyCommand;
 
 /**
  * Migrate common PHPUnit test files into the Testo source layout.
+ *
+ * @deprecated Use the Rector-based migration instead: `php artisan laratesto:migrate-rector`
+ *             (ichinya/laratesto-rector). This string-based migrator keeps working but is
+ *             no longer developed; its removal is tracked separately.
  */
 final class MigratePhpUnitCommand extends Command
 {
@@ -32,6 +36,12 @@ final class MigratePhpUnitCommand extends Command
 
     public function handle(): int
     {
+        $this->components->warn(
+            'laratesto:migrate-phpunit is deprecated and will be removed in a future release; '
+            . 'use the Rector-based migration instead: php artisan laratesto:migrate-rector '
+            . '(package ichinya/laratesto-rector; --help lists its options).',
+        );
+
         $basePath = \realpath(\base_path());
         if ($basePath === false) {
             $this->components->error('Unable to resolve the Laravel project root.');

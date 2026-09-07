@@ -24,6 +24,7 @@ return Application::configure(basePath: dirname(__DIR__))
         AuthServiceProvider::class,
         \Laratesto\LaratestoServiceProvider::class,
         \App\Providers\CompetingTestServiceProvider::class,
+        \App\Providers\ParityFixtureServiceProvider::class,
         \App\Providers\TestAuthServiceProvider::class,
     ])
     ->withMiddleware(function (Middleware $middleware): void {

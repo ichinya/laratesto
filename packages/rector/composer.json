@@ -1,0 +1,45 @@
+{
+    "name": "ichinya/laratesto-rector",
+    "description": "Rector rules to migrate Laravel PHPUnit test suites to Laratesto.",
+    "license": "BSD-3-Clause",
+    "type": "library",
+    "keywords": [
+        "testo",
+        "laravel",
+        "phpunit",
+        "migration",
+        "rector"
+    ],
+    "authors": [
+        {
+            "name": "Ichi",
+            "homepage": "https://github.com/ichinya"
+        }
+    ],
+    "require": {
+        "php": ">=8.2",
+        "rector/rector": "2.6.2",
+        "testo/bridge-rector": "^0.2.4"
+    },
+    "suggest": {
+        "ichinya/laratesto": "The Laratesto runtime API these rules rewrite to. Requires the release that ships the multi-connection database attributes (connections/tables/exceptTables on DatabaseTruncation and RefreshDatabase); use dev-main until that release — the rules do NOT produce code compatible with runtime 0.6.9."
+    },
+    "autoload": {
+        "psr-4": {
+            "Laratesto\\Rector\\": "src/"
+        }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "1.x-dev"
+        },
+        "laravel": {
+            "providers": [
+                "Laratesto\\Rector\\LaratestoRectorServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

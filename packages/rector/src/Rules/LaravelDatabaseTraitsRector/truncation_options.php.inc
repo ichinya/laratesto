@@ -1,0 +1,36 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature;
+
+use Illuminate\Foundation\Testing\DatabaseTruncation;
+use Illuminate\Foundation\Testing\TestCase;
+
+final class ArchiveTest extends TestCase
+{
+    use DatabaseTruncation;
+
+    protected array $connectionsToTruncate = ['archive'];
+
+    protected array $tablesToTruncate = ['orders', 'invoices'];
+}
+-----
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature;
+
+use Illuminate\Foundation\Testing\DatabaseTruncation;
+use Illuminate\Foundation\Testing\TestCase;
+
+/* laratesto-residual(code=DATABASE_UNSUPPORTED_CONFIGURATION, rule=Laratesto\Rector\Rules\LaravelDatabaseTraitsRector, severity=manual): database option $connectionsToTruncate changes the migration and seeding scope: the trait only truncates the selected connections while its first migrate:fresh and every later db:seed run on the default connection, but the attribute would migrate and seed every selected connection - migrate it manually */
+final class ArchiveTest extends TestCase
+{
+    use DatabaseTruncation;
+
+    protected array $connectionsToTruncate = ['archive'];
+
+    protected array $tablesToTruncate = ['orders', 'invoices'];
+}

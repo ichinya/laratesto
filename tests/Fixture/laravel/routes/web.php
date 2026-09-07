@@ -61,3 +61,19 @@ Route::middleware('auth')->get('/auth/me', static function () {
 Route::middleware(SmokeGuard::class)->get('/guarded', static function () {
     return response()->json(['passed' => true]);
 });
+
+// Parity migration corpus endpoints.
+
+Route::get('/parity/ping', static function () {
+    return response()->json(['pong' => true]);
+});
+
+Route::post('/parity/users', static function (\Illuminate\Http\Request $request) {
+    $request->validate(['name' => 'required', 'email' => 'required|email']);
+
+    return response()->json(['created' => true, 'name' => $request->string('name')], 201);
+});
+
+Route::get('/parity/session', static function (\Illuminate\Http\Request $request) {
+    return response()->json(['parity' => $request->session()->get('parity')]);
+});

@@ -16,13 +16,25 @@
         }
     ],
     "require": {
-        "php": "^8.3",
-        "laravel/framework": "^13.0",
+        "php": ">=8.2",
+        "laravel/framework": "^12.0 || ^13.0",
         "testo/testo": "^0.10.42"
     },
     "require-dev": {
-        "testo/bridge-mockery": "^0.1.0"
+        "ichinya/laratesto-rector": "@dev",
+        "testo/bridge-mockery": "^0.1.0",
+        "testo/bridge-rector": "^0.2.4",
+        "rector/rector": "2.6.2"
     },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "packages/rector",
+            "options": {
+                "symlink": true
+            }
+        }
+    ],
     "autoload": {
         "psr-4": {
             "Laratesto\\": "src/"
@@ -31,6 +43,7 @@
     "autoload-dev": {
         "psr-4": {
             "Laratesto\\Tests\\": "tests/",
+            "Laratesto\\Rector\\Tests\\": "packages/rector/tests/",
             "App\\": "tests/Fixture/laravel/app/"
         }
     },
@@ -42,9 +55,15 @@
         }
     },
     "config": {
+        "platform": {
+            "php": "8.2.0"
+        },
         "sort-packages": true
     },
     "scripts": {
-        "test": "testo run"
+        "test": [
+            "Composer\\Config::disableProcessTimeout",
+            "testo run"
+        ]
     }
 }
