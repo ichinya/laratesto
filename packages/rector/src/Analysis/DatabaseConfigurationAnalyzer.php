@@ -164,6 +164,11 @@ final class DatabaseConfigurationAnalyzer
     /** @var array<non-empty-string, list<lowercase-string&non-empty-string>> */
     private array $unsupportedOverrides;
 
+    /** @var array<string, list<ClassLike>> */
+    private array $configuredClasses = [];
+
+    private bool $checkingDescendants = false;
+
     public function __construct(
         private readonly NodeNameResolver $nodeNameResolver,
         private readonly AstResolver $astResolver,
@@ -216,7 +221,7 @@ final class DatabaseConfigurationAnalyzer
                 );
             }
 
-            return new DatabaseConfigurationAnalysis();
+            return $this->inheritedConfiguration($class, $localClasses);
         }
 
         if ($nestedUses !== []) {
@@ -469,6 +474,20 @@ final class DatabaseConfigurationAnalyzer
             return $this->unsupported($base, $ancestorReason);
         }
 
+        if (! $this->checkingDescendants) {
+            $hasInheritedConsumers = false;
+            $descendantReason = $this->descendantConflictReason($class, $sourceTrait, $localClasses, $hasInheritedConsumers);
+            if ($descendantReason !== null) {
+                return $this->unsupported($base, $descendantReason);
+            }
+            if ($hasInheritedConsumers) {
+                // Keep the source metadata that still shadows descendant
+                // properties. It is inert for Testo, and makes that precedence
+                // provable again on a fresh-cache second migration pass.
+                $attributes = [];
+            }
+        }
+
         return new DatabaseConfigurationAnalysis(
             sourceTrait: $sourceTrait,
             targetAttribute: self::TRAITS[$sourceTrait],
@@ -485,6 +504,361 @@ final class DatabaseConfigurationAnalyzer
         $resolved = $this->nodeNameResolver->getName($name);
 
         return $resolved === null ? null : ltrim($resolved, '\\');
+    }
+
+    /**
+     * Preserve the shared source base as well as an unsupported inheriting child.
+     * Read a snapshot before conversion so file order does not decide which side
+     * keeps its source. Explicit duplicate-trait conversions retain their existing
+     * independent merge preflight; this guard covers inherited-only consumers.
+     *
+     * @param list<ClassLike> $localClasses
+     */
+    private function descendantConflictReason(Class_ $class, string $sourceTrait, array $localClasses, bool &$hasInheritedConsumers): ?string
+    {
+        $name = $class->namespacedName?->toString();
+        if ($name === null) {
+            return null;
+        }
+        $classes = [...$localClasses, ...$this->classesInConfiguredPaths()];
+        $this->checkingDescendants = true;
+        try {
+            foreach ($classes as $candidate) {
+                if (! $candidate instanceof Class_ || $candidate->namespacedName?->toString() === $name) {
+                    continue;
+                }
+                $current = $candidate;
+                $seen = [];
+                for ($depth = 0; $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
+                    if ($current === $candidate && $this->directlyUsesDatabaseTrait($current, $sourceTrait)) {
+                        break;
+                    }
+                    $parent = $current->extends === null ? null : $this->resolvedName($current->extends);
+                    if ($parent === $name) {
+                        $hasInheritedConsumers = true;
+                        $analysis = $this->inheritedConfiguration($candidate, $classes);
+                        if ($analysis->unsupportedReason !== null) {
+                            return sprintf('descendant %s cannot preserve its %s configuration - migrate the shared database strategy manually: %s',
+                                $candidate->namespacedName?->toString() ?? 'anonymous class', $sourceTrait, $analysis->unsupportedReason);
+                        }
+                        break;
+                    }
+                    if ($parent === null || isset($seen[$parent])) {
+                        break;
+                    }
+                    $seen[$parent] = true;
+                    $current = $this->resolveAncestor($parent, $classes);
+                    if (! $current instanceof Class_) {
+                        break;
+                    }
+                }
+            }
+        } finally {
+            $this->checkingDescendants = false;
+        }
+        return null;
+    }
+
+    /** @return list<ClassLike> */
+    private function classesInConfiguredPaths(): array
+    {
+        $paths = array_values(array_unique([
+            ...\Rector\Configuration\Parameter\SimpleParameterProvider::provideArrayParameter(\Rector\Configuration\Option::PATHS),
+            ...\Rector\Configuration\Parameter\SimpleParameterProvider::provideArrayParameter(\Rector\Configuration\Option::SOURCE),
+        ]));
+        $key = json_encode($paths, JSON_THROW_ON_ERROR);
+        if (isset($this->configuredClasses[$key])) {
+            return $this->configuredClasses[$key];
+        }
+        $files = [];
+        foreach ($paths as $path) {
+            if (is_file($path)) {
+                $files[$path] = true;
+            } elseif (is_dir($path)) {
+                foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS)) as $file) {
+                    if ($file->isFile() && $file->getExtension() === 'php') {
+                        $files[$file->getPathname()] = true;
+                    }
+                }
+            }
+        }
+        $classes = [];
+        $parser = (new \PhpParser\ParserFactory())->createForNewestSupportedVersion();
+        foreach (array_keys($files) as $file) {
+            $source = file_get_contents($file);
+            if ($source === false) {
+                throw new \RuntimeException(sprintf('Cannot inspect database descendants in %s', $file));
+            }
+            try {
+                $nodes = $parser->parse($source) ?? [];
+                $nodes = (new \PhpParser\NodeTraverser(new \PhpParser\NodeVisitor\NameResolver()))->traverse($nodes);
+            } catch (\PhpParser\Error) {
+                // The public pipeline reports malformed input separately.
+                continue;
+            }
+            $classes = [...$classes, ...$this->nodeFinder->findInstanceOf($nodes, ClassLike::class)];
+        }
+        return $this->configuredClasses[$key] = $classes;
+    }
+
+    /**
+     * An inherited trait still reads options from the concrete object. An inherited
+     * target attribute instead keeps the ancestor's fixed configuration. There is
+     * no trait to remove here and adding another attribute would run the strategy
+     * twice, so only an unchanged effective configuration can pass unmarked.
+     *
+     * @param list<ClassLike> $localClasses
+     */
+    private function inheritedConfiguration(Class_ $class, array $localClasses): DatabaseConfigurationAnalysis
+    {
+        $chain = [$class];
+        $owners = [];
+        $seen = [];
+        $current = $class->extends === null ? null : $this->resolvedName($class->extends);
+
+        for ($depth = 0; $current !== null && $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
+            if ($current === self::FRAMEWORK_BASE || $current === self::TARGET_BASE || isset($seen[$current])) {
+                break;
+            }
+            $seen[$current] = true;
+            $ancestor = $this->resolveAncestor($current, $localClasses);
+            if (! $ancestor instanceof Class_) {
+                break;
+            }
+            $chain[] = $ancestor;
+            foreach (self::TRAITS as $sourceTrait => $targetAttribute) {
+                if ($this->directlyUsesDatabaseTrait($ancestor, $sourceTrait)
+                    || $this->attributesNamed($ancestor, $targetAttribute) !== []) {
+                    // Lower duplicates merge away; the topmost occurrence owns
+                    // the one attribute the runtime eventually inherits.
+                    $owners[$sourceTrait] = count($chain) - 1;
+                }
+            }
+            $current = $ancestor->extends === null ? null : $this->resolvedName($ancestor->extends);
+        }
+
+        foreach ($owners as $sourceTrait => $index) {
+            $owner = $chain[$index];
+            $ownerName = $owner->namespacedName?->toString() ?? 'the project base';
+            $checkingDescendants = $this->checkingDescendants;
+            $this->checkingDescendants = true;
+            try {
+                [$reason, $options] = $this->duplicateConfiguration($owner, $ownerName, $sourceTrait, $localClasses);
+            } finally {
+                $this->checkingDescendants = $checkingDescendants;
+            }
+            $reason ??= $this->inheritedOptionsConflict(
+                $class, array_slice($chain, 0, $index), $owner, $sourceTrait, $options ?? [], $localClasses,
+            );
+            if ($reason !== null) {
+                return new DatabaseConfigurationAnalysis(
+                    sourceTrait: $sourceTrait,
+                    targetAttribute: self::TRAITS[$sourceTrait],
+                    unsupportedReason: sprintf('inherited database strategy %s from %s: %s', $sourceTrait, $ownerName, $reason),
+                );
+            }
+        }
+
+        return new DatabaseConfigurationAnalysis();
+    }
+
+    /**
+     * @param list<Class_> $levels Nearest first, below the attribute owner.
+     * @param array<non-empty-string, Expr> $options
+     * @param list<ClassLike> $localClasses
+     */
+    private function inheritedOptionsConflict(
+        Class_ $class,
+        array $levels,
+        Class_ $owner,
+        string $sourceTrait,
+        array $options,
+        array $localClasses,
+    ): ?string {
+        $metadata = ['seed' => false, 'seeder' => null, 'conflict' => null];
+        if ($sourceTrait !== 'Illuminate\Foundation\Testing\DatabaseTransactions') {
+            $metadata = $this->inheritedSeedAttributes($class, $localClasses, includeClass: true);
+            if ($metadata['conflict'] !== null) {
+                return $metadata['conflict'];
+            }
+            if (($metadata['seed'] || $metadata['seeder'] !== null) && ! $this->sourceSupportsSeedAttributes()) {
+                return 'Laravel Seed/Seeder attributes require proven Laravel 13 source semantics; preserve them for manual migration';
+            }
+        }
+
+        $declarations = [];
+        foreach ($levels as $level) {
+            $members = [$level];
+            $unknown = $this->eachComposedTrait($level, $localClasses, static function (Trait_ $trait) use (&$members): void {
+                $members[] = $trait;
+            });
+            if ($unknown !== null) {
+                return sprintf('used trait %s could not be resolved - migrate the inherited database configuration manually', $unknown);
+            }
+            foreach ($members as $member) {
+                foreach ($member->getMethods() as $method) {
+                    if (in_array(strtolower($method->name->toString()), $this->unsupportedOverrides[$sourceTrait], true)) {
+                        return sprintf('database override %s() requires manual migration', $method->name->toString());
+                    }
+                }
+                // An alias can introduce a live hook without a declaration of
+                // that name in either the class or its composed traits.
+                foreach ($member->stmts as $statement) {
+                    if (! $statement instanceof TraitUse) {
+                        continue;
+                    }
+                    foreach ($statement->adaptations as $adaptation) {
+                        if ($adaptation instanceof Node\Stmt\TraitUseAdaptation\Alias
+                            && $adaptation->newName !== null
+                            && in_array(strtolower($adaptation->newName->toString()), $this->unsupportedOverrides[$sourceTrait], true)) {
+                            return sprintf('database hook alias %s() requires manual migration', $adaptation->newName->toString());
+                        }
+                    }
+                }
+                foreach ($this->promotedProperties($member) as $parameter) {
+                    $name = $parameter->var->name;
+                    if (is_string($name) && isset(self::PROPERTY_OPTIONS[$sourceTrait][$name]) && ! isset($declarations[$name])) {
+                        return sprintf('database option $%s is promoted and requires manual migration', $name);
+                    }
+                }
+                foreach ($member->getProperties() as $property) {
+                    foreach ($property->props as $item) {
+                        $name = $item->name->toString();
+                        if (isset(self::PROPERTY_OPTIONS[$sourceTrait][$name]) && ! isset($declarations[$name])) {
+                            $declarations[$name] = [$property, $item, $level];
+                        }
+                    }
+                }
+            }
+        }
+
+        foreach (self::PROPERTY_OPTIONS[$sourceTrait] as $propertyName => $argument) {
+            $declaration = $declarations[$propertyName] ?? null;
+            $retainedDeclaration = $declaration !== null
+                && ! $this->directlyUsesDatabaseTrait($declaration[2], $sourceTrait);
+            $liftedDeclaration = false;
+            foreach ($owner->getProperties() as $ownerProperty) {
+                foreach ($ownerProperty->props as $ownerItem) {
+                    $liftedDeclaration = $liftedDeclaration || $ownerItem->name->toString() === $propertyName;
+                }
+            }
+            $value = null;
+            $scope = $class;
+            if ($argument === 'seed' && $metadata['seed']) {
+                $value = new Expr\ConstFetch(new Name('true'));
+            } elseif ($argument === 'seeder' && $metadata['seeder'] !== null) {
+                $value = $metadata['seeder'];
+            } elseif ($declaration !== null) {
+                [$property, $item, $scope] = $declaration;
+                if ($property->isPrivate() || $property->isStatic() || ! $item->default instanceof Expr) {
+                    return sprintf('database option $%s has unproven inherited visibility or value - migrate it manually', $propertyName);
+                }
+                $value = $item->default;
+                $nullableDefault = in_array($argument, ['seeder', 'tables', 'exceptTables'], true)
+                    && $value instanceof Expr\ConstFetch && strtolower($value->name->toString()) === 'null';
+                if (! $nullableDefault && ! $this->optionMatchesShape($argument, $value)) {
+                    return sprintf('database option $%s has an unsupported inherited literal shape - migrate it manually', $propertyName);
+                }
+            }
+
+            if ($value !== null) {
+                $expected = $options[$argument] ?? match ($argument) {
+                    'seed', 'dropViews', 'dropTypes' => new Expr\ConstFetch(new Name('false')),
+                    default => new Expr\ConstFetch(new Name('null')),
+                };
+                $actualKey = $this->inheritedOptionKey($value, $scope, $argument);
+                if ($actualKey === null || $actualKey !== $this->inheritedOptionKey($expected, $owner, $argument)) {
+                    return sprintf('database option $%s changes the inherited attribute configuration - migrate the descendant strategy manually', $propertyName);
+                }
+            }
+
+            // No declaration below the owner means its lifted property vanishes
+            // from project readers. A retained declaration still serves readers;
+            // its equal value alone does not make writes safe for a fixed attribute.
+            foreach ($levels as $level) {
+                $scopeName = $level->namespacedName?->toString() ?? 'the descendant';
+                $members = [$level];
+                $this->eachComposedTrait($level, $localClasses, static function (Trait_ $trait) use (&$members): void {
+                    $members[] = $trait;
+                });
+                foreach ($members as $member) {
+                    foreach ($member->getMethods() as $method) {
+                        if (! $retainedDeclaration && ($liftedDeclaration || $declaration !== null || isset($options[$argument]))
+                            && $this->methodReaderSite($method, $propertyName, $scopeName, $scopeName) !== null) {
+                            return sprintf('database option $%s is read below the ancestor that lifts it - preserve the reader and migrate it manually', $propertyName);
+                        }
+                        $aliases = $this->thisAliases($method);
+                        if (($argument === 'seed' && $metadata['seed']) || ($argument === 'seeder' && $metadata['seeder'] !== null)) {
+                            continue;
+                        }
+                        foreach ($this->nodeFinder->find($method, static fn (Node $node): bool =>
+                            $node instanceof Expr\Assign || $node instanceof Expr\AssignRef || $node instanceof Expr\AssignOp
+                            || $node instanceof Expr\PreInc || $node instanceof Expr\PostInc
+                            || $node instanceof Expr\PreDec || $node instanceof Expr\PostDec || $node instanceof Node\Stmt\Unset_) as $write) {
+                            $targets = $write instanceof Node\Stmt\Unset_ ? $write->vars : [$write->var];
+                            if ($write instanceof Expr\AssignRef) {
+                                $targets[] = $write->expr;
+                            }
+                            foreach ($targets as $target) {
+                                while ($target instanceof Expr\ArrayDimFetch) {
+                                    $target = $target->var;
+                                }
+                                if ($this->instancePropertyRead($target, $propertyName, $aliases) !== null) {
+                                    return sprintf('database option $%s is written by descendant code - migrate the dynamic configuration manually', $propertyName);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** Compare only proven literals, resolving class constants in their own scope. */
+    private function inheritedOptionKey(Expr $value, Class_ $scope, string $argument): ?string
+    {
+        if ($value instanceof Expr\ConstFetch) {
+            $name = strtolower($value->name->toString());
+            return in_array($name, ['true', 'false', 'null'], true) ? $name : null;
+        }
+        if ($value instanceof Scalar\String_) {
+            return 'string:' . $value->value;
+        }
+        if ($value instanceof Expr\ClassConstFetch && $value->class instanceof Name
+            && $this->nodeNameResolver->isName($value->name, 'class')) {
+            $name = match (strtolower($value->class->toString())) {
+                'self' => $scope->namespacedName?->toString(),
+                'parent' => $scope->extends === null ? null : $this->resolvedName($scope->extends),
+                'static' => null,
+                default => $this->resolvedName($value->class),
+            };
+            return $name === null ? null : 'string:' . $name;
+        }
+        if (! $value instanceof Expr\Array_) {
+            return null;
+        }
+        if ($argument === 'connections' && $this->isSingleDefaultSelection($value)) {
+            return 'null';
+        }
+        if ($argument === 'exceptTables' && $value->items === []) {
+            // Both runtimes still exclude the migrations table with no
+            // additional exclusions, whether the option is absent or empty.
+            return 'null';
+        }
+        $items = [];
+        foreach ($value->items as $item) {
+            if ($item === null || $item->unpack || $item->key !== null) {
+                return null;
+            }
+            $key = $this->inheritedOptionKey($item->value, $scope, 'item');
+            if ($key === null) {
+                return null;
+            }
+            $items[] = $key;
+        }
+        return json_encode($items, JSON_THROW_ON_ERROR);
     }
 
     /**
@@ -1972,11 +2346,16 @@ final class DatabaseConfigurationAnalyzer
      * @param list<ClassLike> $localClasses
      * @return array{seed: bool, seeder: ?Expr, conflict: ?non-empty-string}
      */
-    private function inheritedSeedAttributes(Class_ $class, array $localClasses): array
+    private function inheritedSeedAttributes(Class_ $class, array $localClasses, bool $includeClass = false): array
     {
         $result = ['seed' => false, 'seeder' => null, 'conflict' => null];
 
-        $current = $class->extends === null ? null : $this->resolvedName($class->extends);
+        $current = $includeClass
+            ? $class->namespacedName?->toString()
+            : ($class->extends === null ? null : $this->resolvedName($class->extends));
+        if ($includeClass) {
+            $localClasses = [$class, ...$localClasses];
+        }
         $seen = [];
 
         for ($depth = 0; $current !== null && $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
