@@ -15,9 +15,11 @@ final class FrontierPipeline
      * @param array<string, string> $files
      * @param array<mixed> $skip Paths are relative to the corpus, rule names are FQCNs.
      * @param list<string>|null $cliPaths Null configures paths; [] passes the corpus directory; a list passes files.
+     * @param list<string>|null $configuredPaths Override configured paths relative to the corpus; '' means its directory.
+     * @param list<string> $autoloadPaths Reflection-only paths relative to the corpus; defaults to configured paths.
      * @return array<string, string>
      */
-    public static function run(array $files, array $skip = [], ?array $cliPaths = null): array
+    public static function run(array $files, array $skip = [], ?array $cliPaths = null, ?array $configuredPaths = null, array $autoloadPaths = []): array
     {
         $root = dirname(__DIR__, 4);
         $tmp = sys_get_temp_dir() . '/laratesto-frontier-' . bin2hex(random_bytes(8));
@@ -33,15 +35,19 @@ final class FrontierPipeline
                 $skip[$rule] = $tmp . '/corpus/' . $paths;
             }
         }
-        $paths = var_export($tmp . '/corpus', true);
         $cache = var_export($tmp . '/cache', true);
         $set = var_export(LaratestoRectorSetList::LARAVEL_PHPUNIT_TO_LARATESTO, true);
         $skipCode = var_export($skip, true);
-        $configuredPaths = $cliPaths === null ? "->withPaths([{$paths}])->withAutoloadPaths([{$paths}])" : '';
+        $resolvePaths = static fn(array $paths): array => array_map(static fn(string $path): string => $tmp . '/corpus/' . $path, $paths);
+        $configuredPaths ??= $cliPaths === null ? [''] : [];
+        $pathsCode = var_export($resolvePaths($configuredPaths), true);
+        $autoloadCode = var_export($resolvePaths($autoloadPaths !== [] ? $autoloadPaths : $configuredPaths), true);
+        $pathsConfiguration = $configuredPaths === [] ? '' : "->withPaths({$pathsCode})";
         file_put_contents($tmp . '/rector.php', <<<PHP
             <?php
             return \Rector\Config\RectorConfig::configure()
-                {$configuredPaths}
+                {$pathsConfiguration}
+                ->withAutoloadPaths({$autoloadCode})
                 ->withSets([{$set}])
                 ->withSkip({$skipCode})
                 ->withCache(cacheDirectory: {$cache})

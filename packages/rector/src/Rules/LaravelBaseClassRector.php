@@ -41,6 +41,7 @@ use Rector\BetterPhpDocParser\PhpDocInfo\PhpDocInfo;
 use Rector\BetterPhpDocParser\PhpDocInfo\PhpDocInfoFactory;
 use Rector\BetterPhpDocParser\PhpDocManipulator\PhpDocTagRemover;
 use Rector\Comments\NodeDocBlock\DocBlockUpdater;
+use Rector\Configuration\ConfigurationRuleFilter;
 use Rector\Configuration\Option;
 use Rector\Configuration\Parameter\SimpleParameterProvider;
 use Rector\Contract\Rector\ConfigurableRectorInterface;
@@ -49,6 +50,8 @@ use Rector\NodeTypeResolver\Reflection\BetterReflection\SourceLocatorProvider\Dy
 use Rector\PhpParser\AstResolver;
 use Rector\Rector\AbstractRector;
 use Rector\Skipper\FileSystem\PathNormalizer;
+use Rector\Util\Reflection\PrivatesAccessor;
+use Rector\ValueObject\Configuration;
 use Symplify\RuleDocGenerator\ValueObject\CodeSample\CodeSample;
 use Symplify\RuleDocGenerator\ValueObject\RuleDefinition;
 use Testo\Bridge\Rector\Testing\TestRectorFixtures;
@@ -152,6 +155,8 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         private readonly PhpDocInfoFactory $phpDocInfoFactory,
         private readonly PhpDocTagRemover $phpDocTagRemover,
         private readonly DocBlockUpdater $docBlockUpdater,
+        private readonly ConfigurationRuleFilter $configurationRuleFilter,
+        private readonly PrivatesAccessor $privatesAccessor,
     ) {
         $this->configuration = BaseClassConfiguration::defaults();
         $this->traitFrontierSnapshots = new \WeakMap();
@@ -1034,7 +1039,15 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         $realFile = self::normalizePath($realFile);
 
         try {
-            $paths = SimpleParameterProvider::provideArrayParameter(Option::PATHS);
+            // ProcessCommand and WorkerCommand set this shared run Configuration
+            // before traversing files. Its paths include positional CLI overrides;
+            // Option::PATHS still contains only the configured paths. The pinned
+            // Rector has no public getter, so keep this compatibility read local.
+            // Do not infer membership from the locator: it includes autoload paths.
+            $runConfiguration = $this->privatesAccessor->getPrivateProperty($this->configurationRuleFilter, 'configuration');
+            $paths = $runConfiguration instanceof Configuration
+                ? $runConfiguration->getPaths()
+                : SimpleParameterProvider::provideArrayParameter(Option::PATHS);
         } catch (\Throwable $e) {
             return false;
         }
