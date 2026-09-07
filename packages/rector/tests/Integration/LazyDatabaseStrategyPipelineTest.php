@@ -27,7 +27,7 @@ final class LazyDatabaseStrategyPipelineTest
 
         declare(strict_types=1);
 
-        namespace Tests;
+        namespace Tests\LazyLf;
 
         use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 
@@ -49,7 +49,7 @@ final class LazyDatabaseStrategyPipelineTest
 
         declare(strict_types=1);
 
-        namespace Tests;
+        namespace Tests\Eager;
 
         use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -70,9 +70,9 @@ final class LazyDatabaseStrategyPipelineTest
     public function lazyTraitStaysVisibleAndIdempotentAcrossLfAndCrlf(): void
     {
         $snapshot = self::runFullSetTwice([
-            'LazyLfTest.php' => self::LAZY_CORPUS,
-            'LazyCrlfTest.php' => self::toCrlf(self::LAZY_CORPUS),
-            'EagerControlTest.php' => self::EAGER_CONTROL_CORPUS,
+            'LazyLfTest.php' => self::toLf(self::LAZY_CORPUS),
+            'LazyCrlfTest.php' => self::toCrlf(str_replace('Tests\LazyLf', 'Tests\LazyCrlf', self::LAZY_CORPUS)),
+            'EagerControlTest.php' => self::toLf(self::EAGER_CONTROL_CORPUS),
         ]);
 
         $lf = Assert::string($snapshot['LazyLfTest.php']);
@@ -97,8 +97,12 @@ final class LazyDatabaseStrategyPipelineTest
         $lf->notContains('#[\Laratesto\Attribute\RefreshDatabase]');
         $lf->notContains('#[\Testo\Test]');
 
-        // The strategy-free abstract base of the same hierarchy still migrates.
-        $lf->contains('abstract class TestCase extends \Laratesto\Testing\LaravelTestCase');
+        // The lazy trait still needs Laravel's inherited app/lifecycle machinery,
+        // so its strategy-free shared base must retain the source framework too.
+        $lf->contains('abstract class TestCase extends \Illuminate\Foundation\Testing\TestCase');
+        $lf->contains('laratesto-residual(code=CLASS_UNSAFE_HIERARCHY');
+        $lf->contains('descendant Tests\LazyLf\LazyTest');
+        $lf->notContains('extends \Laratesto\Testing\LaravelTestCase');
 
         // The same contract on the CRLF corpus, compared after newline
         // normalization; the corpus itself carried raw CRLF bytes in.
@@ -110,19 +114,26 @@ final class LazyDatabaseStrategyPipelineTest
         );
         $crlf->contains('use LazilyRefreshDatabase;');
         $crlf->contains("migrate manually */\nfinal class LazyTest extends TestCase");
+        $crlf->contains('abstract class TestCase extends \Illuminate\Foundation\Testing\TestCase');
+        $crlf->contains('descendant Tests\LazyCrlf\LazyTest');
+        $crlf->notContains('extends \Laratesto\Testing\LaravelTestCase');
+        $crlf->notContains('#[\Laratesto\Attribute\RefreshDatabase]');
+        $crlf->notContains('#[\Testo\Test]');
 
         $control = Assert::string(self::toLf($snapshot['EagerControlTest.php']));
 
         // The ordinary eager strategy still converts clean: attribute instead of the
         // trait, and no residual anywhere.
         $control->contains('#[\Laratesto\Attribute\RefreshDatabase]');
+        $control->contains('abstract class TestCase extends \Laratesto\Testing\LaravelTestCase');
+        $control->contains('#[\Testo\Test]');
         $control->notContains('use RefreshDatabase;');
         $control->notContains('laratesto-residual');
     }
 
     private static function toCrlf(string $contents): string
     {
-        return str_replace("\n", "\r\n", $contents);
+        return str_replace("\n", "\r\n", self::toLf($contents));
     }
 
     private static function toLf(string $contents): string
@@ -160,10 +171,13 @@ final class LazyDatabaseStrategyPipelineTest
             // The CRLF twin must genuinely carry CRLF bytes in, or the LF/CRLF proof
             // below is vacuous.
             Assert::true(str_contains($files['LazyCrlfTest.php'], "\r\n"), 'The CRLF corpus was not written with CRLF line endings.');
+            Assert::true(! str_contains($files['LazyCrlfTest.php'], "\r\r\n"), 'The CRLF corpus contains doubled carriage returns.');
+            Assert::true(! str_contains($files['LazyLfTest.php'], "\r"), 'The LF corpus contains carriage returns.');
 
             // Config written inside the tmp tree so relative paths always point at the copy.
             $withPaths = \var_export($corpusDir, true);
             $sets = \var_export(LaratestoRectorSetList::LARAVEL_PHPUNIT_TO_LARATESTO, true);
+            $cache = \var_export($tmpDir . '/cache', true);
             \file_put_contents(
                 $tmpDir . '/rector.php',
                 <<<PHP
@@ -171,17 +185,27 @@ final class LazyDatabaseStrategyPipelineTest
 
                 declare(strict_types=1);
 
+                use Laratesto\Rector\Rules\LaravelBaseClassRector;
                 use Rector\Config\RectorConfig;
 
                 return RectorConfig::configure()
                     ->withPaths([{$withPaths}])
-                    ->withSets([{$sets}]);
+                    ->withSets([{$sets}])
+                    ->withCache(cacheDirectory: {$cache})
+                    ->withConfiguredRule(LaravelBaseClassRector::class, [
+                        LaravelBaseClassRector::BASE_CLASSES => [
+                            'Tests\\LazyLf\\TestCase',
+                            'Tests\\LazyCrlf\\TestCase',
+                            'Tests\\Eager\\TestCase',
+                            'Illuminate\\Foundation\\Testing\\TestCase',
+                        ],
+                    ]);
                 PHP,
             );
 
             $runOnce = static function () use ($rectorBin, $tmpDir, $rootDir): void {
                 $process = new Process(
-                    [PHP_BINARY, $rectorBin, 'process', '--config', $tmpDir . '/rector.php', '--no-progress-bar', '--no-ansi'],
+                    [PHP_BINARY, $rectorBin, 'process', '--config', $tmpDir . '/rector.php', '--no-progress-bar', '--no-ansi', '--clear-cache'],
                     $rootDir,
                     timeout: 300.0,
                 );

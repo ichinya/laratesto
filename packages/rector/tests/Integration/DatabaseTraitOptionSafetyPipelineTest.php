@@ -168,9 +168,35 @@ final class PlainControlTest extends \Tests\TestCase
     public function test_ok(): void {}
 }
 PHP));
+            file_put_contents($tmpDir . '/corpus/Controls.php', $corpus(<<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Control;
+
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\CleanHelper;
+
+final class CleanTraitTest extends \Illuminate\Foundation\Testing\TestCase
+{
+    use RefreshDatabase;
+    use CleanHelper;
+
+    public function test_ok(): void {}
+}
+
+final class PlainControlTest extends \Illuminate\Foundation\Testing\TestCase
+{
+    use RefreshDatabase;
+
+    public function test_ok(): void {}
+}
+PHP));
 
             $paths = var_export($tmpDir . '/corpus', true);
             $set = var_export(LaratestoRectorSetList::LARAVEL_PHPUNIT_TO_LARATESTO, true);
+            $cache = var_export($tmpDir . '/cache', true);
             file_put_contents($tmpDir . '/rector.php', <<<PHP
 <?php
 
@@ -182,6 +208,7 @@ use Rector\\Config\\RectorConfig;
 return RectorConfig::configure()
     ->withPaths([{$paths}])
     ->withSets([{$set}])
+    ->withCache(cacheDirectory: {$cache})
     ->withConfiguredRule(LaravelBaseClassRector::class, [
         LaravelBaseClassRector::BASE_CLASSES => [
             'Tests\\\\TestCase',
@@ -198,6 +225,7 @@ PHP);
             // marker and attribute adjacency, not the file's EOL style.
             $base = str_replace("\r\n", "\n", (string) file_get_contents($tmpDir . '/corpus/Base.php'));
             $tests = str_replace("\r\n", "\n", (string) file_get_contents($tmpDir . '/corpus/Tests.php'));
+            $controls = str_replace("\r\n", "\n", (string) file_get_contents($tmpDir . '/corpus/Controls.php'));
 
             // Every marker is attached directly to its own class declaration and
             // every converted class carries its attribute directly, so the exact
@@ -228,12 +256,19 @@ PHP);
                 . 'final class AncestorTraitTest extends \Tests\TraitBase' . "\n{\n    use RefreshDatabase;",
             );
 
-            // A project trait without database options is unrelated machinery: the
-            // conversion proceeds and keeps both the trait use and its import.
+            // The unresolved sibling may supply a Laravel lifecycle method. Its
+            // shared source base and otherwise safe siblings must remain together.
+            Assert::string($base)->contains('abstract class TestCase extends FoundationTestCase');
+            Assert::string($base)->contains('descendant Tests\Feature\UnresolvableTraitTest');
+            Assert::string($base)->notContains('extends \Laratesto\Testing\LaravelTestCase');
             Assert::string($tests)->contains(
-                "#[\Laratesto\Attribute\RefreshDatabase]\n"
-                . 'final class CleanTraitTest extends \Tests\TestCase' . "\n{\n    use CleanHelper;",
+                'final class CleanTraitTest extends \Tests\TestCase' . "\n{\n    use RefreshDatabase;\n    use CleanHelper;",
             );
+            Assert::string($tests)->contains(
+                'final class PlainControlTest extends \Tests\TestCase' . "\n{\n    use RefreshDatabase;",
+            );
+            Assert::string($tests)->notContains('#[\Laratesto\Attribute\RefreshDatabase]');
+            Assert::string($tests)->notContains('#[\Testo\Test]');
 
             // A used trait that cannot be resolved cannot be proven option-free —
             // the conversion fails closed instead of guessing.
@@ -242,18 +277,31 @@ PHP);
                 . 'final class UnresolvableTraitTest extends \Tests\TestCase' . "\n{\n    use RefreshDatabase;\n    use NotInstallable;",
             );
 
-            // Control: a recognized class with only the framework trait converts.
-            Assert::string($tests)->contains(
+            // Independent hierarchies still convert, including an option-free
+            // project trait; neither positive control shares the blocked base.
+            Assert::string($controls)->contains(
                 "#[\Laratesto\Attribute\RefreshDatabase]\n"
-                . 'final class PlainControlTest extends \Tests\TestCase' . "\n{\n",
+                . 'final class CleanTraitTest extends \Laratesto\Testing\LaravelTestCase' . "\n{\n    use CleanHelper;",
             );
+            Assert::string($controls)->contains(
+                "#[\Laratesto\Attribute\RefreshDatabase]\n"
+                . 'final class PlainControlTest extends \Laratesto\Testing\LaravelTestCase' . "\n{\n",
+            );
+            Assert::same(2, substr_count($controls, '#[\Testo\Test]'));
+            Assert::string($controls)->notContains('use RefreshDatabase;');
+            Assert::string($controls)->notContains('laratesto-residual');
             // Re-running the migration over its own output changes nothing: the
             // markers reconcile and the conversions stay byte-identical — compared
             // on the raw file bytes, with no line-ending normalization.
-            $afterFirstRun = (string) file_get_contents($tmpDir . '/corpus/Tests.php');
+            $afterFirstRun = [];
+            foreach (['Base.php', 'Tests.php', 'Controls.php'] as $file) {
+                $afterFirstRun[$file] = (string) file_get_contents($tmpDir . '/corpus/' . $file);
+            }
 
             $this->runRector($rootDir, $tmpDir);
-            Assert::same($afterFirstRun, (string) file_get_contents($tmpDir . '/corpus/Tests.php'));
+            foreach ($afterFirstRun as $file => $contents) {
+                Assert::same($contents, (string) file_get_contents($tmpDir . '/corpus/' . $file));
+            }
         } finally {
             self::recursiveRemove($tmpDir);
         }
@@ -272,7 +320,7 @@ PHP);
         // cannot deadlock the run. Finite timeout so a hung binary fails the test
         // instead of stalling it forever.
         $process = new Process(
-            [PHP_BINARY, $rectorBin, 'process', '--config', $tmpDir . '/rector.php', '--no-progress-bar', '--no-ansi'],
+            [PHP_BINARY, $rectorBin, 'process', '--config', $tmpDir . '/rector.php', '--no-progress-bar', '--no-ansi', '--clear-cache'],
             $rootDir,
             timeout: 300.0,
         );
