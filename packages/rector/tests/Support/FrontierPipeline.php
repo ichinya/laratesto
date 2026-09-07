@@ -24,6 +24,12 @@ final class FrontierPipeline
         $root = dirname(__DIR__, 4);
         $tmp = sys_get_temp_dir() . '/laratesto-frontier-' . bin2hex(random_bytes(8));
         Assert::true(mkdir($tmp . '/corpus', 0777, true));
+        // Windows runners expose a short TEMP path (RUNNER~1), while Rector
+        // matches wildcard skips against real paths. Canonicalize the existing
+        // root before appending patterns, which cannot themselves be realpathed.
+        $realTmp = realpath($tmp);
+        Assert::true(is_string($realTmp));
+        $tmp = str_replace('\\', '/', $realTmp);
         foreach ($files as $name => $bytes) {
             Assert::true(file_put_contents($tmp . '/corpus/' . $name, $bytes) !== false);
             self::process([PHP_BINARY, '-l', $tmp . '/corpus/' . $name], $root);
