@@ -606,7 +606,18 @@ final class HttpCompatibilityAnalyzer
     private function isRewrittenParentLifecycleCall(Node\Stmt\ClassMethod $method, StaticCall $call): bool
     {
         $name = $method->name->toString();
-        if (! in_array($name, ['setUp', 'tearDown'], true)
+        $originalMethod = $method->getAttribute(AttributeKey::ORIGINAL_NODE);
+        $originalCall = $call->getAttribute(AttributeKey::ORIGINAL_NODE);
+        // Another worker can still reflect the parent's original setUp/tearDown
+        // after this class has been converted. Recognize the actual rename from
+        // the original AST, without trusting a target hook written in the input.
+        $renamed = $originalMethod instanceof Node\Stmt\ClassMethod
+            && $originalCall instanceof StaticCall
+            && in_array($originalMethod->name->toString(), ['setUp', 'tearDown'], true)
+            && $name === $originalMethod->name->toString() . 'Laravel'
+            && $this->nodeNameResolver->isName($originalCall->class, 'parent')
+            && $this->nodeNameResolver->isName($originalCall->name, $originalMethod->name->toString());
+        if ((! in_array($name, ['setUp', 'tearDown'], true) && ! $renamed)
             || ! $this->nodeNameResolver->isName($call->name, $name)) {
             return false;
         }
