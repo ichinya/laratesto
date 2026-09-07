@@ -10,7 +10,7 @@ trait BindsClock
 {
     public function bindClock(): void
     {
-        $this->beforeApplicationDestroyed(function (): void {});
+        // Ordinary helper has no dependency on the source test base.
     }
 }
 
@@ -40,7 +40,7 @@ trait BindsClock
 {
     public function bindClock(): void
     {
-        $this->beforeApplicationDestroyed(function (): void {});
+        // Ordinary helper has no dependency on the source test base.
     }
 }
 

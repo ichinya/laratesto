@@ -34,6 +34,8 @@ use PhpParser\Node\Stmt\TraitUse;
 use PhpParser\Node\Stmt\TraitUseAdaptation;
 use PhpParser\NodeFinder;
 use PHPStan\Analyser\Scope;
+use PHPStan\BetterReflection\Reflector\DefaultReflector;
+use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\PhpDocParser\Ast\PhpDoc\GenericTagValueNode;
 use Rector\BetterPhpDocParser\PhpDocInfo\PhpDocInfo;
 use Rector\BetterPhpDocParser\PhpDocInfo\PhpDocInfoFactory;
@@ -43,6 +45,7 @@ use Rector\Configuration\Option;
 use Rector\Configuration\Parameter\SimpleParameterProvider;
 use Rector\Contract\Rector\ConfigurableRectorInterface;
 use Rector\NodeTypeResolver\Node\AttributeKey;
+use Rector\NodeTypeResolver\Reflection\BetterReflection\SourceLocatorProvider\DynamicSourceLocatorProvider;
 use Rector\PhpParser\AstResolver;
 use Rector\Rector\AbstractRector;
 use Rector\Skipper\FileSystem\PathNormalizer;
@@ -136,8 +139,13 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
 
     private BaseClassConfiguration $configuration;
 
+    /** @var \WeakMap<object, list<ClassLike>> */
+    private \WeakMap $traitFrontierSnapshots;
+
     public function __construct(
         private readonly AstResolver $astResolver,
+        private readonly ReflectionProvider $reflectionProvider,
+        private readonly DynamicSourceLocatorProvider $sourceLocatorProvider,
         private readonly ConfiguredHierarchy $hierarchy,
         private readonly DatabaseConfigurationAnalyzer $databaseAnalyzer,
         private readonly HttpCompatibilityAnalyzer $httpAnalyzer,
@@ -146,6 +154,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         private readonly DocBlockUpdater $docBlockUpdater,
     ) {
         $this->configuration = BaseClassConfiguration::defaults();
+        $this->traitFrontierSnapshots = new \WeakMap();
     }
 
     public function getRuleDefinition(): RuleDefinition
@@ -427,6 +436,8 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
     {
         $failures = [
             ...$this->traitAdaptationFailures($class),
+            ...$this->traitConversionFailures($class),
+            ...$this->descendantTraitConversionFailures($class),
             ...$this->bootstrapMethodFailures($class),
         ];
 
@@ -613,8 +624,197 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         }
     }
 
+    /**
+     * Class conversion never edits a shared trait. Prove that its discovery and
+     * inherited Laravel/PHPUnit dependencies need no such edit before switching
+     * the consumer's parent, including helpers and nested trait aliases.
+     *
+     * @return list<non-empty-string>
+     */
+    private function traitConversionFailures(Class_ $class): array
+    {
+        $lifecycle = $this->traitProvidedLifecycleFailures($class);
+        if ($lifecycle['lifecycle'] !== [] || $lifecycle['bootstrap'] !== []) {
+            // The existing lifecycle gate already preserves this consumer.
+            return [];
+        }
+
+        $seen = [];
+        $failures = [];
+        foreach ($class->stmts as $stmt) {
+            if ($stmt instanceof TraitUse) {
+                foreach ($stmt->traits as $name) {
+                    $this->collectTraitConversionFailures($name, $seen, $failures, 0);
+                }
+            }
+        }
+
+        // Laravel calls setUp{TraitBasename}/tearDown{TraitBasename} for every
+        // recursively used trait, even when another trait or the class provides it.
+        $hooks = [];
+        $providers = [$class];
+        foreach (array_keys($seen) as $traitName) {
+            if (isset(DatabaseConfigurationAnalyzer::TRAITS[$traitName])) {
+                continue;
+            }
+            $shortName = substr($traitName, (int) strrpos('\\' . $traitName, '\\'));
+            $hooks[] = strtolower('setUp' . $shortName);
+            $hooks[] = strtolower('tearDown' . $shortName);
+            $trait = $this->resolveTraitNode($traitName);
+            if ($trait instanceof Trait_) {
+                $providers[] = $trait;
+            }
+        }
+        $providedMethods = [];
+        foreach ($providers as $provider) {
+            $methodNames = array_map(static fn(ClassMethod $method): string => $method->name->toString(), $provider->getMethods());
+            foreach ($provider->stmts as $stmt) {
+                if ($stmt instanceof TraitUse) {
+                    foreach ($stmt->adaptations as $adaptation) {
+                        if ($adaptation instanceof TraitUseAdaptation\Alias && $adaptation->newName instanceof Identifier) {
+                            $methodNames[] = $adaptation->newName->toString();
+                        }
+                    }
+                }
+            }
+            foreach ($methodNames as $methodName) {
+                $providedMethods[strtolower($methodName)] = true;
+                if (in_array(strtolower($methodName), $hooks, true)) {
+                    $failures[] = sprintf('Laravel trait hook %s() is not called by the Laratesto target - migrate the hook manually before converting its consumer', $methodName);
+                }
+            }
+        }
+        foreach ($providers as $provider) {
+            if (! $provider instanceof Trait_) {
+                continue;
+            }
+            foreach ($provider->getMethods() as $method) {
+                $reason = $this->traitMethodConversionReason($method, $providedMethods);
+                if ($reason !== null) {
+                    $failures[] = sprintf('trait %s method %s() %s - migrate the trait manually before converting its consumer', $this->getName($provider), $method->name->toString(), $reason);
+                }
+            }
+        }
+
+        return array_values(array_unique($failures));
+    }
+
+    /** @param array<string, true> $seen @param list<non-empty-string> $failures */
+    private function collectTraitConversionFailures(Name $name, array &$seen, array &$failures, int $depth): void
+    {
+        $traitName = $this->getName($name);
+        if ($traitName === null || isset($seen[$traitName]) || $depth > self::MAX_CHAIN_DEPTH) {
+            // Resolution/depth failures are already covered by the lifecycle gate.
+            return;
+        }
+        $seen[$traitName] = true;
+
+        if (isset(DatabaseConfigurationAnalyzer::TRAITS[$traitName])) {
+            // This declaration is removed by the database rule after its own
+            // whole-hierarchy preflight; do not ban its framework implementation.
+            return;
+        }
+
+        $trait = $this->resolveTraitNode($traitName);
+        if (! $trait instanceof Trait_) {
+            return;
+        }
+
+        foreach ($trait->stmts as $stmt) {
+            if (! $stmt instanceof TraitUse) {
+                continue;
+            }
+            foreach ($stmt->adaptations as $adaptation) {
+                if (! $adaptation instanceof TraitUseAdaptation\Alias) {
+                    continue;
+                }
+                $alias = ($adaptation->newName ?? $adaptation->method)->toString();
+                if (str_starts_with($alias, 'test')) {
+                    $failures[] = sprintf('trait %s aliases a method to PHPUnit test name %s() - migrate the trait manually before converting its consumer', $traitName, $alias);
+                }
+            }
+            foreach ($stmt->traits as $nestedName) {
+                $this->collectTraitConversionFailures($nestedName, $seen, $failures, $depth + 1);
+            }
+        }
+    }
+
+    /** @param array<string, true> $providedMethods */
+    private function traitMethodConversionReason(ClassMethod $method, array $providedMethods): ?string
+    {
+        $hasTargetTest = false;
+        foreach ($method->attrGroups as $group) {
+            foreach ($group->attrs as $attribute) {
+                if ($this->isName($attribute->name, self::PHPUNIT_TEST_ATTRIBUTE)) {
+                    return 'uses PHPUnit test discovery that is not rewritten in traits';
+                }
+                $hasTargetTest = $hasTargetTest || $this->isName($attribute->name, self::TEST_ATTRIBUTE);
+            }
+        }
+        $phpDoc = $this->phpDocInfoFactory->createFromNode($method);
+        if (! $hasTargetTest && $method->isPublic()
+            && (str_starts_with($method->name->toString(), 'test')
+                || ($phpDoc instanceof PhpDocInfo && $phpDoc->getTagsByName('test') !== []))) {
+            return 'uses PHPUnit test discovery that is not rewritten in traits';
+        }
+
+        $framework = $this->reflectionProvider->getClass(self::FRAMEWORK_BASE);
+        $reason = null;
+        $directReceivers = [];
+        $this->traverseNodesWithCallable($method, function (Node $node) use ($framework, $providedMethods, &$reason, &$directReceivers): ?int {
+            if ($node instanceof ClassLike) {
+                return \PhpParser\NodeTraverser::DONT_TRAVERSE_CURRENT_AND_CHILDREN;
+            }
+            if ($node instanceof MethodCall || $node instanceof NullsafeMethodCall
+                || $node instanceof PropertyFetch || $node instanceof Expr\NullsafePropertyFetch) {
+                if ($node->var instanceof Expr\Variable && $node->var->name === 'this') {
+                    $directReceivers[spl_object_id($node->var)] = true;
+                    $member = $node->name instanceof Identifier ? $node->name->toString() : null;
+                    $isMethod = $node instanceof MethodCall || $node instanceof NullsafeMethodCall;
+                    // PHPUnit need not be installed in the migration project, so
+                    // reflection alone cannot prove its inherited API is absent.
+                    // Only locally provided helper implementations are retained.
+                    if ($member === null || ($isMethod
+                        ? $framework->hasMethod($member) || ! isset($providedMethods[strtolower($member)])
+                        : $member === 'app' || $framework->hasProperty($member))) {
+                        $reason ??= 'depends on inherited Laravel/PHPUnit ' . ($isMethod ? 'method ' : 'property ') . ($member ?? '(dynamic)');
+                    }
+                }
+            }
+            if ($node instanceof StaticCall && $node->class instanceof Name
+                && $this->isNames($node->class, ['self', 'static', 'parent'])) {
+                $member = $node->name instanceof Identifier ? $node->name->toString() : null;
+                if ($member === null || $this->isName($node->class, 'parent')
+                    || $framework->hasMethod($member) || ! isset($providedMethods[strtolower($member)])) {
+                    $reason ??= 'depends on inherited Laravel/PHPUnit method ' . ($member ?? '(dynamic)');
+                }
+            }
+            if ($node instanceof Expr\Variable && $node->name === 'this' && ! isset($directReceivers[spl_object_id($node)])) {
+                $reason ??= 'aliases or passes $this whose Laravel/PHPUnit dependencies cannot be proved safe';
+            }
+            if ($node instanceof Name) {
+                $resolved = $this->getName($node);
+                if ($resolved !== null && (str_starts_with($resolved, 'PHPUnit\\')
+                    || str_starts_with($resolved, 'Illuminate\\Testing\\')
+                    || str_starts_with($resolved, 'Illuminate\\Foundation\\Testing\\'))) {
+                    $reason ??= 'references Laravel/PHPUnit testing API ' . $resolved;
+                }
+            }
+
+            return null;
+        });
+
+        return $reason;
+    }
+
     private function resolveTraitNode(string $traitClass): ?Trait_
     {
+        foreach ($this->traitFrontierClasses() as $classLike) {
+            if ($classLike instanceof Trait_ && $this->isName($classLike, $traitClass)) {
+                return $classLike;
+            }
+        }
+
         $local = (new NodeFinder())->findFirst(
             $this->getFile()->getNewStmts(),
             fn(Node $node): bool => $node instanceof Trait_ && $this->isName($node, $traitClass),
@@ -631,6 +831,87 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         }
 
         return $resolved instanceof Trait_ ? $resolved : null;
+    }
+
+    /** @return list<non-empty-string> */
+    private function descendantTraitConversionFailures(Class_ $class): array
+    {
+        $name = $this->getName($class);
+        if ($name === null) {
+            return [];
+        }
+        $classes = [];
+        foreach ($this->traitFrontierClasses() as $candidate) {
+            if ($candidate instanceof Class_ && ($candidateName = $this->getName($candidate)) !== null) {
+                $classes[strtolower($candidateName)] = $candidate;
+            }
+        }
+        foreach ($classes as $candidateName => $candidate) {
+            if ($candidateName === strtolower($name)) {
+                continue;
+            }
+            $parent = $candidate->extends;
+            $seen = [];
+            for ($depth = 0; $parent instanceof Name && $depth <= self::MAX_CHAIN_DEPTH; ++$depth) {
+                $parentName = strtolower($this->getName($parent) ?? '');
+                if ($parentName === strtolower($name)) {
+                    $failures = $this->traitConversionFailures($candidate);
+                    if ($failures !== []) {
+                        return [sprintf('descendant %s has an unsupported trait dependency - preserve the shared source base until its trait is migrated: %s', $this->getName($candidate), $failures[0])];
+                    }
+                    break;
+                }
+                if (isset($seen[$parentName]) || ! isset($classes[$parentName])) {
+                    break;
+                }
+                $seen[$parentName] = true;
+                $parent = $classes[$parentName]->extends;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Snapshot located source declarations before any shared base changes. Rector
+     * puts actual CLI sources into its dynamic locator, not Option::PATHS/SOURCE.
+     * The locator also covers trait providers supplied through autoload paths.
+     *
+     * @return list<ClassLike>
+     */
+    private function traitFrontierClasses(): array
+    {
+        $locator = $this->sourceLocatorProvider->provide();
+        if (isset($this->traitFrontierSnapshots[$locator])) {
+            return $this->traitFrontierSnapshots[$locator];
+        }
+        $currentFile = $this->getFile()->getFilePath();
+        $files = [self::normalizePath($currentFile) => $currentFile];
+        foreach ((new DefaultReflector($locator))->reflectAllClasses() as $reflection) {
+            $file = $reflection->getFileName();
+            if ($file !== null) {
+                $files[self::normalizePath($file)] = $file;
+            }
+        }
+        ksort($files);
+        $classes = [];
+        $parser = (new \PhpParser\ParserFactory())->createForNewestSupportedVersion();
+        foreach ($files as $file) {
+            $source = file_get_contents($file);
+            if ($source === false) {
+                throw new \RuntimeException(sprintf('Cannot inspect trait consumers in %s', $file));
+            }
+            try {
+                $nodes = $parser->parse($source) ?? [];
+                $nodes = (new \PhpParser\NodeTraverser(new \PhpParser\NodeVisitor\NameResolver()))->traverse($nodes);
+            } catch (\PhpParser\Error) {
+                // Rector reports malformed inputs; do not rewrite their source.
+                continue;
+            }
+            $classes = [...$classes, ...(new NodeFinder())->findInstanceOf($nodes, ClassLike::class)];
+        }
+
+        return $this->traitFrontierSnapshots[$locator] = $classes;
     }
 
     /**
@@ -660,6 +941,8 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         $failures = [
             ...$failures,
             ...$this->traitAdaptationFailures($class),
+            ...$this->traitConversionFailures($class),
+            ...$this->descendantTraitConversionFailures($class),
             ...$this->bootstrapMethodFailures($class),
             ...$this->lifecycleFailures($class),
             ...$this->appFailures($class),
