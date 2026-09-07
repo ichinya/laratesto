@@ -529,7 +529,8 @@ final class DatabaseConfigurationAnalyzer
         $this->checkingDescendants = true;
         try {
             foreach ($classes as $candidate) {
-                if (! $candidate instanceof Class_ || $candidate->namespacedName?->toString() === $name) {
+                if (! $candidate instanceof Class_
+                    || strcasecmp($candidate->namespacedName?->toString() ?? '', $name) === 0) {
                     continue;
                 }
                 $current = $candidate;
@@ -539,7 +540,7 @@ final class DatabaseConfigurationAnalyzer
                         break;
                     }
                     $parent = $current->extends === null ? null : $this->resolvedName($current->extends);
-                    if ($parent === $name) {
+                    if ($parent !== null && strcasecmp($parent, $name) === 0) {
                         $hasInheritedConsumers = true;
                         $analysis = $this->inheritedConfiguration($candidate, $classes);
                         if ($analysis->unsupportedReason !== null) {
@@ -548,10 +549,10 @@ final class DatabaseConfigurationAnalyzer
                         }
                         break;
                     }
-                    if ($parent === null || isset($seen[$parent])) {
+                    if ($parent === null || isset($seen[strtolower($parent)])) {
                         break;
                     }
-                    $seen[$parent] = true;
+                    $seen[strtolower($parent)] = true;
                     $current = $this->resolveAncestor($parent, $classes);
                     if (! $current instanceof Class_) {
                         break;
@@ -624,10 +625,11 @@ final class DatabaseConfigurationAnalyzer
         $current = $class->extends === null ? null : $this->resolvedName($class->extends);
 
         for ($depth = 0; $current !== null && $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
-            if ($current === self::FRAMEWORK_BASE || $current === self::TARGET_BASE || isset($seen[$current])) {
+            if (strcasecmp($current, self::FRAMEWORK_BASE) === 0
+                || strcasecmp($current, self::TARGET_BASE) === 0 || isset($seen[strtolower($current)])) {
                 break;
             }
-            $seen[$current] = true;
+            $seen[strtolower($current)] = true;
             $ancestor = $this->resolveAncestor($current, $localClasses);
             if (! $ancestor instanceof Class_) {
                 break;
@@ -963,11 +965,12 @@ final class DatabaseConfigurationAnalyzer
         $duplicates = [];
 
         for ($depth = 0; $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
-            if ($current === self::FRAMEWORK_BASE || $current === self::TARGET_BASE || isset($seen[$current])) {
+            if (strcasecmp($current, self::FRAMEWORK_BASE) === 0
+                || strcasecmp($current, self::TARGET_BASE) === 0 || isset($seen[strtolower($current)])) {
                 break;
             }
 
-            $seen[$current] = true;
+            $seen[strtolower($current)] = true;
 
             $ancestor = $this->resolveAncestor($current, $localClasses);
 
@@ -1265,7 +1268,7 @@ final class DatabaseConfigurationAnalyzer
         foreach ($localClasses as $local) {
             if ($local instanceof Class_
                 && $local->namespacedName !== null
-                && $local->namespacedName->toString() === $className) {
+                && strcasecmp($local->namespacedName->toString(), $className) === 0) {
                 return $local;
             }
         }
@@ -1857,11 +1860,12 @@ final class DatabaseConfigurationAnalyzer
         $seen = [];
 
         for ($depth = 0; $current !== null && $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
-            if ($current === self::FRAMEWORK_BASE || $current === self::TARGET_BASE || isset($seen[$current])) {
+            if (strcasecmp($current, self::FRAMEWORK_BASE) === 0
+                || strcasecmp($current, self::TARGET_BASE) === 0 || isset($seen[strtolower($current)])) {
                 break;
             }
 
-            $seen[$current] = true;
+            $seen[strtolower($current)] = true;
 
             $ancestor = $this->resolveAncestor($current, $localClasses);
 
@@ -2198,11 +2202,12 @@ final class DatabaseConfigurationAnalyzer
         $seen = [];
 
         for ($depth = 0; $current !== null && $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
-            if ($current === self::FRAMEWORK_BASE || $current === self::TARGET_BASE || isset($seen[$current])) {
+            if (strcasecmp($current, self::FRAMEWORK_BASE) === 0
+                || strcasecmp($current, self::TARGET_BASE) === 0 || isset($seen[strtolower($current)])) {
                 break;
             }
 
-            $seen[$current] = true;
+            $seen[strtolower($current)] = true;
 
             $ancestor = $this->resolveAncestor($current, $localClasses);
 
@@ -2366,11 +2371,12 @@ final class DatabaseConfigurationAnalyzer
         $seen = [];
 
         for ($depth = 0; $current !== null && $depth <= self::MAX_CHAIN_DEPTH; $depth++) {
-            if ($current === self::FRAMEWORK_BASE || $current === self::TARGET_BASE || isset($seen[$current])) {
+            if (strcasecmp($current, self::FRAMEWORK_BASE) === 0
+                || strcasecmp($current, self::TARGET_BASE) === 0 || isset($seen[strtolower($current)])) {
                 break;
             }
 
-            $seen[$current] = true;
+            $seen[strtolower($current)] = true;
 
             $ancestor = $this->resolveAncestor($current, $localClasses);
 

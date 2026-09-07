@@ -228,6 +228,45 @@ final class DatabaseDescendantOptionsPipelineTest
     }
 
     #[Test]
+    public function caseInsensitiveAncestorsKeepChangedOptionsAndAllowEqualOptions(): void
+    {
+        foreach ([false, true] as $sameFile) {
+            foreach ([false, true] as $seed) {
+                $base = <<<'PHP'
+                    <?php
+                    namespace Tests;
+                    abstract class TestCase extends \Illuminate\Foundation\Testing\TestCase
+                    { use \Illuminate\Foundation\Testing\RefreshDatabase; }
+                    abstract class Middle extends tESTcASE {}
+                    PHP;
+                $child = 'class ChildTest extends mIDDLE { protected bool $seed = '
+                    . ($seed ? 'true' : 'false')
+                    . '; public function testValue(): void { $this->assertTrue(true); } }';
+                $files = $sameFile ? ['Tests.php' => $base . "\n" . $child]
+                    : ['ABase.php' => $base, 'ZChild.php' => '<?php namespace Tests; ' . $child];
+                $output = $this->cliPipeline($files, explicitFiles: ! $sameFile);
+                $combined = implode("\n", $output);
+                if ($seed) {
+                    Assert::string($combined)->contains('extends \\Illuminate\\Foundation\\Testing\\TestCase');
+                    Assert::string($combined)->contains('use \\Illuminate\\Foundation\\Testing\\RefreshDatabase;');
+                    Assert::string($combined)->contains('migrate the shared database strategy manually');
+                    Assert::string($combined)->notContains('#[\\Laratesto\\Attribute\\RefreshDatabase');
+                    Assert::string($combined)->contains('code=DATABASE_UNSUPPORTED_CONFIGURATION');
+                } else {
+                    Assert::string($combined)->notContains('code=DATABASE_UNSUPPORTED_CONFIGURATION');
+                    Assert::same(1, substr_count($combined, '#[\\Laratesto\\Attribute\\RefreshDatabase'));
+                }
+                $runtimeSource = static fn (array $sources): string => '<?php ' . implode("\n",
+                    array_map(static fn (string $source): string => substr($source, strlen('<?php')), $sources));
+                Assert::same(
+                    $this->runtimeOptions($runtimeSource($files), 'Tests\\ChildTest', false, seedOnly: true),
+                    $this->runtimeOptions($runtimeSource($output), 'Tests\\ChildTest', ! $seed, seedOnly: true),
+                );
+            }
+        }
+    }
+
+    #[Test]
     public function sourceSnapshotsFollowLocatorResetsWithinOneContainer(): void
     {
         $tmp = sys_get_temp_dir() . '/laratesto-db-snapshot-' . bin2hex(random_bytes(8));
