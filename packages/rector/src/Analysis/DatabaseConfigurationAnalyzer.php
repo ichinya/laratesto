@@ -803,16 +803,33 @@ final class DatabaseConfigurationAnalyzer
                         foreach ($this->nodeFinder->find($method, static fn (Node $node): bool =>
                             $node instanceof Expr\Assign || $node instanceof Expr\AssignRef || $node instanceof Expr\AssignOp
                             || $node instanceof Expr\PreInc || $node instanceof Expr\PostInc
-                            || $node instanceof Expr\PreDec || $node instanceof Expr\PostDec || $node instanceof Node\Stmt\Unset_) as $write) {
-                            $targets = $write instanceof Node\Stmt\Unset_ ? $write->vars : [$write->var];
+                            || $node instanceof Expr\PreDec || $node instanceof Expr\PostDec
+                            || $node instanceof Node\Stmt\Unset_ || $node instanceof Node\Stmt\Foreach_) as $write) {
+                            $targets = match (true) {
+                                $write instanceof Node\Stmt\Unset_ => $write->vars,
+                                $write instanceof Node\Stmt\Foreach_ => array_filter([
+                                    $write->keyVar, $write->valueVar,
+                                ]),
+                                default => [$write->var],
+                            };
                             if ($write instanceof Expr\AssignRef) {
                                 $targets[] = $write->expr;
                             }
-                            foreach ($targets as $target) {
-                                while ($target instanceof Expr\ArrayDimFetch) {
-                                    $target = $target->var;
+                            if ($write instanceof Node\Stmt\Foreach_ && $write->byRef) {
+                                if ($write->expr instanceof Expr\Array_) {
+                                    // A literal copies ordinary values; only explicit
+                                    // reference elements can write back to the source.
+                                    foreach ($this->nodeFinder->findInstanceOf($write->expr, Node\ArrayItem::class) as $item) {
+                                        if ($item->byRef) {
+                                            $targets[] = $item->value;
+                                        }
+                                    }
+                                } else {
+                                    $targets[] = $write->expr;
                                 }
-                                if ($this->instancePropertyRead($target, $propertyName, $aliases) !== null) {
+                            }
+                            foreach ($targets as $target) {
+                                if ($this->writesInstanceProperty($target, $propertyName, $aliases)) {
                                     return sprintf('database option $%s is written by descendant code - migrate the dynamic configuration manually', $propertyName);
                                 }
                             }
@@ -823,6 +840,25 @@ final class DatabaseConfigurationAnalyzer
         }
 
         return null;
+    }
+
+    /** @param array<string, true> $aliases */
+    private function writesInstanceProperty(Expr $target, string $propertyName, array $aliases): bool
+    {
+        if ($target instanceof Expr\Array_ || $target instanceof Expr\List_) {
+            foreach ($target->items as $item) {
+                // Destructuring writes values; keys are expressions evaluated as reads.
+                if ($item !== null && $this->writesInstanceProperty($item->value, $propertyName, $aliases)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if ($target instanceof Expr\ArrayDimFetch) {
+            // An array offset is written through its container, not its index.
+            return $this->writesInstanceProperty($target->var, $propertyName, $aliases);
+        }
+        return $this->instancePropertyRead($target, $propertyName, $aliases) !== null;
     }
 
     /** Compare only proven literals, resolving class constants in their own scope. */
@@ -2045,7 +2081,7 @@ final class DatabaseConfigurationAnalyzer
     {
         $aliases = ['this' => true];
         $assignments = $this->nodeFinder->find($method, static fn (Node $node): bool =>
-            $node instanceof Expr\Assign || $node instanceof Expr\AssignRef);
+            $node instanceof Expr\Assign || $node instanceof Expr\AssignRef || $node instanceof Node\Stmt\Foreach_);
 
         // A monotone method-local set covers chained assignments and reference
         // bindings in either direction. Do not kill aliases on assignment: a
@@ -2053,10 +2089,17 @@ final class DatabaseConfigurationAnalyzer
         do {
             $before = $aliases;
             foreach ($assignments as $assignment) {
-                if ($assignment->var instanceof Expr\Variable && is_string($assignment->var->name)
-                    && $this->mayAliasThis($assignment->expr, $aliases)) {
-                    $aliases[$assignment->var->name] = true;
+                if ($assignment instanceof Node\Stmt\Foreach_) {
+                    if ($assignment->expr instanceof Expr\Array_) {
+                        foreach ($assignment->expr->items as $item) {
+                            if ($item !== null && ! $item->unpack) {
+                                $this->collectAssignedThisAliases($assignment->valueVar, $item->value, $aliases);
+                            }
+                        }
+                    }
+                    continue;
                 }
+                $this->collectAssignedThisAliases($assignment->var, $assignment->expr, $aliases);
                 if ($assignment instanceof Expr\AssignRef
                     && $assignment->expr instanceof Expr\Variable && is_string($assignment->expr->name)
                     && $this->mayAliasThis($assignment->var, $aliases)) {
@@ -2066,6 +2109,46 @@ final class DatabaseConfigurationAnalyzer
         } while ($before !== $aliases);
 
         return $aliases;
+    }
+
+    /** @param array<string, true> $aliases */
+    private function collectAssignedThisAliases(Expr $target, Expr $value, array &$aliases): void
+    {
+        if ($target instanceof Expr\Variable && is_string($target->name) && $this->mayAliasThis($value, $aliases)) {
+            $aliases[$target->name] = true;
+            return;
+        }
+        if ((! $target instanceof Expr\Array_ && ! $target instanceof Expr\List_) || ! $value instanceof Expr\Array_) {
+            return;
+        }
+        // Only pair literal array slots. An array merely containing $this is not
+        // itself an object alias, and unknown keys/unpacks cannot prove a pairing.
+        $values = [];
+        foreach ($value->items as $item) {
+            if ($item === null || $item->unpack) {
+                return;
+            }
+            if ($item->key === null) {
+                $values[] = $item->value;
+            } elseif ($item->key instanceof Scalar\String_ || $item->key instanceof Scalar\Int_) {
+                $values[$item->key->value] = $item->value;
+            } else {
+                return;
+            }
+        }
+        foreach ($target->items as $index => $item) {
+            if ($item === null) {
+                continue;
+            }
+            if ($item->key instanceof Scalar\String_ || $item->key instanceof Scalar\Int_) {
+                $index = $item->key->value;
+            } elseif ($item->key !== null) {
+                continue;
+            }
+            if (isset($values[$index])) {
+                $this->collectAssignedThisAliases($item->value, $values[$index], $aliases);
+            }
+        }
     }
 
     /** @param array<string, true> $aliases */

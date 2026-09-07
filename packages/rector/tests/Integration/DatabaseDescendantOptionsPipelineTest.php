@@ -267,6 +267,72 @@ final class DatabaseDescendantOptionsPipelineTest
     }
 
     #[Test]
+    public function destructuringAndForeachBlockOptionWritesButKeepOrdinaryReads(): void
+    {
+        $writers = [
+            'ArrayTarget' => '[$this->seed] = [true];',
+            'ListTarget' => 'list($this->seed) = [true];',
+            'KeyedTarget' => "['enabled' => \$this->seed] = ['enabled' => true];",
+            'NestedTarget' => "['enabled' => [\$this->seed]] = ['enabled' => [true]];",
+            'AliasTarget' => '$that = $this; list(, list($that->seed)) = [null, [true]];',
+            'ReferenceTarget' => '$values = [false]; [&$this->seed] = $values; $values[0] = true;',
+            'ForeachValue' => 'foreach ([true] as $this->seed) {}',
+            'ForeachKey' => "foreach ([1 => 'value'] as \$this->seed => \$local) {}",
+            'ForeachNested' => "foreach ([['v' => [true]]] as ['v' => [\$this->seed]]) {}",
+            'ForeachReceiver' => 'foreach ([$this] as $that) { [$that->seed] = [true]; }',
+            'ForeachReference' => 'foreach ([&$this->seed] as &$local) { $local = true; }',
+            'DestructuredAlias' => '[$that] = [$this]; [$that->seed] = [true];',
+            'KeyedAlias' => "['v' => [\$that]] = ['v' => [\$this]]; list(\$that->seed) = [true];",
+        ];
+        $readers = [
+            'ReadValue' => '[$local] = [$this->seed];',
+            'ReadKey' => '[$this->seed => $local] = [true];',
+            'ReadDimension' => '$values = []; $values[$this->seed] = true;',
+            'ReadForeach' => 'foreach ([$this->seed] as $local) {}',
+            'ReadForeachKey' => 'foreach ([[true]] as [$this->seed => $local]) {}',
+            'ReadForeachReference' => 'foreach ([$this->seed] as &$local) { $local = true; }',
+            'OtherObject' => '$that = new \\stdClass(); [$that->seed] = [true];',
+            'OtherSlot' => '[$that, $self] = [new \\stdClass(), $this]; [$that->seed] = [true];',
+        ];
+        $files = [];
+        $bases = [];
+        foreach ($writers + $readers as $name => $body) {
+            $namespace = 'Tests\\WriteTargets\\' . $name;
+            $bases[] = $namespace . '\\Base';
+            $files[$name . '.php'] = <<<PHP
+                <?php
+                namespace {$namespace};
+                abstract class Base extends \Illuminate\Foundation\Testing\TestCase
+                { use \Illuminate\Foundation\Testing\RefreshDatabase; }
+                class ChildTest extends Base
+                {
+                    protected \$seed = false;
+                    public function alter(): void { {$body} }
+                    public function testValue(): void { \$this->assertTrue(true); }
+                }
+                PHP;
+        }
+        $output = DatabasePipeline::run($files, $bases);
+        foreach ($writers + $readers as $name => $_body) {
+            $file = $name . '.php';
+            $written = isset($writers[$name]);
+            if ($written) {
+                Assert::string($output[$file])->contains('use \\Illuminate\\Foundation\\Testing\\RefreshDatabase;');
+                Assert::string($output[$file])->contains('database option $seed is written by descendant code');
+                Assert::string($output[$file])->notContains('#[\\Laratesto\\Attribute\\RefreshDatabase');
+                Assert::same(2, substr_count($output[$file], 'code=DATABASE_UNSUPPORTED_CONFIGURATION'));
+            } else {
+                Assert::string($output[$file])->notContains('laratesto-residual');
+                Assert::same(1, substr_count($output[$file], '#[\\Laratesto\\Attribute\\RefreshDatabase'));
+            }
+            Assert::same(
+                $this->runtimeOptions($files[$file], 'Tests\\WriteTargets\\' . $name . '\\ChildTest', false, seedOnly: true, alter: true),
+                $this->runtimeOptions($output[$file], 'Tests\\WriteTargets\\' . $name . '\\ChildTest', ! $written, seedOnly: true, alter: true),
+            );
+        }
+    }
+
+    #[Test]
     public function sourceSnapshotsFollowLocatorResetsWithinOneContainer(): void
     {
         $tmp = sys_get_temp_dir() . '/laratesto-db-snapshot-' . bin2hex(random_bytes(8));
@@ -376,13 +442,17 @@ final class DatabaseDescendantOptionsPipelineTest
     }
 
     /** Read the actual Laravel methods and the actual Testo hierarchy metadata. */
-    private function runtimeOptions(string $source, string $class, bool $target, bool $seedOnly = false): array
+    private function runtimeOptions(string $source, string $class, bool $target, bool $seedOnly = false, bool $alter = false): array
     {
         $probe = <<<'PHP'
             namespace PHPUnit\Framework { abstract class TestCase {} }
             namespace {
                 require $argv[1];
                 eval(substr(base64_decode($argv[2]), strlen('<?php')));
+                if ($argv[6] === 'alter') {
+                    $instance = (new \ReflectionClass($argv[3]))->newInstanceWithoutConstructor();
+                    $instance->alter();
+                }
                 if ($argv[4] === 'target') {
                     $attributes = \Testo\Common\Reflection::fetchClassAttributes(
                         $argv[3], attributeClass: \Laratesto\Attribute\RefreshDatabase::class,
@@ -392,7 +462,7 @@ final class DatabaseDescendantOptionsPipelineTest
                     $options = [$attribute->seed, $attribute->seeder ?? false, $attribute->dropViews,
                         $attribute->dropTypes, $attribute->connections ?? [null]];
                 } else {
-                    $instance = (new \ReflectionClass($argv[3]))->newInstanceWithoutConstructor();
+                    $instance ??= (new \ReflectionClass($argv[3]))->newInstanceWithoutConstructor();
                     $options = [];
                     $methods = $argv[5] === 'seed' ? ['shouldSeed']
                         : ['shouldSeed', 'seeder', 'shouldDropViews', 'shouldDropTypes', 'connectionsToTransact'];
@@ -405,7 +475,7 @@ final class DatabaseDescendantOptionsPipelineTest
             PHP;
         $root = dirname(__DIR__, 4);
         $process = new Process([PHP_BINARY, '-r', $probe, $root . '/vendor/autoload.php',
-            base64_encode($source), $class, $target ? 'target' : 'source', $seedOnly ? 'seed' : 'all'], $root, timeout: 60.0);
+            base64_encode($source), $class, $target ? 'target' : 'source', $seedOnly ? 'seed' : 'all', $alter ? 'alter' : 'unchanged'], $root, timeout: 60.0);
         $process->run();
         Assert::same(0, $process->getExitCode(), $process->getOutput() . $process->getErrorOutput());
         return json_decode($process->getOutput(), true, flags: JSON_THROW_ON_ERROR);
