@@ -176,6 +176,11 @@ is absent from newer Rector versions tested for this release. Remove or widen th
 pin only after the public-set, configured-rule, and double-run corpus tests pass
 against the candidate Rector version.
 
+Processing-scope checks also read the pinned Rector run configuration through
+`PrivatesAccessor`, because this version has no public getter for the effective
+input paths. When upgrading Rector, verify positional CLI overrides, parallel
+workers, and skipped or autoload-only bases as well as configured-path runs.
+
 The Laratesto runtime these rules migrate to supports PHP `>=8.2`,
 Laravel `^12.0 || ^13.0` and Testo `^0.10.42`. This package declares no Composer
 dependency on the runtime and only suggests it. Laravel 12 supports PHP 8.2;
