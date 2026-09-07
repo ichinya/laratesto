@@ -6,6 +6,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-07
+
 ### Fixed
 
 - Empty `RefreshDatabase` and `DatabaseTruncation` connection selections preserve
@@ -366,6 +368,8 @@ First public release.
 - `#[RefreshDatabase]` (migrate:fresh, optional seeding) and
   `#[DatabaseTransactions]` (transaction wrap with rollback) attributes.
 - Self-hosted test suite on a fixture Laravel application.
+
+[0.7.0]: https://github.com/ichinya/laratesto/releases/tag/v0.7.0
 
 [0.6.9]: https://github.com/ichinya/laratesto/releases/tag/v0.6.9
 [0.4.0]: https://github.com/ichinya/laratesto/releases/tag/v0.4.0
