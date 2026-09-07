@@ -861,9 +861,17 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             for ($depth = 0; $parent instanceof Name && $depth <= self::MAX_CHAIN_DEPTH; ++$depth) {
                 $parentName = strtolower($this->getName($parent) ?? '');
                 if ($parentName === strtolower($name)) {
-                    $failures = $this->traitConversionFailures($candidate);
+                    // The trait body gate defers lifecycle/bootstrap failures to
+                    // their existing gates. A preserved descendant still needs its
+                    // source parent, including a direct unsafe lifecycle override.
+                    $failures = [
+                        ...$this->traitConversionFailures($candidate),
+                        ...$this->traitAdaptationFailures($candidate),
+                        ...$this->lifecycleFailures($candidate),
+                        ...$this->bootstrapMethodFailures($candidate),
+                    ];
                     if ($failures !== []) {
-                        return [sprintf('descendant %s has an unsupported trait dependency - preserve the shared source base until its trait is migrated: %s', $this->getName($candidate), $failures[0])];
+                        return [sprintf('descendant %s has an unsupported lifecycle or trait dependency - preserve the shared source base until the descendant is migrated: %s', $this->getName($candidate), $failures[0])];
                     }
                     break;
                 }

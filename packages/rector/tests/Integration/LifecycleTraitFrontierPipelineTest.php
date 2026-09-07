@@ -97,7 +97,7 @@ final class CrossFileTraitTest extends \Tests\TestCase
     public function test_ok(): void {}
 }
 
-final class SafeTraitTest extends \Tests\TestCase
+final class SafeTraitTest extends \Illuminate\Foundation\Testing\TestCase
 {
     use ClockHelper;
 
@@ -162,12 +162,13 @@ PHP);
             // gains no Laratesto conversion.
             Assert::string($support)->notContains('Laratesto');
             Assert::string($support)->contains('protected function setUp(): void');
-            Assert::string($tests)->contains('abstract class TestCase extends \Laratesto\Testing\LaravelTestCase');
+            Assert::string($tests)->contains('abstract class TestCase extends FoundationTestCase');
+            Assert::string($tests)->contains('preserve the shared source base');
 
-            // Control: a trait without lifecycle/bootstrap declarations does not
+            // Independent control: a trait without lifecycle/bootstrap declarations does not
             // block - the safe class converts fully.
             Assert::string($safeBlock)->notContains('laratesto-residual');
-            Assert::string($safeBlock)->contains('extends \Tests\TestCase');
+            Assert::string($safeBlock)->contains('extends \Laratesto\Testing\LaravelTestCase');
             Assert::string($safeBlock)->contains('setUpLaravel');
             Assert::string($safeBlock)->contains('#[\Testo\Test]');
             Assert::string($safeBlock)->contains('$this->make(\'cache\');');
