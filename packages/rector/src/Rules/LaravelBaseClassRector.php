@@ -436,6 +436,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
     {
         $failures = [
             ...$this->traitAdaptationFailures($class),
+            ...$this->databaseConversionReadinessFailures($class),
             ...$this->traitConversionFailures($class),
             ...$this->descendantTraitConversionFailures($class),
             ...$this->bootstrapMethodFailures($class),
@@ -941,6 +942,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         $failures = [
             ...$failures,
             ...$this->traitAdaptationFailures($class),
+            ...$this->databaseConversionReadinessFailures($class),
             ...$this->traitConversionFailures($class),
             ...$this->descendantTraitConversionFailures($class),
             ...$this->bootstrapMethodFailures($class),
@@ -992,6 +994,21 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         $classes = (new NodeFinder())->findInstanceOf($this->getFile()->getOldStmts(), ClassLike::class);
 
         return $classes;
+    }
+
+    /** @return list<non-empty-string> */
+    private function databaseConversionReadinessFailures(Class_ $class): array
+    {
+        $analysis = $this->databaseAnalyzer->analyze($class, $this->fileClasses());
+        if (! $analysis->supported()) {
+            return [];
+        }
+
+        if ($this->isExcludedBySkip($class, LaravelDatabaseTraitsRector::class)) {
+            return ['required LaravelDatabaseTraitsRector conversion is excluded for this file by the skip configuration - enable the database rule for this class and its ancestors in the same run'];
+        }
+
+        return [];
     }
 
     private function isWithinProcessedPaths(Class_ $class): bool
@@ -1049,7 +1066,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
      * on such a file never converts - and neither may its descendants, which would
      * rename parent::setUp() against a base that still only knows setUp().
      */
-    private function isExcludedBySkip(Class_ $class): bool
+    private function isExcludedBySkip(Class_ $class, string $rule = self::class): bool
     {
         $scope = $class->getAttribute(AttributeKey::SCOPE);
 
@@ -1076,7 +1093,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             return true;
         }
 
-        return $this->skipper->shouldSkipElementAndFilePath(self::class, $normalized);
+        return $this->skipper->shouldSkipElementAndFilePath($rule, $normalized);
     }
 
     /** @return list<non-empty-string> */
