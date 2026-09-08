@@ -6,6 +6,29 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-08
+
+### Fixed
+
+- `artisan test` no longer takes over Collision's `test` command by default:
+  the unified runner is always available as `artisan laratesto:test`, and
+  replacing `test` is opt-in through the publishable
+  `laratesto.replace_test_command` config flag.
+- PHPUnit migration and runtime parity (issue #10, PR #11):
+  - project bootstrap and initialization semantics are preserved for migrated
+    suites, including state cleanup between tests;
+  - assertion semantics match PHPUnit and Laravel, including facade
+    assertions, mailable assertions and exception expectations;
+  - response helpers keep Laravel behavior, including registered response
+    macros;
+  - stub policies and console output capture follow PHPUnit behavior, with
+    and without return values;
+  - pending Artisan commands execute at Laravel's deferred timing, and the
+    Rector rules rewrite them consistently;
+  - conversions without a faithful mechanical translation stay explicit
+    residuals instead of silently changing behavior.
+- README documents installing the matching runtime and Rector path packages.
+
 ## [0.7.0] - 2026-09-07
 
 ### Fixed
@@ -369,6 +392,7 @@ First public release.
   `#[DatabaseTransactions]` (transaction wrap with rollback) attributes.
 - Self-hosted test suite on a fixture Laravel application.
 
+[0.7.1]: https://github.com/ichinya/laratesto/releases/tag/v0.7.1
 [0.7.0]: https://github.com/ichinya/laratesto/releases/tag/v0.7.0
 
 [0.6.9]: https://github.com/ichinya/laratesto/releases/tag/v0.6.9
