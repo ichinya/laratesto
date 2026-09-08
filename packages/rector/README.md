@@ -5,9 +5,52 @@ suites to [Laratesto](https://github.com/ichinya/laratesto) (Testo-based).
 
 ## Install
 
-```bash
-composer require --dev ichinya/laratesto-rector --with-all-dependencies
+This package lives at `packages/rector` inside `ichinya/laratesto`; it is not a
+separate GitHub repository. Until a matching package is published on Packagist,
+clone the monorepo and add both path repositories to the consuming application's
+`composer.json` (replace `/absolute/path/laratesto` with your checkout, using
+forward slashes on Windows):
+
+```json
+{
+  "repositories": [
+    {
+      "type": "path",
+      "url": "/absolute/path/laratesto",
+      "options": {
+        "symlink": false,
+        "versions": {"ichinya/laratesto": "dev-issue10"}
+      }
+    },
+    {
+      "type": "path",
+      "url": "/absolute/path/laratesto/packages/rector",
+      "options": {
+        "symlink": false,
+        "versions": {"ichinya/laratesto-rector": "dev-main"}
+      }
+    }
+  ]
+}
 ```
+
+Merge these entries with existing repositories. Use a checkout containing the
+`Laratesto\Testing\PhpUnitCompatibility` helper; generated code from this set is
+not compatible with runtime 0.7.0 or earlier. The development version labels
+above are local Composer labels, not remote branch names.
+
+```bash
+composer require --dev ichinya/laratesto:dev-issue10 ichinya/laratesto-rector:dev-main --with-all-dependencies
+php artisan package:discover
+php artisan laratesto:migrate-rector --help
+php artisan laratesto:migrate-rector --path=tests
+```
+
+The subpackage installs `rector/rector` and `testo/bridge-rector` as dependencies.
+Normal Laravel package discovery registers the command. If discovery is disabled,
+register `Laratesto\Rector\LaratestoRectorServiceProvider` in the application.
+With `symlink: false`, rerun `composer reinstall ichinya/laratesto ichinya/laratesto-rector`
+after changing the source checkout to refresh the mirrored packages.
 
 ## Usage
 
@@ -90,11 +133,25 @@ from HEAD. Avoid broad destructive commands for rollback.
 | Test class | `Tests\TestCase` / `Illuminate\Foundation\Testing\TestCase` → `LaravelTestCase`; `setUp/tearDown` → `setUpLaravel/tearDownLaravel` | unresolved/custom or skipped parents, parameterized/static or trait-provided lifecycle/bootstrap (`CLASS_UNSAFE_HIERARCHY`, `LIFECYCLE_UNSUPPORTED`) |
 | Database | trait → attribute (`RefreshDatabase`, `DatabaseTransactions`, `DatabaseMigrations`, `DatabaseTruncation`) with literal options | overrides of hooks live for the selected strategy, dynamic options, strategies hidden inside project traits, multiple traits/adaptations (`DATABASE_UNSUPPORTED_CONFIGURATION`); the lazy `LazilyRefreshDatabase` strategy is never converted — the trait use stays and needs manual migration |
 | HTTP / responses | common request, header, session, cookie, database and response assertions keep working unchanged | unknown helpers/signatures, unsupported response API (`HTTP_UNSUPPORTED_SIGNATURE`, `RESPONSE_UNSUPPORTED_API`) |
-| Fakes | — | `Mail/Queue/Bus/Event/Notification/Storage/Http::fake()` (`LARAVEL_FAKE_UNSUPPORTED`) |
+| Fakes | Laravel facade `assert*` calls keep their framework behavior and record assertions in Testo | retain `phpunit/phpunit` in `require-dev` for these framework assertions |
 | Outside a convertible class | — | Laravel constructs in classes whose base does not resolve (`LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY`) |
-| Artisan chains | supported immediate chains or terminal assignments followed only by literal expectations (`assertExitCode`, `expectsOutput`, …) | interactive forms and commands retained across later statements, loop iterations or catch/finally (`ARTISAN_INTERACTION_UNSUPPORTED`) |
+| Artisan chains | immediate chains, terminal literal expectations, and straight-line local variables migrated to deferred `pendingArtisan()` | interactive forms, retained commands in loops or catch/finally, and escaping variables (`ARTISAN_INTERACTION_UNSUPPORTED`) |
+| PHPUnit helpers | `createStub()` uses the installed PHPUnit generator; `expectOutputString()` checks exact setup/test output before teardown | keep PHPUnit installed for stubs and deferred console assertions; other unsupported helpers remain explicit residuals |
 
-Shared traits are not rewritten: PHPUnit test discovery in traits, source
+Public project `createApplication()` methods with no required arguments are
+preserved and invoked once before database setup and user lifecycle hooks.
+Delegation to `parent::createApplication()`, other custom bootstrap contracts,
+and unresolved or excluded bases still require a manual decision. `WithFaker`
+is supported, including initialization before the user setup hook.
+
+The HTTP analysis accepts inferred types and named arguments whose parameter
+names match the runtime. It keeps nested classes and callback parameters in
+their own scope. Inertia `assertInertia()` / `inertiaPage()` and additional
+framework response assertions preserve the package implementation; keep
+`phpunit/phpunit` as an assertion-library dependency. Callbacks retain their
+original Inertia type and import alias.
+
+Other shared traits are not rewritten: PHPUnit test discovery in traits, source
 testing APIs in trait helpers, and Laravel `setUp<Trait>`/`tearDown<Trait>` hooks
 require manual migration. A processed descendant with an unsupported trait
 dependency also keeps its shared source base unchanged. A database-rule `withSkip` exclusion for a strategy owner
@@ -140,7 +197,7 @@ continuing control flow requires manual migration.
 
 Upstream `PHPUNIT_TO_TESTO` covers generic PHPUnit constructs as part of the same
 set: assertions, data providers, group/coverage metadata and similar are converted
-there and are **not** manual-only.
+there and are **not** manual-only. Local compatibility rules preserve PHPUnit exception substring matching (including literal regex characters and repeated message replacement), caller-dependent string coercion, emptiness, array checks and strict membership. Negative assertion controls remain failing after conversion.
 
 Project base classes and the target strategy can be overridden after importing the
 set. Rector keeps one instance of the rule and merges the later associative
@@ -191,7 +248,7 @@ the actual installed framework major before running the suite.
 The rules rewrite database traits into the multi-connection attributes
 (`connections`, `tables`, `exceptTables` on
 `#[DatabaseTruncation]`; `connections` on `#[RefreshDatabase]`), which the released
-runtime `0.6.9` does not ship. Install `ichinya/laratesto` `dev-main` — or the first
+runtime `0.6.9` does not ship. The matching checkout also supplies the PHPUnit compatibility helpers introduced after runtime `0.7.0`. Install the matching `ichinya/laratesto` development checkout — or the first
 release that includes those attributes — before running migrated tests; against
 `0.6.9` the generated code cannot run.
 

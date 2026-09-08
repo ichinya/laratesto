@@ -73,6 +73,11 @@ final class ParentLifecycleProvenanceTest
                     'Base.php' => '<?php namespace Tests; abstract class TestCase extends \\Illuminate\\Foundation\\Testing\\TestCase { protected function setUp(): void { parent::setUp(); } protected function tearDown(): void { parent::tearDown(); } }',
                     'Child.php' => '<?php namespace Tests; final class ChildTest extends TestCase { protected function setUp(): void { parent::setUp(); } protected function tearDown(): void { parent::tearDown(); } public function testValue(): void { $this->assertTrue(true); } }',
                 ];
+                if ($attempt === 2) {
+                    // The native runtime trait must supply tearDownLaravel when
+                    // the converted project base only overrides setUpLaravel.
+                    $files['Base.php'] = str_replace(' protected function tearDown(): void { parent::tearDown(); }', '', $files['Base.php']);
+                }
                 foreach ($files as $file => $source) {
                     file_put_contents($directory . '/corpus/' . $file, $source);
                     self::run([PHP_BINARY, '-l', $directory . '/corpus/' . $file], $root);
@@ -91,7 +96,9 @@ final class ParentLifecycleProvenanceTest
                     self::run([PHP_BINARY, '-l', $directory . '/corpus/' . $file], $root);
                     Assert::string($first[$file])->notContains('laratesto-residual');
                     Assert::string($first[$file])->contains('function setUpLaravel');
-                    Assert::string($first[$file])->contains('function tearDownLaravel');
+                    if ($attempt !== 2 || $file !== 'Base.php') {
+                        Assert::string($first[$file])->contains('function tearDownLaravel');
+                    }
                 }
                 Assert::string($first['Child.php'])->contains('#[\\Testo\\Test]');
                 self::run($command, $root);

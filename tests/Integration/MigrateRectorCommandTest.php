@@ -53,6 +53,14 @@ final class SignupTest extends TestCase
         $this->postJson('/signup', ['email' => 'a@b.c'])->assertStatus(201);
     }
 }
+
+final class ManualSeedTest extends TestCase
+{
+    public function test_seed(): void
+    {
+        $this->seed();
+    }
+}
 PHP;
 
     /**
@@ -97,7 +105,7 @@ PHP;
                 '--report' => $report,
             ]);
 
-            Assert::same($result->exitCode(), 2, 'Manual residuals (Mail::fake) must yield exit 2. Output: ' . $result->output());
+            Assert::same($result->exitCode(), 2, 'Manual residuals (seed) must yield exit 2. Output: ' . $result->output());
             Assert::same($before, \md5_file($file), 'A dry-run must not modify processed sources.');
 
             $payload = \json_decode((string) \file_get_contents($report), true);
@@ -108,7 +116,7 @@ PHP;
 
             $codes = \array_map(static fn(array $r): string => $r['code'], $payload['residuals']);
 
-            Assert::true(\in_array('LARAVEL_FAKE_UNSUPPORTED', $codes, true), 'Mail::fake() must be reported: ' . \json_encode($codes));
+            Assert::true(\in_array('HTTP_UNSUPPORTED_SIGNATURE', $codes, true), 'seed() must be reported: ' . \json_encode($codes));
         } finally {
             self::cleanup($dir, $report);
         }
@@ -137,7 +145,7 @@ PHP;
             Assert::true(\str_contains($applied, 'Laratesto\\Testing\\LaravelTestCase'), 'The base class must be rewritten in place.');
             Assert::true(\str_contains($applied, '#[\Laratesto\Attribute\RefreshDatabase]'), 'The trait must become an attribute.');
             Assert::true(\str_contains($applied, '#[\Testo\Test]'), 'Test methods must be discoverable by Testo.');
-            Assert::true(\str_contains($applied, 'laratesto-residual(code=LARAVEL_FAKE_UNSUPPORTED'), 'The fake must stay visible as a residual marker.');
+            Assert::true(\str_contains($applied, 'laratesto-residual(code=HTTP_UNSUPPORTED_SIGNATURE'), 'The unsupported seed helper must stay visible as a residual marker.');
 
             $hash = \md5_file($file);
 
@@ -196,9 +204,11 @@ PHP;
             $payload = \json_decode((string) \file_get_contents($report), true);
 
             Assert::same($payload['mode'], 'dry-run');
-            Assert::same(\count($payload['residuals']), 1);
-            Assert::same($payload['residuals'][0]['code'], 'LARAVEL_FAKE_UNSUPPORTED');
-            Assert::same($payload['residuals'][0]['line'], $markerLine, 'The on-disk marker line must be reported.');
+            Assert::same(\count($payload['residuals']), 2);
+            foreach ($payload['residuals'] as $residual) {
+                Assert::same($residual['code'], 'HTTP_UNSUPPORTED_SIGNATURE');
+                Assert::same($residual['line'], $markerLine, 'Both rule contributions must report the on-disk marker line.');
+            }
         } finally {
             self::cleanup($dir, $report);
         }

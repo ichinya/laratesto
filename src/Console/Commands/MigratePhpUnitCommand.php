@@ -100,7 +100,11 @@ final class MigratePhpUnitCommand extends Command
             }
 
             $contents = $this->files->get($sourceFile);
-            $result = $this->migrator->migrate($contents);
+            $baseFile = $basePath . '/tests/TestCase.php';
+            $result = $this->migrator->migrate(
+                $contents,
+                $this->files->isFile($baseFile) ? $this->files->get($baseFile) : null,
+            );
             $sourceLabel = $this->relative($basePath, $sourceFile);
             $targetLabel = $this->relative($basePath, $targetFile);
 

@@ -31,7 +31,7 @@ final class LaravelApplicationFactory
      *
      * @throws \RuntimeException If the bootstrap file does not return an application instance.
      */
-    public function boot(): Application
+    public function boot(?object $testCase = null): Application
     {
         $this->flush();
 
@@ -44,7 +44,13 @@ final class LaravelApplicationFactory
         $_ENV['APP_ENV'] = $environment;
         $_SERVER['APP_ENV'] = $environment;
 
-        $application = require $this->config->bootstrapFile();
+        // Laravel project bases commonly register services before bootstrapping.
+        // Their public createApplication() owns that bootstrap, just as it does
+        // under Laravel's PHPUnit runner. Never bootstrap its result a second time.
+        $customFactory = $testCase !== null && \is_callable([$testCase, 'createApplication']);
+        $application = $customFactory
+            ? $testCase->createApplication()
+            : require $this->config->bootstrapFile();
 
         if (!$application instanceof Application) {
             throw new \RuntimeException(\sprintf(
@@ -55,7 +61,9 @@ final class LaravelApplicationFactory
             ));
         }
 
-        $application->make(ConsoleKernel::class)->bootstrap();
+        if (!$customFactory) {
+            $application->make(ConsoleKernel::class)->bootstrap();
+        }
 
         foreach ($this->config->config as $key => $value) {
             $application['config']->set($key, $value);

@@ -15,6 +15,7 @@ with.
   (`connections`/`tables`/`exceptTables` on `DatabaseTruncation` and
   `RefreshDatabase`) — use `dev-main` until that release: the generated
   attributes do not exist in the released runtime 0.6.9.
+- Use the [monorepo consumer installation](README.md#install) with the matching runtime checkout containing `Laratesto\Testing\PhpUnitCompatibility`; runtime 0.7.0 and earlier cannot run the new assertion output.
 - The project's test classes autoloadable (a standard Laravel `Tests\` namespace is).
 - PHP 8.2+ for Laravel 12, or PHP 8.3+ for Laravel 13.
 
@@ -91,16 +92,19 @@ reason, sorted by rule.
 
 | Code | Typical trigger | Manual fix |
 | --- | --- | --- |
-| `LARAVEL_FAKE_UNSUPPORTED` | `Mail::fake()`, `Queue::fake()`, `Http::fake()` … | keep the fake for now and run the test under PHPUnit semantics, or replace with Testo-native doubles |
+| `LARAVEL_FAKE_UNSUPPORTED` | marker from an older migration | migrate the original source with the current set; facade assertions now use the framework compatibility helper and require `phpunit/phpunit` in `require-dev` |
 | `RESPONSE_UNSUPPORTED_API` | `assertJsonFragment()`, `TestResponse::fromBaseResponse()` or another static factory, construction from an unknown/nullable value or with extra arguments, a sibling blocking the file-wide type swap | use a supported assertion or migrate the response manually; construction converts only with one proven non-null Symfony `Response` value, positional or named `response:` |
 | `DATABASE_UNSUPPORTED_CONFIGURATION` | a custom override of a hook the used strategy actually runs (`beforeRefreshingDatabase()` with `RefreshDatabase`/`DatabaseMigrations`, `beforeTruncatingDatabase()` with `DatabaseTruncation`, `connectionsToTransact()` with `RefreshDatabase`/`DatabaseTransactions`, …), dynamic `$connectionsToTruncate`, a `tablesToTruncate`/`exceptTables` map keyed by connection name on `DatabaseTruncation` (the trait looks it up with the null default selector and falls back to the whole unmatched map, while the attribute truncates/excludes the listed tables on the resolved connection), an option property such as `$seed` or `$connectionsToTransact` declared on a resolved project ancestor (unless the class itself redeclares the same option and no project reader above it observes the declaration — a reader in an ancestor method, an ancestor trait or one of the class's own project traits fails the lift closed, except a reader whose own scope declares the option privately, which the redeclare never shadows) or supplied by a used project trait (directly or through an ancestor; still live there through `property_exists()`, but out of reach of the class-level attribute), the same database trait re-declared on a descendant of a class that already uses it with a different configuration, a `$connectionsToTransact`/`$connectionsToTruncate` selection on `RefreshDatabase`/`DatabaseTruncation` that names, multiplies, duplicates or empties connections (both traits always keep their first `migrate:fresh` on the default connection, `DatabaseTruncation` also its later `db:seed`, while the attribute would repoint `migrate:fresh` and `db:seed` at the selected ones), a used trait that cannot be resolved | move the hook body into the test or `setUpLaravel()`, express options as literal attribute arguments on the class that carries the trait, and drop the duplicated trait use so the hierarchy inherits the single attribute |
 | `LazilyRefreshDatabase` (lazy refresh strategy) | a test class uses it directly, or through a resolved project trait, including across files | there is no lazy counterpart — the eager attribute would change refresh timing: keep the source trait, switch to the eager attribute manually once per-class refresh timing is acceptable, then delete the marker together with the fix |
-| `HTTP_UNSUPPORTED_SIGNATURE` | `$this->postJson()` with extra, unpacked or named arguments, unknown/dynamic helpers, unsupported `parent::` assertions/lifecycle calls, direct app writes/references or app arguments passed to unresolved or by-reference signatures | use supported signatures or migrate manually; parent lifecycle calls convert only as direct statements of the matching class hook, while supported parent helpers and project-declared methods remain available; ordinary app reads and proven by-value calls still convert |
+| `HTTP_UNSUPPORTED_SIGNATURE` | extra or unpacked arguments, unknown named parameters, unknown/dynamic helpers, unsupported `parent::` assertions/lifecycle calls, direct app writes/references or app arguments passed to unresolved or by-reference signatures | use supported signatures or migrate manually; known named parameters and expressions with compatible parameter types convert; parent lifecycle calls convert only as direct statements of the matching class hook, while supported parent helpers and project-declared methods remain available; ordinary app reads and proven by-value calls still convert |
 | `CLASS_UNSAFE_HIERARCHY` / `LIFECYCLE_UNSUPPORTED` | custom or skipped parent, parameterized lifecycle, trait-provided lifecycle or custom bootstrap (including nested uses and aliases) | include and convert the base class explicitly (add it via `--base-class`, check file/glob and base-rule `withSkip` exclusions), or move and review the lifecycle behavior in the class |
 | `LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY` | helper class using `$this->app` or a database trait | decide whether the class should become a Laratesto test or drop the test constructs |
-| `ARTISAN_INTERACTION_UNSUPPORTED` | interactive prompts, or a Pending Artisan command retained across later statements, loop iterations or catch/finally | review execution order: Laravel executes retained commands on release, while Laratesto is eager; supported immediate chains and terminal assignments followed only by literal expectations convert when the command does not escape through references or static/global storage |
+| `ARTISAN_INTERACTION_UNSUPPORTED` | interactive prompts, retained commands in loops or catch/finally, or variables escaping through closures/references/static/global storage | review execution order and variable lifetime; straight-line local commands now convert to `pendingArtisan()`, preserving execution on release; immediate chains and terminal literal expectations also convert |
 
-Trait declarations are shared and are not rewritten. Move or manually migrate
+Project `createApplication()` methods are supported when public, non-static,
+callable without required arguments, and independent of an unsupported parent
+factory. Their pre-boot service registration remains in place. `WithFaker` also
+runs before the user setup hook. Other trait declarations are shared and are not rewritten. Move or manually migrate
 trait-provided PHPUnit tests, source testing APIs in helpers, and Laravel
 `setUp<Trait>`/`tearDown<Trait>` hooks before removing their hierarchy residuals.
 Nested traits and aliases participate in this check. The shared base stays in
@@ -143,6 +147,23 @@ the migrated scope even when no markers remain.
 Some residuals keep the entire class on its original PHPUnit hierarchy or retain
 its source strategy trait. Complete that manual conversion before running it as
 a Laratesto test.
+
+Compare discovery as well as pass/fail results. PHPUnit normally discovers files
+ending in `Test.php`; Testo can also discover test methods in files such as
+`PaymentTestNew.php` or `PaymentDemo.php`. Use the same file list for the before
+and after runs, and account separately for classes left with residual markers.
+
+Facade fake assertions and assertions on proven `Illuminate\Mail\Mailable`
+receivers use the framework compatibility helper. It records their assertions
+and failures in Testo, including fluent chains. Keep `phpunit/phpunit` installed
+as a development dependency for these framework and package assertions.
+
+The set supports `createStub()` with the installed PHPUnit generator, including
+configured return values and exceptions. `expectOutputString()` checks the exact
+output from setup and the test body before teardown. Deferred console commands
+use Laravel's `PendingCommand`; retain PHPUnit for both stubs and console
+assertions. Run the migration again from original source when upgrading from a
+version that marked these calls as residuals.
 
 ## 4. Report and rollback hygiene
 

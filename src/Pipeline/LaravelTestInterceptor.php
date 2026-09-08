@@ -38,8 +38,33 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
     #[\Override]
     public function runTest(TestInfo $info, callable $next): TestResult
     {
+        $instance = $info->caseInfo->instance?->getInstance();
+        if ($instance !== null && method_exists($instance, 'beginPhpUnitOutputCapture')) {
+            $instance->beginPhpUnitOutputCapture();
+        }
+        $result = null;
         try {
-            $application = $this->factory->boot();
+            $result = $this->runLaravelTest($info, $next);
+        } finally {
+            if ($instance !== null && method_exists($instance, 'closePhpUnitOutputCapture')) {
+                try {
+                    $instance->closePhpUnitOutputCapture();
+                } catch (\Throwable $cleanupFailure) {
+                    // Preserve an existing result failure or a propagating
+                    // pipeline exception; report cleanup failures on their own.
+                    if ($result !== null && $result->failure === null) {
+                        $result = FailureResult::aborted($info, $cleanupFailure);
+                    }
+                }
+            }
+        }
+        return $result;
+    }
+
+    private function runLaravelTest(TestInfo $info, callable $next): TestResult
+    {
+        try {
+            $application = $this->factory->boot($info->caseInfo->instance?->getInstance());
         } catch (\Throwable $bootFailure) {
             return FailureResult::aborted($info, $bootFailure);
         }

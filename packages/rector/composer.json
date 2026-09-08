@@ -21,8 +21,11 @@
         "rector/rector": "2.6.2",
         "testo/bridge-rector": "^0.2.4"
     },
+    "conflict": {
+        "ichinya/laratesto": "<=0.7.0"
+    },
     "suggest": {
-        "ichinya/laratesto": "The Laratesto runtime API these rules rewrite to. Requires the release that ships the multi-connection database attributes (connections/tables/exceptTables on DatabaseTruncation and RefreshDatabase); use dev-main until that release — the rules do NOT produce code compatible with runtime 0.6.9."
+        "ichinya/laratesto": "Install the matching runtime checkout (or a release after 0.7.0) with PhpUnitCompatibility and multi-connection database attributes. See README.md for monorepo path installation."
     },
     "autoload": {
         "psr-4": {

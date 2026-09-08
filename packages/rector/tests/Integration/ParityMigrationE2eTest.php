@@ -107,7 +107,7 @@ final class ParityMigrationE2eTest
             $dynamic = (string) \file_get_contents($unsupported . '/UnsupportedCorpus.php');
             Assert::string($dynamic)->contains('laratesto-residual(code=DATABASE_UNSUPPORTED_CONFIGURATION');
             Assert::string($dynamic)->contains('laratesto-residual(code=HTTP_UNSUPPORTED_SIGNATURE');
-            Assert::string($dynamic)->contains('laratesto-residual(code=LARAVEL_FAKE_UNSUPPORTED');
+            Assert::string($dynamic)->notContains('laratesto-residual(code=LARAVEL_FAKE_UNSUPPORTED');
             Assert::string($dynamic)->contains('laratesto-residual(code=ARTISAN_INTERACTION_UNSUPPORTED');
             Assert::string($dynamic)->contains('expectsQuestion');
 

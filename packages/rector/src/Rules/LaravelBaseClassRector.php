@@ -232,6 +232,7 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             return null;
         }
 
+        $deferredCalls = $this->rewriteDeferredArtisan($node);
         $changed = false;
         [$kind, $chainFailure] = $this->classifyHierarchy($node);
 
@@ -302,6 +303,9 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             || $httpAnalysis->reasonsByCode !== []
             || $appFailures !== []
             || $databaseAnalysis->unsupportedReason !== null) {
+            foreach ($deferredCalls as $call) {
+                $call->name = new \PhpParser\Node\Identifier('artisan');
+            }
             return $changed ? $node : null;
         }
 
@@ -310,16 +314,35 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         return $this->convertClass($node, $kind);
     }
 
+    /** @return list<\PhpParser\Node\Expr\MethodCall> */
+    private function rewriteDeferredArtisan(Class_ $class): array
+    {
+        $name = $this->getName($class);
+        try {
+            if ($name === null || !$this->reflectionProvider->hasClass($name)) {
+                return [];
+            }
+            $reflection = $this->reflectionProvider->getClass($name);
+            if ($reflection->hasNativeMethod('pendingArtisan')) {
+                // A project helper would capture the generated runtime call.
+                // Keep the original artisan call for the timing safety gate.
+                return [];
+            }
+            if (!$reflection->hasNativeMethod('artisan') || !in_array(
+                $reflection->getNativeMethod('artisan')->getDeclaringClass()->getName(),
+                ['Illuminate\\Foundation\\Testing\\TestCase', 'Illuminate\\Foundation\\Testing\\Concerns\\InteractsWithConsole'], true,
+            )) {
+                return [];
+            }
+        } catch (\Throwable) {
+            return [];
+        }
+        return (new \Laratesto\Rector\Analysis\DeferredArtisanRewriter())->rewrite($class);
+    }
+
     /**
-     * Decides how far this class may be rewritten: a direct framework child is
-     * converted to the Laratesto base itself, while a project-base descendant keeps
-     * its extends untouched - the project base is converted exactly once, and this
-     * class only receives lifecycle, API and database conversions.
-     *
-     * Only classes whose direct parent is a configured base reach this point; other
-     * hierarchies are simply not our business.
-     *
-     * @return array{('framework'|'descendant')|null, non-empty-string|null} kind + failure reason (null when safe)
+     * Direct framework children change base; descendants retain their project base.
+     * @return array{('framework'|'descendant')|null, non-empty-string|null}
      */
     private function classifyHierarchy(Class_ $class): array
     {
@@ -473,6 +496,14 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
 
         foreach ($class->getMethods() as $method) {
             $name = $this->getName($method->name);
+
+            if ($name !== null && strtolower($name) === 'createapplication'
+                && $method->isPublic() && !$method->isStatic() && !$method->isAbstract()
+                && array_filter($method->params, static fn(Node\Param $parameter): bool => $parameter->default === null && !$parameter->variadic) === []
+                && !(new NodeFinder())->findFirst($method->stmts ?? [], fn(Node $node): bool => $node instanceof StaticCall
+                    && $this->isName($node->class, 'parent') && $this->isName($node->name, 'createApplication'))) {
+                continue;
+            }
 
             // PHP method names are case-insensitive: CreateApplication() provides
             // createApplication() all the same.
@@ -660,7 +691,8 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
         $hooks = [];
         $providers = [$class];
         foreach (array_keys($seen) as $traitName) {
-            if (isset(DatabaseConfigurationAnalyzer::TRAITS[$traitName])) {
+            if (isset(DatabaseConfigurationAnalyzer::TRAITS[$traitName])
+                || in_array($traitName, ['Illuminate\Foundation\Testing\WithFaker', 'Laratesto\Testing\WithFaker'], true)) {
                 continue;
             }
             $shortName = substr($traitName, (int) strrpos('\\' . $traitName, '\\'));
@@ -1408,7 +1440,20 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
                 );
 
                 if ($classNode instanceof Class_) {
-                    return $classNode->getMethod('__construct');
+                    for ($depth = 0; $depth <= self::MAX_CHAIN_DEPTH; ++$depth) {
+                        $constructor = $classNode->getMethod('__construct');
+                        if ($constructor !== null) {
+                            return $constructor;
+                        }
+                        if ($classNode->extends === null) {
+                            break;
+                        }
+                        $parent = $this->getName($classNode->extends);
+                        $classNode = $parent === null ? null : $this->astResolver->resolveClassFromName($parent);
+                        if (!$classNode instanceof Class_) {
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -1451,6 +1496,15 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
      */
     private function convertClass(Class_ $class, string $kind): Node
     {
+        foreach ($class->stmts as $statement) {
+            if ($statement instanceof TraitUse) {
+                foreach ($statement->traits as $index => $trait) {
+                    if ($this->isName($trait, 'Illuminate\Foundation\Testing\WithFaker')) {
+                        $statement->traits[$index] = new FullyQualified('Laratesto\Testing\WithFaker');
+                    }
+                }
+            }
+        }
         if ($kind === 'framework') {
             if ($this->configuration->targetMode === self::TARGET_MODE_BASE_CLASS) {
                 $class->extends = new FullyQualified(self::TARGET_BASE);
@@ -1468,7 +1522,9 @@ final class LaravelBaseClassRector extends AbstractRector implements Configurabl
             $this->markTestMethod($method);
         }
 
-        $this->traverseNodesWithCallable($class->stmts, fn(Node $inner): ?Node => $this->convertAppExpression($inner));
+        $this->traverseNodesWithCallable($class->stmts, fn(Node $inner): Node|int|null => $inner instanceof ClassLike
+            ? \PhpParser\NodeTraverser::DONT_TRAVERSE_CHILDREN
+            : $this->convertAppExpression($inner));
 
         return $class;
     }

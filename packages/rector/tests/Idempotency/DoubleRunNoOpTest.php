@@ -93,7 +93,7 @@ PHP;
 
     /**
      * GLM cold-review finding: the analyzer scanned MethodCall only, so a PHPUnit
-     * assertion written as self::/static:: (self::assertStringContainsString())
+     * assertion written as self::/static:: (self::assertStringContainsStringIgnoringCase())
      * survived the upstream bridge-rector, bypassed the residual preflight, and the
      * class still migrated to LaravelTestCase — fataling at runtime on the converted
      * base, which provides no assert surface. The full pipeline must keep the class
@@ -115,7 +115,7 @@ final class StaticAssertBlockTest extends TestCase
     {
         $this->assertSame('acme', 'acme');
 
-        self::assertStringContainsString('acme', 'acme label');
+        self::assertStringContainsStringIgnoringCase('acme', 'acme label');
     }
 }
 PHP;
@@ -290,7 +290,7 @@ PHP;
 
         // The unsupported self:: assert keeps the class on PHPUnit.
         $blocked->contains('extends TestCase');
-        $blocked->contains('self::assertStringContainsString() is outside the supported helper matrix');
+        $blocked->contains('self::assertStringContainsStringIgnoringCase() is outside the supported helper matrix');
 
         // Both preflight rules fail the same code and merge into one marker comment.
         $blocked->contains(

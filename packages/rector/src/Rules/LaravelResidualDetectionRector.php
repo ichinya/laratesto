@@ -11,7 +11,6 @@ use Laratesto\Rector\Residuals\ResidualMarker;
 use PhpParser\Node;
 use PhpParser\Node\Expr\MethodCall;
 use PhpParser\Node\Expr\PropertyFetch;
-use PhpParser\Node\Expr\StaticCall;
 use PhpParser\Node\Expr\Variable;
 use PhpParser\Node\Identifier;
 use PhpParser\Node\Name\FullyQualified;
@@ -32,11 +31,8 @@ use Testo\Bridge\Rector\Testing\TestRectorFixtures;
  * Two sides of the hybrid detection decision:
  *
  * 1. Inside a converted Laravel test class — calls with no Laratesto counterpart:
- *    facade fakes (`Mail::fake()`, `Queue::fake()`, `Bus::fake()`, `Event::fake()`,
- *    `Notification::fake()`, `Storage::fake()`, `Http::fake()`), exception-handling
- *    helpers (`$this->withoutExceptionHandling()` / `withExceptionHandling()`), and
  *    response asserts Laratesto does not provide (`assertJsonFragment`,
- *    `assertJsonCount`, `assertCookie`, `assertCookieExpired`, `assertViewIs`,
+ *    `assertCookieExpired`, `assertViewIs`,
  *    `assertDownload`, ...). They keep running under PHPUnit semantics; the class gets
  *    a residual marker listing what needs a manual decision. An unsupported database
  *    strategy is made visible the same way: a `LazilyRefreshDatabase` trait use —
@@ -67,30 +63,12 @@ final class LaravelResidualDetectionRector extends AbstractRector
     private const MAX_CHAIN_DEPTH = 10;
 
     /**
-     * Facade fakes without a stable Testo-native counterpart yet.
-     */
-    private const FAKE_FACADES = [
-        'Illuminate\Support\Facades\Mail',
-        'Illuminate\Support\Facades\Queue',
-        'Illuminate\Support\Facades\Bus',
-        'Illuminate\Support\Facades\Event',
-        'Illuminate\Support\Facades\Notification',
-        'Illuminate\Support\Facades\Storage',
-        'Illuminate\Support\Facades\Http',
-    ];
-
-    /**
      * Response/method calls inside a Laravel test that Laratesto does not provide.
      */
-    private const UNSUPPORTED_TEST_HELPERS = [
-        'withoutExceptionHandling',
-        'withExceptionHandling',
-    ];
+    private const UNSUPPORTED_TEST_HELPERS = [];
 
     private const UNSUPPORTED_RESPONSE_METHODS = [
         'assertJsonFragment',
-        'assertJsonCount',
-        'assertCookie',
         'assertCookieExpired',
         'assertCookieNotExpired',
         'assertViewIs',
@@ -128,37 +106,31 @@ final class LaravelResidualDetectionRector extends AbstractRector
     public function getRuleDefinition(): RuleDefinition
     {
         return new RuleDefinition(
-            'Mark unsupported Laravel test constructs (fakes, exception helpers, missing asserts, constructs outside the hierarchy) as residuals',
+            'Mark unsupported Laravel assertions, database strategies and constructs outside the hierarchy as residuals',
             [
                 new CodeSample(
                     <<<'PHP'
                         use Illuminate\Foundation\Testing\TestCase;
-                        use Illuminate\Support\Facades\Mail;
 
                         final class SignupTest extends TestCase
                         {
                             public function test_signup_sends_mail(): void
                             {
-                                Mail::fake();
-
                                 $this->postJson('/signup', ['email' => 'a@b.c'])
-                                    ->assertStatus(201);
+                                    ->assertJsonFragment(['created' => true]);
                             }
                         }
                         PHP,
                     <<<'PHP'
                         use Illuminate\Foundation\Testing\TestCase;
-                        use Illuminate\Support\Facades\Mail;
 
-                        /* laratesto-residual(code=LARAVEL_FAKE_UNSUPPORTED, rule=Laratesto\Rector\Rules\LaravelResidualDetectionRector, severity=manual): Mail::fake() — no stable Testo-native fakes yet; migrate manually */
+                        /* laratesto-residual(code=RESPONSE_UNSUPPORTED_API, rule=Laratesto\Rector\Rules\LaravelResidualDetectionRector, severity=manual): assertJsonFragment() has no supported response counterpart */
                         final class SignupTest extends TestCase
                         {
                             public function test_signup_sends_mail(): void
                             {
-                                Mail::fake();
-
                                 $this->postJson('/signup', ['email' => 'a@b.c'])
-                                    ->assertStatus(201);
+                                    ->assertJsonFragment(['created' => true]);
                             }
                         }
                         PHP,
@@ -189,22 +161,10 @@ final class LaravelResidualDetectionRector extends AbstractRector
      */
     private function detectUnsupportedInside(Class_ $node): ?Node
     {
-        $fakes = [];
         $unsupportedHelpers = [];
         $unsupportedResponses = [];
 
-        $this->traverseNodesWithCallable($node->stmts, function (Node $inner) use ($node, &$fakes, &$unsupportedHelpers, &$unsupportedResponses): void {
-            if ($inner instanceof StaticCall
-                && $this->isNames($inner->class, self::FAKE_FACADES)
-                && $this->isName($inner->name, 'fake')) {
-                $fakes[] = \sprintf(
-                    '%s::fake()',
-                    (new FullyQualified((string) $this->getName($inner->class)))->getLast(),
-                );
-
-                return;
-            }
-
+        $this->traverseNodesWithCallable($node->stmts, function (Node $inner) use ($node, &$unsupportedHelpers, &$unsupportedResponses): void {
             if (! $inner instanceof MethodCall) {
                 return;
             }
@@ -222,13 +182,9 @@ final class LaravelResidualDetectionRector extends AbstractRector
 
         $changed = false;
 
-        $fakes !== [] and $changed = ResidualMarker::mark(
-            $node,
-            ResidualCode::LARAVEL_FAKE_UNSUPPORTED,
-            static::class,
-            \implode(', ', \array_values(\array_unique($fakes)))
-                . ' — no stable Testo-native fakes yet; migrate manually',
-        );
+        // Fake setup already works in a booted Laravel application. Their
+        // assertions are retained through LaravelFacadeAssertionsRector; PHPUnit
+        // remains a documented assertion-library dependency for these calls.
 
         $unsupportedHelpers !== [] and $changed = ResidualMarker::mark(
             $node,

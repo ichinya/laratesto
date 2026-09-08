@@ -49,7 +49,7 @@ final class PhpUnitToTestoMigrator
             => '/\bfunction\s+(?:setUpBeforeClass|tearDownAfterClass)\s*\(/',
     ];
 
-    public function migrate(string $source): MigrationResult
+    public function migrate(string $source, ?string $projectBaseSource = null): MigrationResult
     {
         $errors = $this->validateSource($source);
 
@@ -58,6 +58,12 @@ final class PhpUnitToTestoMigrator
         }
 
         $isLaravel = $this->isLaravelTest($source);
+
+        if ($isLaravel && !$this->isEmptyProjectBase($projectBaseSource)) {
+            return new MigrationResult($source, errors: [
+                'The project Tests\\TestCase bootstrap could not be proven empty. Custom createApplication(), lifecycle hooks, traits and inherited initialization require manual migration; use laratesto:migrate-rector to analyze the hierarchy.',
+            ]);
+        }
 
         if (!$isLaravel && \preg_match('/\bfunction\s+(?:setUp|tearDown)\s*\(/', $source) === 1) {
             return new MigrationResult(
@@ -87,6 +93,7 @@ final class PhpUnitToTestoMigrator
         );
 
         $code = $this->rewriteStructure($code, $source, $isLaravel, $conversionErrors);
+        $this->validateRemainingCalls($code, $isLaravel, $conversionErrors);
 
         if ($needsAssert) {
             $code = $this->addUse($code, 'Testo\\Assert');
@@ -94,6 +101,7 @@ final class PhpUnitToTestoMigrator
         if ($needsExpect) {
             $code = $this->addUse($code, 'Testo\\Expect');
         }
+        $this->validateImports($code, $conversionErrors);
 
         $residuals = [
             'PHPUnit\\Framework' => 'PHPUnit framework references remain after conversion.',
@@ -119,6 +127,109 @@ final class PhpUnitToTestoMigrator
             warnings: \array_values(\array_unique($warnings)),
             errors: \array_values(\array_unique($conversionErrors)),
         );
+    }
+
+    private function isEmptyProjectBase(?string $source): bool
+    {
+        if ($source === null) {
+            return false;
+        }
+        $code = $this->maskNonCodeTokens($source);
+        if (\preg_match('/\babstract\s+class\s+TestCase\s+extends\s+(\\\\?[A-Za-z_][A-Za-z0-9_\\\\]*)\s*\{\s*\}/', $code, $match) !== 1) {
+            return false;
+        }
+        $parent = \ltrim($match[1], '\\');
+        if ($parent === 'Illuminate\\Foundation\\Testing\\TestCase') {
+            return true;
+        }
+
+        return \preg_match('/\buse\s+Illuminate\\\\Foundation\\\\Testing\\\\TestCase\s+as\s+' . \preg_quote($parent, '/') . '\s*;/', $code) === 1;
+    }
+
+    /** @param list<string> $errors */
+    private function validateRemainingCalls(string $code, bool $isLaravel, array &$errors): void
+    {
+        $code = $this->maskNonCodeTokens($code);
+        \preg_match_all('/\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $code, $definitions);
+        $local = \array_map('strtolower', $definitions[1]);
+        \preg_match_all('/\$this->([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $code, $calls);
+        foreach ($calls[1] as $method) {
+            if (\in_array(\strtolower($method), $local, true)
+                || ($isLaravel && \method_exists(\Laratesto\Testing\LaravelTestCase::class, $method))) {
+                continue;
+            }
+            $errors[] = "Unsupported inherited helper {$method}(); migrate it explicitly or use laratesto:migrate-rector.";
+        }
+        if (!$isLaravel) {
+            return;
+        }
+        \preg_match_all('/->(assert[A-Za-z0-9_]+|viewData)\s*\(/', $code, $responseCalls);
+        foreach ($responseCalls[1] as $method) {
+            if (!\in_array(\strtolower($method), $local, true)
+                && !\method_exists(\Laratesto\Testing\LaravelTestCase::class, $method)
+                && !\method_exists(\Laratesto\Testing\LaravelResponse::class, $method)) {
+                $errors[] = "Unsupported response API {$method}(); migrate it explicitly or use laratesto:migrate-rector.";
+            }
+        }
+    }
+
+    /** @param list<string> $errors */
+    private function validateImports(string $code, array &$errors): void
+    {
+        // The legacy converter accepts unbracketed namespaces only. Track brace
+        // depth so trait uses and closure captures cannot be mistaken for imports.
+        $depth = 0;
+        $import = null;
+        $aliases = [];
+        $classNameExpected = false;
+        foreach (\token_get_all($code) as $token) {
+            if ($classNameExpected) {
+                if (\is_array($token) && \in_array($token[0], [\T_WHITESPACE, \T_COMMENT, \T_DOC_COMMENT], true)) {
+                    continue;
+                }
+                if (\is_array($token) && $token[0] === \T_STRING) {
+                    $alias = \strtolower($token[1]);
+                    if (isset($aliases[$alias])) {
+                        $errors[] = "Generated import alias {$token[1]} conflicts with a declared class; use laratesto:migrate-rector.";
+                    }
+                    $aliases[$alias] = true;
+                }
+                $classNameExpected = false;
+            }
+            if ($import !== null) {
+                $text = \is_array($token) ? $token[1] : $token;
+                if ($text === ';') {
+                    if (!\preg_match('/^\s*(?:function|const)\b/', $import)) {
+                        if (\str_contains($import, '{')) {
+                            $errors[] = 'Grouped imports require the Rector migrator to verify generated aliases.';
+                        } else {
+                            foreach (\explode(',', $import) as $name) {
+                                if (\preg_match('/([A-Za-z_][A-Za-z0-9_]*)\s*$/', $name, $match)) {
+                                    $alias = \strtolower($match[1]);
+                                    if (isset($aliases[$alias])) {
+                                        $errors[] = "Generated import alias {$match[1]} conflicts with another import; use laratesto:migrate-rector.";
+                                    }
+                                    $aliases[$alias] = true;
+                                }
+                            }
+                        }
+                    }
+                    $import = null;
+                } elseif (!\is_array($token) || !\in_array($token[0], [\T_COMMENT, \T_DOC_COMMENT], true)) {
+                    $import .= $text;
+                }
+                continue;
+            }
+            if (\is_array($token) && $token[0] === \T_USE && $depth === 0) {
+                $import = '';
+            } elseif (\is_array($token) && \in_array($token[0], [\T_CLASS, \T_INTERFACE, \T_TRAIT, \T_ENUM], true) && $depth === 0) {
+                $classNameExpected = true;
+            } elseif ($token === '{') {
+                ++$depth;
+            } elseif ($token === '}') {
+                --$depth;
+            }
+        }
     }
 
     /** @return list<string> */
@@ -233,6 +344,33 @@ final class PhpUnitToTestoMigrator
                 $warnings,
                 $errors,
             );
+
+            // Fold adjacent expectations without moving argument evaluation.
+            if ($method === 'expectException' && $replacement !== null) {
+                while (\preg_match(
+                    '/\G\s*;\s*(?:static|self|\$this)(?:::|->)(expectExceptionMessage|expectExceptionCode)\s*\(/',
+                    $searchableSource, $next, \PREG_OFFSET_CAPTURE, $close + 1,
+                ) === 1) {
+                    $nextOpen = $next[0][1] + \strlen($next[0][0]) - 1;
+                    $nextClose = $this->findClosingParenthesis($source, $nextOpen);
+                    if ($nextClose === null) {
+                        break;
+                    }
+                    $nextArguments = $this->splitArguments(\substr($source, $nextOpen + 1, $nextClose - $nextOpen - 1));
+                    if (\count($nextArguments) !== 1 || \preg_match('/^[A-Za-z_][A-Za-z0-9_]*\s*:(?!:)/', $nextArguments[0])) {
+                        break;
+                    }
+                    $replacement .= $next[1][0] === 'expectExceptionMessage'
+                        ? '->withMessagePattern(\\Laratesto\\Testing\\PhpUnitCompatibility::exceptionMessagePattern(' . $nextArguments[0] . '))'
+                        : '->withCode(' . $nextArguments[0] . ')';
+                    foreach (\token_get_all('<?php ' . \substr($source, $close + 1, $nextOpen - $close - 1)) as $token) {
+                        if (\is_array($token) && \in_array($token[0], [\T_COMMENT, \T_DOC_COMMENT], true)) {
+                            $replacement = $token[1] . "\n" . $replacement;
+                        }
+                    }
+                    $close = $nextClose;
+                }
+            }
 
             $output .= \substr($source, $position, $spanStart - $position);
             $output .= $replacement ?? \substr($source, $spanStart, $close + 1 - $spanStart);
@@ -424,7 +562,7 @@ final class PhpUnitToTestoMigrator
             $needsExpect = true;
             $warnings[] = 'expectExceptionMessage() was converted to a Throwable expectation; review the exception class if the test can be more specific.';
 
-            return "Expect::exception(\\Throwable::class)->withMessage({$arguments[0]})";
+            return "Expect::exception(\\Throwable::class)->withMessagePattern(\\Laratesto\\Testing\\PhpUnitCompatibility::exceptionMessagePattern({$arguments[0]}))";
         }
 
         if ($method === 'expectExceptionCode') {
@@ -579,12 +717,7 @@ final class PhpUnitToTestoMigrator
         if (!$this->requireArguments($method, $arguments, 1, $errors)) {
             return null;
         }
-        $parts = ["(bool) ({$arguments[0]})"];
-        isset($arguments[1]) and $parts[] = $arguments[1];
-
-        $assertion = $expectedEmpty ? 'Assert::false' : 'Assert::true';
-
-        return $assertion . '(' . $this->join($parts) . ')';
+        return '\\Laratesto\\Testing\\PhpUnitCompatibility::' . $method . '(' . $this->join($arguments) . ')';
     }
 
     /** @param list<string> $arguments @param list<string> $errors */
@@ -593,10 +726,7 @@ final class PhpUnitToTestoMigrator
         if (!$this->requireArguments($method, $arguments, 2, $errors)) {
             return null;
         }
-        $parts = [$arguments[0]];
-        isset($arguments[2]) and $parts[] = $arguments[2];
-
-        return "Assert::string({$arguments[1]})->{$operation}(" . $this->join($parts) . ')';
+        return '\\Laratesto\\Testing\\PhpUnitCompatibility::' . $method . '(' . $this->join($arguments) . ')';
     }
 
     /** @param list<string> $arguments @param list<string> $errors */
@@ -750,7 +880,8 @@ final class PhpUnitToTestoMigrator
                 $errors[] = 'Unable to replace the Laravel PHPUnit base class.';
             }
 
-            $code = $this->rewriteLaravelTraits($code, $source);
+            $code = $this->addUse($code, 'Laratesto\\Testing\\LaravelTestCase');
+            $code = $this->rewriteLaravelTraits($code, $source, $errors);
             $code = $this->rewriteLaravelLifecycle($code);
             $code = \preg_replace('/\$this->app\b(?!\s*\()/', '$this->app()', $code) ?? $code;
             $code = \str_replace('use Illuminate\\Testing\\TestResponse;', 'use Laratesto\\Testing\\LaravelResponse;', $code);
@@ -769,7 +900,8 @@ final class PhpUnitToTestoMigrator
         return $code;
     }
 
-    private function rewriteLaravelTraits(string $code, string $source): string
+    /** @param list<string> $errors */
+    private function rewriteLaravelTraits(string $code, string $source, array &$errors): string
     {
         $traits = [
             'RefreshDatabase' => 'Laratesto\\Attribute\\RefreshDatabase',
@@ -787,7 +919,10 @@ final class PhpUnitToTestoMigrator
                 '',
                 $code,
             ) ?? $code;
-            $code = \preg_replace('/^\s{4}use ' . $short . ';\R/m', '', $code, 1) ?? $code;
+            $code = \preg_replace('/^\h+use\h+' . $short . '\h*;\h*(?=\/\/|\/\*|\R|$)/m', '', $code, 1, $removed) ?? $code;
+            if ($removed !== 1) {
+                $errors[] = "Trait {$short} must have one standalone use; migrate combined, aliased or adapted traits with Rector.";
+            }
             $code = $this->addUse($code, $replacement);
             $code = \preg_replace(
                 '/^((?:final\s+|abstract\s+)?class\s+[A-Za-z_][A-Za-z0-9_]*)/m',

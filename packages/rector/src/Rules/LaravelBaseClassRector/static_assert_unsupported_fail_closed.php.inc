@@ -12,7 +12,7 @@ final class UnsupportedStaticAssertsTest extends TestCase
     {
         $haystack = 'acme label';
 
-        self::assertStringContainsString('acme', $haystack);
+        self::assertStringContainsStringIgnoringCase('acme', $haystack);
         static::assertFileExists('/tmp/acme');
     }
 
@@ -32,14 +32,14 @@ namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\TestCase;
 
-/* laratesto-residual(code=HTTP_UNSUPPORTED_SIGNATURE, rule=Laratesto\Rector\Rules\LaravelBaseClassRector, severity=manual): self::assertStringContainsString() is outside the supported helper matrix; static::assertFileExists() is outside the supported helper matrix; dynamic self/static method cannot be classified */
+/* laratesto-residual(code=HTTP_UNSUPPORTED_SIGNATURE, rule=Laratesto\Rector\Rules\LaravelBaseClassRector, severity=manual): self::assertStringContainsStringIgnoringCase() is outside the supported helper matrix; dynamic self/static method cannot be classified */
 final class UnsupportedStaticAssertsTest extends TestCase
 {
     public function test_haystack(): void
     {
         $haystack = 'acme label';
 
-        self::assertStringContainsString('acme', $haystack);
+        self::assertStringContainsStringIgnoringCase('acme', $haystack);
         static::assertFileExists('/tmp/acme');
     }
 

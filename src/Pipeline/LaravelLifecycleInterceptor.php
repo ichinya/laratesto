@@ -39,6 +39,18 @@ final readonly class LaravelLifecycleInterceptor implements TestRunInterceptor
         }
 
         try {
+            $instance = $this->instance($info);
+            if ($instance !== null && method_exists($instance, 'finishPhpUnitOutputCapture')) {
+                $instance->finishPhpUnitOutputCapture($result->status === \Testo\Core\Value\Status::Passed);
+            }
+        } catch (\Throwable $failure) {
+            if (!$result->status->isFailure()) {
+                $result = $result->with(status: $failure instanceof \Testo\Assert\State\Record
+                    ? \Testo\Core\Value\Status::Failed : \Testo\Core\Value\Status::Aborted)->withFailure($failure);
+            }
+        }
+
+        try {
             $this->tearDown($info);
         } catch (\Throwable $failure) {
             return FailureResult::fromLifecycle($info, $failure);

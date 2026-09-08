@@ -36,7 +36,7 @@ final class HttpDynamicSignaturesPipelineTest
             $this->runRector($rootDir, $tmpDir, [$tmpDir . '/corpus']);
             foreach ($fixtures as $fixture) {
                 $output = (string) \file_get_contents($tmpDir . '/corpus/' . $fixture . '.php');
-                if ($fixture === 'call_common_signature_supported') {
+                if (in_array($fixture, ['call_common_signature_supported', 'call_dynamic_shape_fail_closed'], true)) {
                     Assert::string($output)->notContains('laratesto-residual');
                     Assert::string($output)->contains('extends \\Laratesto\\Testing\\LaravelTestCase');
                 } else {
