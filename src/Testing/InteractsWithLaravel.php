@@ -26,7 +26,45 @@ use Testo\Assert;
  */
 trait InteractsWithLaravel
 {
+    use \Illuminate\Foundation\Testing\Concerns\InteractsWithContainer;
+    use \Illuminate\Foundation\Testing\Concerns\InteractsWithExceptionHandling;
+
+    /** Application alias required by Laravel's container and exception helpers. */
+    protected $app;
+
     private ?Application $laravelApplication = null;
+
+    private ?PhpUnitOutput $phpUnitOutput = null;
+
+    private ?Internal\PhpUnitConsoleTestCase $phpUnitConsole = null;
+
+    /** @internal */
+    public function beginPhpUnitOutputCapture(): void
+    {
+        $this->phpUnitOutput = new PhpUnitOutput();
+        $this->phpUnitOutput->start();
+    }
+
+    /** @internal */
+    public function finishPhpUnitOutputCapture(bool $verify): void
+    {
+        $this->phpUnitOutput?->finish($verify);
+    }
+
+    /** @internal */
+    public function closePhpUnitOutputCapture(): void
+    {
+        $this->phpUnitOutput?->close();
+        $this->phpUnitOutput = null;
+    }
+
+    protected function expectOutputString(string $expectedString): void
+    {
+        if ($this->phpUnitOutput === null) {
+            throw new \LogicException('expectOutputString() requires LaravelPlugin output capture.');
+        }
+        $this->phpUnitOutput->expected = $expectedString;
+    }
 
     /** @var array<non-empty-string, string> Cookies collected from previous responses, keyed by name. */
     private array $cookies = [];
@@ -45,6 +83,12 @@ trait InteractsWithLaravel
     public function setLaravelApplication(Application $application): void
     {
         $this->laravelApplication = $application;
+        $this->phpUnitConsole = null;
+        $this->app = $application;
+        $this->originalExceptionHandler = null;
+        $this->originalVite = null;
+        $this->originalMix = null;
+        $this->originalDeferredCallbacksCollection = null;
         $this->cookies = [];
         $this->defaultHeaders = [];
         $this->serverVariables = [];
@@ -56,6 +100,10 @@ trait InteractsWithLaravel
      */
     public function setUpLaravelApplication(): void
     {
+        $traits = \class_uses_recursive(static::class);
+        if (isset($traits[WithFaker::class]) || isset($traits[\Illuminate\Foundation\Testing\WithFaker::class])) {
+            $this->setUpFaker();
+        }
         $this->setUpLaravel();
     }
 
@@ -68,6 +116,12 @@ trait InteractsWithLaravel
             $this->tearDownLaravel();
         } finally {
             $this->laravelApplication = null;
+            $this->phpUnitConsole = null;
+            $this->app = null;
+            $this->originalExceptionHandler = null;
+            $this->originalVite = null;
+            $this->originalMix = null;
+            $this->originalDeferredCallbacksCollection = null;
             $this->cookies = [];
             $this->defaultHeaders = [];
             $this->serverVariables = [];
@@ -449,8 +503,21 @@ trait InteractsWithLaravel
     }
 
     /**
-     * Run an Artisan command and return a testable result.
+     * Preserve a migrated PHPUnit command's lifetime and deferred assertions.
      *
+     * @param array<array-key, string|bool|int> $parameters
+     */
+    protected function pendingArtisan(string $command, array $parameters = []): DeferredArtisanCommand
+    {
+        if (!class_exists(\PHPUnit\Framework\TestCase::class)) {
+            throw new \LogicException('Deferred Artisan compatibility requires phpunit/phpunit as a dev dependency.');
+        }
+        $this->phpUnitConsole ??= new Internal\PhpUnitConsoleTestCase('consoleCompatibility');
+        return new DeferredArtisanCommand(new \Illuminate\Testing\PendingCommand($this->phpUnitConsole, $this->app(), $command, $parameters));
+    }
+
+    /**
+     * Run an Artisan command and return a testable result.
      * @param array<array-key, string|bool|int> $parameters
      */
     protected function artisan(string $command, array $parameters = []): PendingArtisanCommand
@@ -489,6 +556,24 @@ trait InteractsWithLaravel
             });
         }
 
+        return $this;
+    }
+
+    protected function withMiddleware(string|array|null $middleware = null): static
+    {
+        if ($middleware === null) {
+            $this->app()->instance('middleware.disable', false);
+        } else {
+            foreach ((array) $middleware as $abstract) {
+                $this->app()->forgetInstance($abstract);
+            }
+        }
+        return $this;
+    }
+
+    protected function assertModelExists(\Illuminate\Database\Eloquent\Model $model): static
+    {
+        Assert::true($model->newQueryWithoutScopes()->whereKey($model->getKey())->exists(), 'The model does not exist in the database.');
         return $this;
     }
 

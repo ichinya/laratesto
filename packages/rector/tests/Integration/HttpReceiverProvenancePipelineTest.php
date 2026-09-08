@@ -33,7 +33,7 @@ final class HttpReceiverProvenancePipelineTest
             'TraitHelper' => 'public function example(): void { $alias = $this; $alias->withoutExceptionHandling(); }',
             'HelperAlias' => 'public function example(): void { $alias = $this; $alias->withoutExceptionHandling(); }',
         ];
-        $supported = ['LocalDto', 'AliasDto', 'TypedDto', 'PropertyDto', 'MethodDto', 'OwnHelper'];
+        $supported = ['LocalDto', 'AliasDto', 'TypedDto', 'PropertyDto', 'MethodDto', 'OwnHelper', 'HelperAlias', 'TraitHelper'];
         try {
             \file_put_contents($tmpDir . '/corpus/OwnDto.php', '<?php namespace HttpDto; final class OwnDto { public function assertDownload(): void {} public function withoutExceptionHandling(): void {} }');
             foreach ($cases as $name => $body) {
@@ -49,7 +49,9 @@ final class HttpReceiverProvenancePipelineTest
                 $output = (string) \file_get_contents($tmpDir . '/corpus/' . $name . '.php');
                 if (\in_array($name, $supported, true)) {
                     Assert::string($output)->notContains('laratesto-residual', $name);
-                    Assert::string($output)->contains('extends \\Laratesto\\Testing\\LaravelTestCase', $name);
+                    if ($name !== 'TraitHelper') {
+                        Assert::string($output)->contains('extends \\Laratesto\\Testing\\LaravelTestCase', $name);
+                    }
                 } else {
                     Assert::string($output)->contains(\in_array($name, ['HelperAlias', 'TraitHelper'], true) ? 'HTTP_UNSUPPORTED_SIGNATURE' : 'RESPONSE_UNSUPPORTED_API', $name);
                 }

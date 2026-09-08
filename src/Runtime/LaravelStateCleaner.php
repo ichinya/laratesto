@@ -81,12 +81,12 @@ final class LaravelStateCleaner
     ];
 
     /**
-     * @param list<non-empty-string> $arguments
+     * @var list<array{class-string, non-empty-string, list<mixed>}>
      */
     private const RESETS_WITH_ARGUMENTS = [
         [Migrator::class, 'withoutMigrations', [[]]],
-        [Queue::class, 'createPayloadUsing', [[null]]],
-        [Sleep::class, 'fake', [[false]]],
+        [Queue::class, 'createPayloadUsing', [null]],
+        [Sleep::class, 'fake', [false]],
     ];
 
     public function clean(Application $application): void

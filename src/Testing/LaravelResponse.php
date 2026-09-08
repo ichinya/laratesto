@@ -16,7 +16,8 @@ use function Illuminate\Support\enum_value;
 /**
  * Test-oriented wrapper over an HTTP response returned by the kernel.
  *
- * The `assert*` methods use Testo assertions, so no PHPUnit is involved.
+ * Assertions are recorded in Testo. Package macros and selected framework
+ * assertions retain Laravel's implementation through PhpUnitCompatibility.
  *
  * @api
  */
@@ -32,11 +33,14 @@ final readonly class LaravelResponse
      */
     public Response $baseResponse;
 
+    public mixed $original;
+
     public function __construct(
         private Response $response,
     ) {
         $this->baseResponse = $response;
         $this->headers = $response->headers;
+        $this->original = \method_exists($response, 'getOriginalContent') ? $response->getOriginalContent() : null;
     }
 
     /**
@@ -107,6 +111,58 @@ final readonly class LaravelResponse
         }
 
         return $key !== null ? \data_get($decoded, $key) : $decoded;
+    }
+
+    /** Preserve the package's own macro, including its callback type and checks. */
+    public function assertInertia(?\Closure $callback = null): static
+    {
+        $this->frameworkAssertion('assertInertia', [$callback]);
+        return $this;
+    }
+
+    public function assertJsonMissing(array $data, bool $exact = false): static
+    {
+        $this->frameworkAssertion('assertJsonMissing', [$data, $exact]);
+        return $this;
+    }
+
+    public function assertJsonCount(int $count, ?string $key = null): static
+    {
+        $this->frameworkAssertion('assertJsonCount', [$count, $key]);
+        return $this;
+    }
+
+    public function assertSessionHasNoErrors(): static
+    {
+        $this->frameworkAssertion('assertSessionHasNoErrors', []);
+        return $this;
+    }
+
+    public function assertCookie($cookieName, $value = null, $encrypted = true, $unserialize = false): static
+    {
+        $this->frameworkAssertion('assertCookie', [$cookieName, $value, $encrypted, $unserialize]);
+        return $this;
+    }
+
+    public function assertServerError(): static
+    {
+        Assert::true($this->response->isServerError(), 'Expected an HTTP server error.');
+        return $this;
+    }
+
+    public function viewData(?string $key = null): mixed
+    {
+        return $this->frameworkAssertion('viewData', [$key]);
+    }
+
+    public function inertiaPage(?string $key = null): mixed
+    {
+        return $this->frameworkAssertion('inertiaPage', [$key]);
+    }
+
+    private function frameworkAssertion(string $method, array $arguments): mixed
+    {
+        return PhpUnitCompatibility::run(fn(): mixed => (new \Illuminate\Testing\TestResponse($this->response))->{$method}(...$arguments));
     }
 
     public function assertOk(): static

@@ -15,7 +15,7 @@ use Testo\Test;
  *
  * The corpus fails `HTTP_UNSUPPORTED_SIGNATURE` twice for one class: `$this->app->make()`
  * with two arguments in {@see \Laratesto\Rector\Rules\LaravelBaseClassRector} and
- * `withoutExceptionHandling()` in {@see \Laratesto\Rector\Rules\LaravelResidualDetectionRector}.
+ * `seed()` in {@see \Laratesto\Rector\Rules\LaravelSourceCompatibleCallsRector}.
  */
 final class TwoRuleResidualMergeTest
 {
@@ -34,7 +34,7 @@ final class CollisionTest extends TestCase
     {
         $this->app->make('stdout', ['channel' => 'test']);
 
-        $this->withoutExceptionHandling();
+        $this->seed();
     }
 }
 PHP;
@@ -58,18 +58,18 @@ PHP;
         Assert::true(
             \str_contains($marker, 'code=HTTP_UNSUPPORTED_SIGNATURE')
             && \str_contains($marker, 'rule=Laratesto\Rector\Rules\LaravelBaseClassRector')
-            && \str_contains($marker, 'rule=Laratesto\Rector\Rules\LaravelResidualDetectionRector'),
+            && \str_contains($marker, 'rule=Laratesto\Rector\Rules\LaravelSourceCompatibleCallsRector'),
             "Both rule contributions must live in the single marker:\n" . $marker,
         );
 
         Assert::true(
             \str_contains($marker, '$this->app->make() is automatic only with one argument')
-            && \str_contains($marker, 'withoutExceptionHandling() — no automatic helper conversion; migrate manually'),
+            && \str_contains($marker, 'seed() is outside the supported helper matrix'),
             "No rule reason may be overwritten or lost:\n" . $marker,
         );
 
         $baseClassAt = \strpos($marker, 'LaravelBaseClassRector');
-        $detectionAt = \strpos($marker, 'LaravelResidualDetectionRector');
+        $detectionAt = \strpos($marker, 'LaravelSourceCompatibleCallsRector');
         Assert::true(
             $baseClassAt !== false && $detectionAt !== false && $baseClassAt < $detectionAt,
             'Contributions must render sorted by rule class-string, independent of marking order.',

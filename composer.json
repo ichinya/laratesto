@@ -21,10 +21,12 @@
         "testo/testo": "^0.10.42"
     },
     "require-dev": {
+        "fakerphp/faker": "^1.24",
         "ichinya/laratesto-rector": "@dev",
+        "phpunit/phpunit": "^11.5",
+        "rector/rector": "2.6.2",
         "testo/bridge-mockery": "^0.1.0",
-        "testo/bridge-rector": "^0.2.4",
-        "rector/rector": "2.6.2"
+        "testo/bridge-rector": "^0.2.4"
     },
     "repositories": [
         {

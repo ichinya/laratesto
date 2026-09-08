@@ -15,7 +15,7 @@ use Symfony\Component\Console\Output\OutputInterface;
  */
 final class RunTestsCommand extends Command
 {
-    protected $signature = 'test
+    protected $signature = 'laratesto:test
         {paths?* : Test files or path globs to run}
         {--testo-only : Run Testo and skip Pest/PHPUnit}
         {--legacy-only : Skip Testo and run the installed Pest/PHPUnit runner}

@@ -55,6 +55,9 @@ final class HttpPendingArtisanPipelineTest
             'ParentArtisan' => '$pending = parent::artisan("cache:clear"); $observed = 1; $pending->assertExitCode(0);',
             'ArrowReturnsPending' => '$callback = fn () => $this->artisan("cache:clear"); $pending = $callback(); $observed = 1;',
             'AfterAssertion' => $immediate . ' $observed = 1;',
+            'EscapingFluentResult' => '$pending = $this->artisan("cache:clear"); $alias = $pending->assertExitCode(0); $observed = 1;',
+            'BlockedWithDeferred' => $gap . ' $this->expectOutputRegex("/x/");',
+            'ExistingPendingHelper' => $gap,
             'OuterContinuation' => 'if (true) { ' . $immediate . ' } $observed = 1;',
             'FinallyContinuation' => 'try { ' . $immediate . ' } finally { $observed = 1; }',
             'RetainedLoop' => 'foreach ([1, 2] as $item) { ' . $immediate . ' }',
@@ -63,11 +66,13 @@ final class HttpPendingArtisanPipelineTest
             'TerminalBranch' => 'if (true) { ' . $immediate . ' }',
             'TerminalClosure' => '$callback = function (): void { ' . $immediate . ' }; $callback();',
         ];
-        $supported = ['Immediate', 'Inline', 'TerminalBranch', 'TerminalClosure', 'UnrelatedReference', 'LocalReference'];
+        $supported = ['Immediate', 'Inline', 'TerminalBranch', 'TerminalClosure', 'UnrelatedReference', 'LocalReference', 'AfterAssertion'];
         try {
             foreach ($cases as $name => $body) {
                 \file_put_contents($tmpDir . '/corpus/' . $name . '.php', '<?php namespace HttpPending; final class '
-                    . $name . ' extends \\Illuminate\\Foundation\\Testing\\TestCase { public function testExample(' . ($name === 'ReferenceParameter' ? '&$pending' : '') . '): void { ' . $body . ' } }');
+                    . $name . ' extends \\Illuminate\\Foundation\\Testing\\TestCase { '
+                    . ($name === 'ExistingPendingHelper' ? 'protected function pendingArtisan(string $command): int { return 99; } ' : '')
+                    . 'public function testExample(' . ($name === 'ReferenceParameter' ? '&$pending' : '') . '): void { ' . $body . ' } }');
             }
             foreach (\glob($tmpDir . '/corpus/*.php') ?: [] as $file) {
                 $this->assertValidPhp($file);
@@ -79,8 +84,9 @@ final class HttpPendingArtisanPipelineTest
                     Assert::string($output)->notContains('laratesto-residual', $name);
                     Assert::string($output)->contains('extends \\Laratesto\\Testing\\LaravelTestCase', $name);
                 } else {
-                    Assert::string($output)->contains('ARTISAN_INTERACTION_UNSUPPORTED', $name);
+                    Assert::string($output)->contains($name === 'BlockedWithDeferred' ? 'HTTP_UNSUPPORTED_SIGNATURE' : 'ARTISAN_INTERACTION_UNSUPPORTED', $name);
                     Assert::string($output)->notContains('extends \\Laratesto\\Testing\\LaravelTestCase', $name);
+                    Assert::string($output)->notContains('$this->pendingArtisan', $name);
                 }
                 $this->assertValidPhp($tmpDir . '/corpus/' . $name . '.php');
             }

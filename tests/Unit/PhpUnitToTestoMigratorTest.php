@@ -10,6 +10,7 @@ use Testo\Test;
 
 final class PhpUnitToTestoMigratorTest
 {
+    private const EMPTY_BASE = '<?php namespace Tests; use Illuminate\Foundation\Testing\TestCase as BaseTestCase; abstract class TestCase extends BaseTestCase {}';
     #[Test]
     public function migratesPureUnitAssertionsWithTestoArgumentOrder(): void
     {
@@ -34,7 +35,7 @@ final class PhpUnitToTestoMigratorTest
                     self::assertNotEmpty($nonEmpty);
                 }
             }
-            PHP);
+            PHP, self::EMPTY_BASE);
 
         Assert::true($result->successful(), \implode('; ', $result->errors));
         Assert::string($result->code)->contains('namespace Tests\Testo\Unit\Domain;');
@@ -45,8 +46,8 @@ final class PhpUnitToTestoMigratorTest
         Assert::string($result->code)->contains("Assert::contains(\$values, 'needle');");
         Assert::string($result->code)->contains('Assert::count($values, 2);');
         Assert::string($result->code)->contains('Assert::instanceOf($object, \ArrayObject::class);');
-        Assert::string($result->code)->contains("Assert::false((bool) (\$empty), 'empty message');");
-        Assert::string($result->code)->contains('Assert::true((bool) ($nonEmpty));');
+        Assert::string($result->code)->contains("PhpUnitCompatibility::assertEmpty(\$empty, 'empty message');");
+        Assert::string($result->code)->contains('PhpUnitCompatibility::assertNotEmpty($nonEmpty);');
     }
 
     #[Test]
@@ -90,7 +91,7 @@ final class PhpUnitToTestoMigratorTest
                     self::assertSame('{}', $response->getContent());
                 }
             }
-            PHP);
+            PHP, self::EMPTY_BASE);
 
         Assert::true($result->successful(), \implode('; ', $result->errors));
         Assert::string($result->code)->contains('namespace Tests\Testo\Feature;');
@@ -126,7 +127,7 @@ final class PhpUnitToTestoMigratorTest
 
                 public function testDatabase(): void {}
             }
-            PHP);
+            PHP, self::EMPTY_BASE);
 
         Assert::true($result->successful(), \implode('; ', $result->errors));
         Assert::string($result->code)->contains('use Laratesto\Attribute\DatabaseMigrations;');
@@ -164,12 +165,12 @@ final class PhpUnitToTestoMigratorTest
                     $this->markTestSkipped('not available');
                 }
             }
-            PHP);
+            PHP, self::EMPTY_BASE);
 
         Assert::true($result->successful(), \implode('; ', $result->errors));
         Assert::string($result->code)->contains('use Testo\Expect;');
         Assert::string($result->code)->contains('Expect::exception(\RuntimeException::class);');
-        Assert::string($result->code)->contains("Expect::exception(\Throwable::class)->withMessage('boom');");
+        Assert::string($result->code)->contains("Expect::exception(\Throwable::class)->withMessagePattern(\Laratesto\Testing\PhpUnitCompatibility::exceptionMessagePattern('boom'));");
         Assert::string($result->code)->contains("throw new \Testo\Core\Exception\SkipTest('not available');");
         Assert::count($result->warnings, 1);
     }
@@ -195,7 +196,7 @@ final class PhpUnitToTestoMigratorTest
                     }
                 }
             }
-            PHP);
+            PHP, self::EMPTY_BASE);
 
         Assert::true($result->successful(), \implode('; ', $result->errors));
         Assert::string($result->code)->contains("Assert::fail('must throw');");
@@ -222,7 +223,7 @@ final class PhpUnitToTestoMigratorTest
                     self::assertSame('expected', $actual);
                 }
             }
-            PHP);
+            PHP, self::EMPTY_BASE);
 
         Assert::true($result->successful(), \implode('; ', $result->errors));
         Assert::string($result->code)->contains('self::assertSame("expected", "actual")');
@@ -250,7 +251,7 @@ final class PhpUnitToTestoMigratorTest
                     self::assertSame('x', $value);
                 }
             }
-            PHP);
+            PHP, self::EMPTY_BASE);
 
         Assert::false($result->successful());
         Assert::string(\implode('\n', $result->errors))->contains('data providers');
@@ -279,7 +280,7 @@ final class PhpUnitToTestoMigratorTest
 
                 public function testValue(): void {}
             }
-            PHP);
+            PHP, self::EMPTY_BASE);
 
         Assert::false($result->successful());
         Assert::string(\implode('\n', $result->errors))->contains('refresh hooks');

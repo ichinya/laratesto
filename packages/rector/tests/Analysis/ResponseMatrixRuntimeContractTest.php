@@ -67,12 +67,12 @@ final class ResponseMatrixRuntimeContractTest
     }
 
     #[Test]
-    public function everyListedAssertIsSharedWithLaravelTestResponse(): void
+    public function everyListedAssertIsSharedWithLaravelTestResponseOrItsInertiaMacro(): void
     {
         $laravelMethods = $this->laravelTestResponseMethods();
 
         foreach ($this->signatures() as $method => $signature) {
-            if (! \str_starts_with($method, 'assert')) {
+            if (! \str_starts_with($method, 'assert') || $method === 'assertInertia') {
                 continue;
             }
 

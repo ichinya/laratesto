@@ -1,6 +1,6 @@
 # Testo Laravel Bridge
 
-Native [Testo](https://github.com/php-testo/testo) plugin that boots [Laravel](https://laravel.com) around every test — without PHPUnit.
+Native [Testo](https://github.com/php-testo/testo) plugin that boots [Laravel](https://laravel.com) around every test. The core runtime works without PHPUnit; migrated Laravel fake, mailable and package assertions such as Inertia use its assertion library as a development dependency.
 
 The bridge is a standalone Composer package. It does not require any changes to Testo or to your application: it registers a `TestRunInterceptor` through the standard plugin API (the same mechanism `testo/bridge-mockery` uses).
 
@@ -23,7 +23,7 @@ The bridge is a standalone Composer package. It does not require any changes to 
   attributes with Laravel-compatible lifecycle ordering.
 - Safe `php artisan laratesto:migrate-phpunit` source converter with dry-run,
   conflict protection and explicit diagnostics for manual-only constructs.
-- Unified `php artisan test` entry point: Testo first, then Pest or PHPUnit when
+- Unified `php artisan laratesto:test` entry point: Testo first, then Pest or PHPUnit when
   a legacy-compatible runner is still installed.
 
 ## Requirements
@@ -83,11 +83,11 @@ vendor/bin/testo run --suite=Laravel
 
 ## Running all application tests
 
-Package discovery replaces Laravel Collision's `test` command with a unified
+Package discovery registers a separate `laratesto:test` command with a unified
 runner:
 
 ```bash
-php artisan test
+php artisan laratesto:test
 ```
 
 The command always runs `php vendor/bin/testo run` first. It then runs Pest when
@@ -102,22 +102,41 @@ runner still executes after a failure so one CI job reports the full picture;
 
 ```bash
 # Testo only, useful after the migration is complete.
-php artisan test --testo-only
+php artisan laratesto:test --testo-only
 
 # Only the detected Pest/PHPUnit runner.
-php artisan test --legacy-only
+php artisan laratesto:test --legacy-only
 
 # Common selectors are translated for each runner.
-php artisan test --filter=User --testsuite=Feature --path=tests/Feature
+php artisan laratesto:test --filter=User --testsuite=Feature --path=tests/Feature
 
 # Runner-specific arguments are passed literally without a shell.
-php artisan test --testo-arg=--json --legacy-arg=--colors=always
+php artisan laratesto:test --testo-arg=--json --legacy-arg=--colors=always
 ```
 
 Supported shared options are `--filter`, `--group`, `--suite` / `--testsuite`,
 `--path`, `--coverage` and `--no-coverage`. Positional paths are accepted as
 well. `--without-tty` remains available for Laravel CI command compatibility;
 the child processes are always streamed without an interactive TTY.
+
+Collision keeps ownership of `php artisan test` by default. Existing CI commands
+such as `php artisan test --coverage --min=70 --coverage-clover=coverage.xml`
+therefore continue to use Collision, including its coverage threshold. Actual
+coverage collection still requires a supported coverage driver.
+
+To explicitly replace that command with the unified runner, publish the config
+and set `replace_test_command` to `true` in `config/laratesto.php`:
+
+```bash
+php artisan vendor:publish --tag=laratesto-config
+```
+
+Rebuild any cached application configuration after changing this option.
+`laratesto:test` remains available in either mode. The unified runner has no
+Collision `--min` equivalent. Keep the coverage/threshold job on Collision and
+run Testo in a separate job, or implement an explicit threshold check over your
+Testo coverage report. `--legacy-arg=--coverage-clover=coverage.xml` forwards a
+report argument to PHPUnit/Pest; it does not implement Collision's threshold.
 
 ## Migrating PHPUnit tests
 
@@ -147,6 +166,8 @@ class-level lifecycle hooks or another construct without a faithful Testo
 equivalent. Those files need an explicit human migration; the command will not
 write a partial target for them.
 
+The deprecated converter only replaces a project base whose source is verified as an empty subclass of Laravel TestCase. Custom bootstrap, hooks, traits, unknown helpers, unsupported response APIs and conflicting import aliases are refused; use the Rector hierarchy analysis or migrate them manually. Commented database trait uses retain their comments. Exception messages keep substring matching and their expected type; string assertions preserve PHP caller coercion.
+
 The converter intentionally does not rewrite `phpunit.xml`: reproduce its
 environment overrides and suite boundaries in `testo.php`. Generated `test*()`
 methods also require `NamingConventionPlugin` in the target suite.
@@ -159,7 +180,7 @@ vendor/bin/testo run --suite=Unit
 
 ## Migrating with Rector
 
-For full Laravel test suites the bridge ships a Rector-based migrator. The
+For full Laravel test suites the bridge ships a Rector-based migrator in the monorepo subpackage `packages/rector`. Install it using the [consumer path repository instructions](packages/rector/README.md#install); installing the runtime alone does not register the Rector command. The
 command wraps the pinned Rector binary with the public
 `Laratesto\Rector\Set\LaratestoRectorSetList::LARAVEL_PHPUNIT_TO_LARATESTO`
 set, prints the residual table and writes a deterministic `laratesto-residuals.json`:
@@ -307,12 +328,18 @@ a Laravel response remain conservative residuals.
 
 Laravel keeps a retained Pending Artisan command deferred until it is released;
 `assertExitCode()` records an expectation rather than forcing execution.
-Laratesto runs it eagerly. Immediate chains and terminal assignments followed
-only by literal expectations remain supported when the command does not escape
-through references or static/global storage. Terminal branches and independent
-closure scopes follow the same condition. Retention across later statements,
-loop iterations or catch/finally receives `ARTISAN_INTERACTION_UNSUPPORTED`; review the intended
-execution order before migrating those commands manually.
+The Rector set rewrites supported straight-line local variables to
+`pendingArtisan()`, which uses Laravel's own deferred command and records its
+assertions in Testo. Release through `unset()` or method return keeps its timing.
+Immediate chains and terminal literal expectations also remain supported.
+Interactive commands, retained commands in loops or catch/finally, and variables
+escaping through closures, references or static/global storage still receive
+`ARTISAN_INTERACTION_UNSUPPORTED` and need review.
+
+The Rector set also supports `createStub()` through the installed PHPUnit stub
+generator and `expectOutputString()` through a per-test output buffer. Exact
+output is checked after the test body, before teardown, including setup output.
+Keep `phpunit/phpunit` in `require-dev` for stubs and deferred console assertions.
 
 ### Database trait conversion
 
@@ -590,7 +617,22 @@ Available via `LaravelTestCase` or the `InteractsWithLaravel` trait:
 `assertTooManyRequests()`, `assertServiceUnavailable()`, `assertHeader()`, `assertHeaderMissing()`, `assertSee()`, `assertDontSee()`, `assertContent()`,
 `assertJson()`, `assertExactJson()`, `assertJsonPath()` (dot-path, closure support), `assertJsonStructure()` (`'*'` wildcard; array structure required),
 `assertJsonMissingPath()`, `assertJsonValidationErrors()`, `assertRedirect(?string $uri)`, `assertViewHas()` (closure support),
-`assertSessionHas()`, `assertSessionMissing()`, `assertSessionHasErrors()`.
+`assertSessionHas()`, `assertSessionMissing()`, `assertSessionHasErrors()`, `assertSessionHasNoErrors()`,
+`assertInertia()`, `assertJsonMissing()`, `assertJsonCount()`, `assertCookie()`, `assertServerError()`, `viewData()`, `inertiaPage()`.
+
+Package assertions such as `assertInertia()` run the installed package's own
+Laravel `TestResponse` macro. Keep `phpunit/phpunit` in `require-dev` for these
+checks and the framework-backed JSON, cookie and session assertions above;
+their assertion counts and failures are recorded in Testo. The Inertia callback
+keeps its original `Inertia\Testing\AssertableInertia` type and import alias.
+
+The Rector migration preserves a public, zero-required-argument project
+`createApplication()` and calls it once before database setup and user lifecycle
+hooks. That method owns bootstrapping, including pre-boot service registration.
+`WithFaker` migrates to `Laratesto\Testing\WithFaker`, initialized before the user
+setup hook. Container mocking, `withoutVite()`, `withoutExceptionHandling()`,
+`withExceptionHandling()`, `withMiddleware()` and `assertModelExists()` are also
+available to migrated tests. Unresolved bootstrap contracts still receive a residual.
 
 `assertHeader($name, $value)` matches both the header name and expected value
 case-insensitively, as Laravel does; differences beyond case still fail.
@@ -653,10 +695,10 @@ public function testLogsWarningOnFailure(): void
 
 ## Limitations
 
-- **This is not a runner for existing PHPUnit/Pest Laravel tests.** Laravel's
-  `TestCase` extends PHPUnit, and Laravel assertions (`Queue::assertPushed`, etc.)
-  call PHPUnit under the hood. Tests must be written against Testo assertions
-  (`Testo\Assert`) — hence the PHPUnit-free `LaravelResponse` wrapper.
+- **PHPUnit/Pest test discovery must be migrated before running under Testo.**
+  The Rector set converts test metadata, lifecycle and the supported assertions.
+  It can retain Laravel package assertions through the compatibility helpers;
+  those use PHPUnit as an assertion library without running its test runner.
 - **Facade fakes (`Queue::fake()`, `Event::fake()`, …) require `phpunit/phpunit`
   as a library** if you need their `assert*` methods. The fake setup itself works
   without PHPUnit — the facades resolve on the booted application with no bridge
@@ -666,10 +708,6 @@ public function testLogsWarningOnFailure(): void
   the `assert*` methods on fakes will throw class-not-found errors.
 - **The following Laravel TestCase conveniences are not (yet) ported** and have
   simple workarounds:
-  - `withoutExceptionHandling()` — set `APP_DEBUG=true` in `.env.testing` or
-    configure the exception handler directly.
-  - `withoutVite()` / `withoutMix()` — set `VITE_BYPASS=true` / `MIX_BYPASS=true`
-    in your environment, or configure the entry point resolution in the config.
   - `$this->seed()` — call `Artisan::call('db:seed', ['--force' => true])`
     or `DB::table(...)->insert(...)` directly.
 - Laravel keeps a lot of state in process-global statics, so a Laravel suite must

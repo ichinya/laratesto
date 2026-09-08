@@ -72,6 +72,12 @@ final class HttpCompatibilityAnalyzer
         'followingRedirects' => [0, 0, []],
         'from' => [1, 1, ['string']],
         'withoutMiddleware' => [0, 1, ['middleware']],
+        'withMiddleware' => [0, 1, ['middleware']],
+        'withoutVite' => [0, 0, []],
+        'withoutExceptionHandling' => [0, 1, ['array']],
+        'withExceptionHandling' => [0, 0, []],
+        'mock' => [1, 2, ['string', 'any']],
+        'assertModelExists' => [1, 1, ['any']],
         'actingAs' => [1, 2, ['any', 'nullable-string']],
         'actingAsGuest' => [0, 1, ['nullable-string']],
         'assertAuthenticated' => [0, 1, ['nullable-string']],
@@ -89,6 +95,8 @@ final class HttpCompatibilityAnalyzer
         'session' => [0, 0, []],
         'app' => [0, 0, []],
         'make' => [1, 1, ['any']],
+        'expectOutputString' => [1, 1, ['string']],
+        'pendingArtisan' => [1, 2, ['string', 'array']],
     ];
 
     /**
@@ -99,7 +107,7 @@ final class HttpCompatibilityAnalyzer
      * idempotency on the second run. `travel()` returns a runtime Wormhole whose
      * methods (`$this->travel(5)->days()`) are never rewritten and work as-is.
      */
-    private const NON_FLUENT_HELPERS = ['session', 'app', 'make', 'travel'];
+    private const NON_FLUENT_HELPERS = ['session', 'app', 'make', 'travel', 'mock', 'expectOutputString', 'pendingArtisan'];
 
     /**
      * PHPUnit `$this->` calls the imported testo/bridge-rector
@@ -114,7 +122,7 @@ final class HttpCompatibilityAnalyzer
      * the subject is statically an array, and a surviving call would fatal on the
      * converted base, which provides no assert surface. Those are pinned to their
      * triggering shape by UPSTREAM_SHAPE_CONDITIONAL_CALLS instead. PHPUnit
-     * assertions outside both lists (assertStringContainsString, assertSeeded,
+     * assertions outside the upstream and local compatibility lists (assertSeeded,
      * ...) are NOT rewritten and stay fail-closed.
      */
     private const UPSTREAM_REWRITTEN_CALLS = [
@@ -169,6 +177,14 @@ final class HttpCompatibilityAnalyzer
     // TestResponse never declared (response(), headers(), header(), body(),
     // getSession()).
     private const RESPONSE_SIGNATURES = [
+        'assertInertia' => [0, 1, ['any']],
+        'assertJsonMissing' => [1, 2, ['array', 'bool']],
+        'assertJsonCount' => [1, 2, ['int', 'nullable-string']],
+        'assertSessionHasNoErrors' => [0, 0, []],
+        'assertCookie' => [1, 4, ['any', 'any', 'any', 'any']],
+        'assertServerError' => [0, 0, []],
+        'viewData' => [0, 1, ['nullable-string']],
+        'inertiaPage' => [0, 1, ['nullable-string']],
         'assertStatus' => [1, 1, ['int']],
         'assertOk' => [0, 0, []],
         'assertJson' => [1, 2, ['array-or-closure', 'bool']],
@@ -218,6 +234,8 @@ final class HttpCompatibilityAnalyzer
     ];
 
     private const RESPONSE_FLUENT_METHODS = [
+        'assertInertia', 'assertJsonMissing', 'assertJsonCount',
+        'assertSessionHasNoErrors', 'assertCookie', 'assertServerError',
         'assertStatus',
         'assertOk',
         'assertJson',
@@ -276,19 +294,46 @@ final class HttpCompatibilityAnalyzer
      */
     public function analyze(Class_ $class, array $localClasses = []): HttpCompatibilityAnalysis
     {
+        // $this, self and parent inside a nested class belong to that class.
+        // Inspect a private view so neither the analysis nor subsequent rewrites
+        // mistake a nested service constructor/assertion for a test helper.
+        $class = clone $class;
+        $traverser = new \PhpParser\NodeTraverser(new class extends \PhpParser\NodeVisitorAbstract {
+            public function enterNode(Node $node): Node
+            {
+                // Preserve Rector's original-node provenance used by lifecycle
+                // validation; CloningVisitor would replace it with renamed nodes.
+                $node = clone $node;
+                if ($node instanceof Node\Stmt\ClassLike) {
+                    $node->stmts = [];
+                }
+                return $node;
+            }
+        });
+        $class->stmts = $traverser->traverse($class->stmts);
         /** @var array<non-empty-string, list<non-empty-string>> $reasons */
         $reasons = [];
         $responseProperties = $this->responseProperties($class);
         $responseMethods = $this->responseMethods($class);
-        $responseVariables = $this->responseVariables($class, $responseProperties, $responseMethods);
+        $scopedResponseVariables = $this->scopedResponseVariables($class, $responseProperties, $responseMethods);
         $artisanVariables = $this->artisanVariables($class);
         $hasResponseType = $this->classContainsName($class, self::TEST_RESPONSE);
         $declaredMethods = array_map(static fn(Node\Stmt\ClassMethod $method): string => $method->name->toString(), $class->getMethods());
+        foreach ($class->stmts as $statement) {
+            if ($statement instanceof Node\Stmt\TraitUse) {
+                foreach ($statement->traits as $trait) {
+                    if ($this->nodeNameResolver->isNames($trait, ['Illuminate\Foundation\Testing\WithFaker', 'Laratesto\Testing\WithFaker'])) {
+                        $declaredMethods = [...$declaredMethods, 'faker', 'makeFaker', 'setUpFaker'];
+                    }
+                }
+            }
+        }
         $this->validateResponseCreation($reasons, $class);
 
         /** @var list<MethodCall> $calls */
         $calls = $this->nodeFinder->findInstanceOf($class->stmts, MethodCall::class);
         foreach ($calls as $call) {
+            $responseVariables = $scopedResponseVariables[$call] ?? [];
             $method = $call->name instanceof Identifier ? $call->name->toString() : null;
             if ($method === null) {
                 if ($this->isThisReceiver($call->var)
@@ -326,6 +371,9 @@ final class HttpCompatibilityAnalyzer
             }
 
             if ($this->isThisReceiver($call->var)) {
+                if ($this->isGuardedOptionalMethod($class, $call, $method)) {
+                    continue;
+                }
                 if (isset(self::REQUEST_SIGNATURES[$method])) {
                     $this->validate($reasons, 'HTTP_UNSUPPORTED_SIGNATURE', $method, $call->args, self::REQUEST_SIGNATURES[$method]);
                     continue;
@@ -362,7 +410,7 @@ final class HttpCompatibilityAnalyzer
             }
         }
 
-        // PHPUnit assertions written as self::/static:: (self::assertStringContainsString())
+        // PHPUnit assertions written as self::/static:: (self::assertSeeded())
         // never reach the $this-> pass above, yet the upstream bridge-rector rewrites exactly
         // its matrix for them: a supported call converts, an unsupported one survives onto the
         // converted base and fatals at runtime. Classify them through the same carve-outs, and
@@ -432,12 +480,13 @@ final class HttpCompatibilityAnalyzer
         /** @var list<PropertyFetch> $properties */
         $properties = $this->nodeFinder->findInstanceOf($class->stmts, PropertyFetch::class);
         foreach ($properties as $property) {
+            $responseVariables = $scopedResponseVariables[$property] ?? [];
             if (! $this->isResponseReceiver($property->var, $responseVariables, $responseProperties, $responseMethods)) {
                 continue;
             }
 
             $name = $this->nodeNameResolver->getName($property->name);
-            if ($name === null || ! in_array($name, ['headers', 'baseResponse'], true)) {
+            if ($name === null || ! in_array($name, ['headers', 'baseResponse', 'original'], true)) {
                 $this->addReason(
                     $reasons,
                     'RESPONSE_UNSUPPORTED_API',
@@ -478,12 +527,25 @@ final class HttpCompatibilityAnalyzer
         }
 
         foreach ($arguments as $position => $argument) {
-            if ($argument->unpack || $argument->name !== null) {
+            if (!$argument instanceof Arg || $argument->unpack) {
                 $this->addReason($reasons, $code, sprintf('%s() uses named or unpacked arguments outside the automatic matrix', $method));
                 return;
             }
 
-            if (! $this->matchesShape($argument->value, $types[$position] ?? 'any')) {
+            if ($argument->name !== null) {
+                $runtime = $code === 'RESPONSE_UNSUPPORTED_API' ? \Laratesto\Testing\LaravelResponse::class
+                    : (method_exists(\Laratesto\Testing\InteractsWithLaravel::class, $method)
+                        ? \Laratesto\Testing\InteractsWithLaravel::class : \Laratesto\Testing\PendingArtisanCommand::class);
+                $parameters = (new \ReflectionMethod($runtime, $method))->getParameters();
+                $position = array_search($argument->name->toString(), array_map(static fn(\ReflectionParameter $parameter): string => $parameter->getName(), $parameters), true);
+                if ($position === false) {
+                    $this->addReason($reasons, $code, sprintf('%s() uses named or unpacked arguments outside the automatic matrix', $method));
+                    return;
+                }
+            }
+
+            if (! $this->matchesShape($argument->value, $types[$position] ?? 'any')
+                && !$this->preservesParameterType($method, $position, $code, $types[$position] ?? 'any')) {
                 $this->addReason(
                     $reasons,
                     $code,
@@ -491,6 +553,27 @@ final class HttpCompatibilityAnalyzer
                 );
             }
         }
+    }
+
+    private function preservesParameterType(string $method, int $position, string $code, string $shape): bool
+    {
+        if (!in_array($shape, ['string', 'nullable-string', 'int', 'bool', 'array'], true)) {
+            return false;
+        }
+        $source = $code === 'RESPONSE_UNSUPPORTED_API' ? self::TEST_RESPONSE : 'Illuminate\Foundation\Testing\TestCase';
+        $target = $code === 'RESPONSE_UNSUPPORTED_API' ? self::LARAVEL_RESPONSE : 'Laratesto\Testing\InteractsWithLaravel';
+        if ($source === 'Illuminate\Foundation\Testing\TestCase' && !class_exists(\PHPUnit\Framework\TestCase::class)) {
+            return false;
+        }
+        if (!method_exists($source, $method) || !method_exists($target, $method)) {
+            return false;
+        }
+        $original = (new \ReflectionMethod($source, $method))->getParameters()[$position] ?? null;
+        $converted = (new \ReflectionMethod($target, $method))->getParameters()[$position] ?? null;
+        // An unchanged typed parameter performs exactly the same PHP caller-side
+        // coercion/check for dynamic expressions, even when PHPStan reports mixed.
+        return $original !== null && $converted !== null && $original->hasType()
+            && (string) $original->getType() === (string) $converted->getType();
     }
 
     /**
@@ -517,6 +600,11 @@ final class HttpCompatibilityAnalyzer
         array $declaredMethods,
     ): void {
         if (in_array($method, $declaredMethods, true)) {
+            return;
+        }
+
+        // The public set also installs the local source-compatible assertion rules.
+        if (\Laratesto\Rector\Rules\PhpUnitCompatibilityRector::supportsCall($method, $arguments)) {
             return;
         }
 
@@ -659,6 +747,15 @@ final class HttpCompatibilityAnalyzer
                 return false;
             }
 
+            // On a fresh second pass the native parent supplies these hooks via
+            // InteractsWithLaravel, even when the project base overrides only one.
+            // The framework boundary above still rejects target hook names that
+            // were written into an unconverted PHPUnit hierarchy.
+            if (strcasecmp($current, 'Laratesto\\Testing\\LaravelTestCase') === 0
+                && in_array(strtolower($method), ['setuplaravel', 'teardownlaravel'], true)) {
+                return true;
+            }
+
             if (isset($seen[$current])) {
                 return null;
             }
@@ -753,6 +850,9 @@ final class HttpCompatibilityAnalyzer
 
     private function matchesShape(Expr $expression, string $shape): bool
     {
+        if ($this->matchesInferredShape($expression, $shape)) {
+            return true;
+        }
         return match ($shape) {
             'any' => true,
             'string' => $expression instanceof Scalar\String_,
@@ -772,6 +872,56 @@ final class HttpCompatibilityAnalyzer
                 || ($expression instanceof Expr\Array_ && $this->arrayIsStatic($expression)),
             default => false,
         };
+    }
+
+    private function matchesInferredShape(Expr $expression, string $shape): bool
+    {
+        $scope = $expression->getAttribute(AttributeKey::SCOPE);
+        if (!$scope instanceof Scope) {
+            return false;
+        }
+        $type = $scope->getType($expression);
+        $string = $type->isString()->yes();
+        $array = $type->isArray()->yes();
+        return match ($shape) {
+            'string' => $string,
+            'int' => $type->isInteger()->yes(),
+            'bool' => $type->isBoolean()->yes(),
+            'array' => $array,
+            'nullable-string' => (new \PHPStan\Type\UnionType([new \PHPStan\Type\StringType(), new \PHPStan\Type\NullType()]))->isSuperTypeOf($type)->yes(),
+            'string-or-array', 'middleware' => $string || $array,
+            'array-or-closure' => $array,
+            default => false,
+        };
+    }
+
+    private function isGuardedOptionalMethod(Class_ $class, MethodCall $call, string $method): bool
+    {
+        if (!in_array($method, ['markConfigCached', 'markRoutesCached'], true)) {
+            return false;
+        }
+        // Preserve optional hooks such as method_exists($this, 'markRoutesCached').
+        // Only an exact positive guard in the containing if body proves this safe.
+        foreach ($this->nodeFinder->findInstanceOf($class->stmts, Node\Stmt\If_::class) as $if) {
+            if (!$this->nodeFinder->findFirst($if->stmts, static fn(Node $node): bool => $node === $call)) {
+                continue;
+            }
+            $conditions = [$if->cond];
+            while ($condition = array_pop($conditions)) {
+                if ($condition instanceof Expr\BinaryOp\BooleanAnd || $condition instanceof Expr\BinaryOp\LogicalAnd) {
+                    $conditions[] = $condition->left;
+                    $conditions[] = $condition->right;
+                } elseif ($condition instanceof Expr\FuncCall
+                    && $condition->name instanceof Name && $this->nodeNameResolver->isName($condition->name, 'method_exists')
+                    && count($condition->args) === 2
+                    && $this->isThisVariable($condition->args[0]->value)
+                    && $condition->args[1]->value instanceof Scalar\String_
+                    && strcasecmp($condition->args[1]->value->value, $method) === 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -873,11 +1023,50 @@ final class HttpCompatibilityAnalyzer
         return array_values(array_unique($variables));
     }
 
-    /**
-     * @param list<non-empty-string> $responseVariables
-     * @param list<non-empty-string> $responseProperties
-     * @param list<non-empty-string> $responseMethods
-     */
+    /** @return \WeakMap<Node, list<string>> Response variable names in each lexical scope. */
+    private function scopedResponseVariables(Class_ $class, array $properties, array $methods): \WeakMap
+    {
+        $map = new \WeakMap();
+        $variablesForMethod = function (Node\Stmt\ClassMethod $method) use ($properties, $methods): array {
+            $view = new Class_(null);
+            $view->stmts = [$method];
+            return $this->responseVariables($view, $properties, $methods);
+        };
+        $isResponseType = fn(?Node $type): bool => $this->typeContainsTestResponse($type);
+        $visitor = new class($map, $variablesForMethod, $isResponseType) extends \PhpParser\NodeVisitorAbstract {
+            private array $variables = [];
+            private array $stack = [];
+            public function __construct(private \WeakMap $map, private \Closure $forMethod, private \Closure $isResponseType) {}
+            public function enterNode(Node $node): void
+            {
+                if ($node instanceof Node\Stmt\ClassMethod || $node instanceof Expr\Closure || $node instanceof Expr\ArrowFunction) {
+                    $this->stack[] = $this->variables;
+                    if ($node instanceof Node\Stmt\ClassMethod) {
+                        $this->variables = ($this->forMethod)($node);
+                    } else {
+                        foreach ($node->params as $parameter) {
+                            if ($parameter->var instanceof Variable && is_string($parameter->var->name)) {
+                                $this->variables = array_values(array_diff($this->variables, [$parameter->var->name]));
+                                if (($this->isResponseType)($parameter->type)) {
+                                    $this->variables[] = $parameter->var->name;
+                                }
+                            }
+                        }
+                    }
+                }
+                $this->map[$node] = $this->variables;
+            }
+            public function leaveNode(Node $node): void
+            {
+                if ($node instanceof Node\Stmt\ClassMethod || $node instanceof Expr\Closure || $node instanceof Expr\ArrowFunction) {
+                    $this->variables = array_pop($this->stack);
+                }
+            }
+        };
+        (new \PhpParser\NodeTraverser($visitor))->traverse($class->stmts);
+        return $map;
+    }
+
     private function isResponseProducingExpression(
         Expr $expression,
         array $responseVariables,

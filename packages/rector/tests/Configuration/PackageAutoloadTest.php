@@ -95,8 +95,9 @@ final class PackageAutoloadTest
         Assert::same('^0.2.4', $packageComposer['require']['testo/bridge-rector'] ?? null, 'The supported bridge version must stay documented.');
 
         $suggest = $packageComposer['suggest']['ichinya/laratesto'] ?? '';
-        Assert::true(\str_contains($suggest, 'dev-main'), 'The suggest must point at dev-main until the multi-connection database release.');
-        Assert::true(\str_contains($suggest, '0.6.9'), 'The suggest must state the truthful incompatibility boundary (runtime 0.6.9).');
+        Assert::true(\str_contains($suggest, 'matching runtime checkout'), 'The suggest must name the consumer installation path.');
+        Assert::true(\str_contains($suggest, 'PhpUnitCompatibility'), 'The suggest must name the generated code runtime dependency.');
+        Assert::same('<=0.7.0', $packageComposer['conflict']['ichinya/laratesto'] ?? null);
 
         foreach (['PHP `^8.3`', 'Laravel `^13.0`', '(`^0.6.9`)'] as $falseClaim) {
             Assert::true(!\str_contains($readme, $falseClaim), 'The README must not claim: ' . $falseClaim);
@@ -141,6 +142,7 @@ final class PackageAutoloadTest
             'license' => (array) ($packageComposer['license'] ?? []),
             'authors' => $packageComposer['authors'],
             'require' => $packageComposer['require'],
+            'conflict' => $packageComposer['conflict'],
             'suggest' => $packageComposer['suggest'] ?? [],
             'extra' => $packageComposer['extra'],
             'autoload' => $packageComposer['autoload'],
@@ -154,6 +156,7 @@ final class PackageAutoloadTest
             'license' => $entry['license'] ?? null,
             'authors' => $entry['authors'] ?? null,
             'require' => $entry['require'] ?? null,
+            'conflict' => $entry['conflict'] ?? [],
             'suggest' => $entry['suggest'] ?? [],
             'extra' => $entry['extra'] ?? null,
             'autoload' => $entry['autoload'] ?? null,

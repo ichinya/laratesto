@@ -27,7 +27,7 @@ final class DescendantStaticAssertsTest extends TestCase
 {
     public function test_descendant(): void
     {
-        self::assertStringContainsString('acme', 'acme label');
+        self::assertStringContainsStringIgnoringCase('acme', 'acme label');
     }
 }
 -----
@@ -56,11 +56,11 @@ namespace Tests\Feature;
 
 use Tests\TestCase;
 
-/* laratesto-residual(code=HTTP_UNSUPPORTED_SIGNATURE, rule=Laratesto\Rector\Rules\LaravelBaseClassRector, severity=manual): self::assertStringContainsString() is outside the supported helper matrix */
+/* laratesto-residual(code=HTTP_UNSUPPORTED_SIGNATURE, rule=Laratesto\Rector\Rules\LaravelBaseClassRector, severity=manual): self::assertStringContainsStringIgnoringCase() is outside the supported helper matrix */
 final class DescendantStaticAssertsTest extends TestCase
 {
     public function test_descendant(): void
     {
-        self::assertStringContainsString('acme', 'acme label');
+        self::assertStringContainsStringIgnoringCase('acme', 'acme label');
     }
 }

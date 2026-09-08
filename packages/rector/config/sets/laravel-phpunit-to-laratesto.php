@@ -7,12 +7,20 @@ use Laratesto\Rector\Rules\LaravelBaseClassRector;
 use Laratesto\Rector\Rules\LaravelDatabaseTraitsRector;
 use Laratesto\Rector\Rules\LaravelResidualDetectionRector;
 use Laratesto\Rector\Rules\LaravelSourceCompatibleCallsRector;
+use Laratesto\Rector\Rules\PhpUnitCompatibilityRector;
+use Laratesto\Rector\Rules\LaravelFacadeAssertionsRector;
+use Laratesto\Rector\Rules\PhpUnitExceptionExpectationRector;
 use Rector\Config\RectorConfig;
 use Testo\Bridge\Rector\Set\TestoRectorSetList;
+use Testo\Bridge\Rector\PhpunitToTesto\ExpectExceptionToTestoRector;
 
 return static function (RectorConfig $rectorConfig): void {
     // Generic PHPUnit -> Testo part (upstream), applied BEFORE Laravel-specific rules.
     $rectorConfig->import(TestoRectorSetList::PHPUNIT_TO_TESTO);
+    $rectorConfig->skip([ExpectExceptionToTestoRector::class]);
+    $rectorConfig->rule(PhpUnitExceptionExpectationRector::class);
+    $rectorConfig->rule(PhpUnitCompatibilityRector::class);
+    $rectorConfig->rule(LaravelFacadeAssertionsRector::class);
 
     // One shared hierarchy recognition state: LaravelBaseClassRector::configure()
     // adopts the configured base classes into it and every Laravel rule reads them
