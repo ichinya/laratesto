@@ -51,6 +51,13 @@ final class PhpUnitToTestoMigrator
 
     public function migrate(string $source, ?string $projectBaseSource = null): MigrationResult
     {
+        // The migrator is line-ending agnostic: CRLF and CR inputs are normalized
+        // to LF up front so downstream anchors (for example the `;$` import checks
+        // in self::addUse()) behave identically on Windows and Unix checkouts.
+        $source = \str_replace(["\r\n", "\r"], "\n", $source);
+        $projectBaseSource = $projectBaseSource === null
+            ? null
+            : \str_replace(["\r\n", "\r"], "\n", $projectBaseSource);
         $errors = $this->validateSource($source);
 
         if ($errors !== []) {

@@ -36,7 +36,13 @@ final class DatabaseTruncationTableMapContractTest
 <?php
 
 declare(strict_types=1);
-require $argv[1];
+
+// The pinned contract is the null-key selection outcome itself; PHP >= 8.5
+// deprecates the framework's null array offset under the very code path this
+// probe exercises, and the emitted deprecation noise would contaminate the
+// JSON payload on stdout.
+error_reporting(\E_ALL & ~\E_DEPRECATED);
+ require $argv[1];
 
 $connection = new class implements \Illuminate\Database\ConnectionInterface {
     public function table($table, $as = null) {}
