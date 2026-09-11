@@ -22,7 +22,7 @@ final class PhpUnitCompatibility
     public static function createStub(string $originalClassName, ?string $testClass = null): \PHPUnit\Framework\MockObject\Stub
     {
         if (!class_exists(\PHPUnit\Framework\TestCase::class)) {
-            throw new \LogicException('Migrated createStub() requires phpunit/phpunit as a dev dependency.');
+            throw new \LogicException('Migrated createStub() requires the PHPUnit compatibility shim or phpunit/phpunit to be available.');
         }
         if ($testClass !== null && class_exists(\PHPUnit\Metadata\Parser\Registry::class)
             && !\PHPUnit\Metadata\Parser\Registry::parser()->forClass($testClass)->isDisableReturnValueGenerationForTestDoubles()->isEmpty()) {
@@ -35,7 +35,7 @@ final class PhpUnitCompatibility
     public static function run(callable $assertions): mixed
     {
         if (!\class_exists(\PHPUnit\Framework\Assert::class)) {
-            throw new \LogicException('Laravel package assertions require phpunit/phpunit as a dev dependency.');
+            throw new \LogicException('Laravel package assertions require the PHPUnit compatibility shim or phpunit/phpunit to be available.');
         }
         // PHPUnit 12/13's assertion exporter reads the TextUI configuration even
         // when only its assertion library is used. Initialize defaults without

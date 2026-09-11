@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Laratesto\Rector\Tests\Support;
 
+use Laratesto\Rector\Configuration\AutoloadPaths;
 use Laratesto\Rector\Set\LaratestoRectorSetList;
 use Symfony\Component\Process\Process;
 use Testo\Assert;
@@ -47,7 +48,10 @@ final class FrontierPipeline
         $resolvePaths = static fn(array $paths): array => array_map(static fn(string $path): string => $tmp . '/corpus/' . $path, $paths);
         $configuredPaths ??= $cliPaths === null ? [''] : [];
         $pathsCode = var_export($resolvePaths($configuredPaths), true);
-        $autoloadCode = var_export($resolvePaths($autoloadPaths !== [] ? $autoloadPaths : $configuredPaths), true);
+        $autoloadPaths = $autoloadPaths !== [] ? $autoloadPaths : $configuredPaths;
+        // The builder's withAutoloadPaths() overwrites any autoload paths declared
+        // by the set, so merge the package's reflection paths with the corpus ones.
+        $autoloadCode = var_export(\array_merge(AutoloadPaths::forPackage($root), $resolvePaths($autoloadPaths)), true);
         $pathsConfiguration = $configuredPaths === [] ? '' : "->withPaths({$pathsCode})";
         file_put_contents($tmp . '/rector.php', <<<PHP
             <?php

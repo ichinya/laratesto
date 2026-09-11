@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\ProjectBootstrapTest" tests="8" failures="2" errors="0">
+    <testcase name="testPositiveFrameworkAssertion" class="Tests\ProjectBootstrapTest"/>
+    <testcase name="testPositiveFacadeAssertion" class="Tests\ProjectBootstrapTest"/>
+    <testcase name="testFakerIsAvailable" class="Tests\ProjectBootstrapTest"/>
+    <testcase name="testNestedTestCaseIsAvailable" class="Tests\ProjectBootstrapTest"/>
+    <testcase name="testBootstrapMacroRuns" class="Tests\ProjectBootstrapTest"/>
+    <testcase name="testEnvironmentIsTesting" class="Tests\ProjectBootstrapTest"/>
+    <testcase name="testNegativeFacadeAssertionStillFails" class="Tests\ProjectBootstrapTest">
+      <failure message="failed"/>
+    </testcase>
+    <testcase name="testNegativeFrameworkAssertionStillFails" class="Tests\ProjectBootstrapTest">
+      <failure message="failed"/>
+    </testcase>
+  </testsuite>
+</testsuites>

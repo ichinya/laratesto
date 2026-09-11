@@ -1,6 +1,6 @@
 # Testo Laravel Bridge
 
-Native [Testo](https://github.com/php-testo/testo) plugin that boots [Laravel](https://laravel.com) around every test. The core runtime works without PHPUnit; migrated Laravel fake, mailable and package assertions such as Inertia use its assertion library as a development dependency.
+Native [Testo](https://github.com/php-testo/testo) plugin that boots [Laravel](https://laravel.com) around every test. The core runtime works without PHPUnit. A bundled PHPUnit compatibility shim lets migrated Laravel fake, mailable and package assertions such as Inertia, as well as `createStub()` and deferred Artisan assertions, run without `phpunit/phpunit` in the consumer project.
 
 The bridge is a standalone Composer package. It does not require any changes to Testo or to your application: it registers a `TestRunInterceptor` through the standard plugin API (the same mechanism `testo/bridge-mockery` uses).
 
@@ -336,10 +336,11 @@ Interactive commands, retained commands in loops or catch/finally, and variables
 escaping through closures, references or static/global storage still receive
 `ARTISAN_INTERACTION_UNSUPPORTED` and need review.
 
-The Rector set also supports `createStub()` through the installed PHPUnit stub
-generator and `expectOutputString()` through a per-test output buffer. Exact
-output is checked after the test body, before teardown, including setup output.
-Keep `phpunit/phpunit` in `require-dev` for stubs and deferred console assertions.
+The Rector set also supports `createStub()` through the bundled PHPUnit shim
+(Mockery-backed when PHPUnit is not installed) and `expectOutputString()` through
+a per-test output buffer. Exact output is checked after the test body, before
+teardown, including setup output. Stubs and deferred console assertions no
+longer need `phpunit/phpunit` in consumer projects.
 
 ### Database trait conversion
 
@@ -621,10 +622,11 @@ Available via `LaravelTestCase` or the `InteractsWithLaravel` trait:
 `assertInertia()`, `assertJsonMissing()`, `assertJsonCount()`, `assertCookie()`, `assertServerError()`, `viewData()`, `inertiaPage()`.
 
 Package assertions such as `assertInertia()` run the installed package's own
-Laravel `TestResponse` macro. Keep `phpunit/phpunit` in `require-dev` for these
-checks and the framework-backed JSON, cookie and session assertions above;
-their assertion counts and failures are recorded in Testo. The Inertia callback
-keeps its original `Inertia\Testing\AssertableInertia` type and import alias.
+Laravel `TestResponse` macro through the bundled PHPUnit shim. Framework-backed
+JSON, cookie and session assertions, as well as the assertions above, record
+their counts and failures in Testo without requiring `phpunit/phpunit` in
+consumer projects. The Inertia callback keeps its original
+`Inertia\Testing\AssertableInertia` type and import alias.
 
 The Rector migration preserves a public, zero-required-argument project
 `createApplication()` and calls it once before database setup and user lifecycle
@@ -698,14 +700,12 @@ public function testLogsWarningOnFailure(): void
 - **PHPUnit/Pest test discovery must be migrated before running under Testo.**
   The Rector set converts test metadata, lifecycle and the supported assertions.
   It can retain Laravel package assertions through the compatibility helpers;
-  those use PHPUnit as an assertion library without running its test runner.
-- **Facade fakes (`Queue::fake()`, `Event::fake()`, …) require `phpunit/phpunit`
-  as a library** if you need their `assert*` methods. The fake setup itself works
-  without PHPUnit — the facades resolve on the booted application with no bridge
-  involvement — but every official Laravel fake uses `PHPUnit\Framework\Assert`
-  internally. If your project already has `phpunit/phpunit` in `require-dev` (as
-  most do), the fakes work transparently. In a pure Testo project without PHPUnit,
-  the `assert*` methods on fakes will throw class-not-found errors.
+  those use the bundled PHPUnit compatibility shim as an assertion library.
+- **Facade fakes (`Queue::fake()`, `Event::fake()`, …) use the bundled PHPUnit
+  shim** for their `assert*` methods. The fake setup itself works without any
+  bridge — the facades resolve on the booted application — and the framework's
+  `PHPUnit\Framework\Assert` calls are routed to Testo. Consumer projects do not
+  need `phpunit/phpunit` installed for these assertions.
 - **The following Laravel TestCase conveniences are not (yet) ported** and have
   simple workarounds:
   - `$this->seed()` — call `Artisan::call('db:seed', ['--force' => true])`
