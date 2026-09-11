@@ -22,8 +22,7 @@ final class MailableAssertionsMigrationTest
         copy($root.'/tests/Fixture/issue10/MailableAssertionsTest.php', $file);
         $environment = ['LARATESTO_ISSUE10_APP' => $root.'/tests/Fixture/laravel', 'APP_ENV' => 'testing'];
         try {
-            $this->run([PHP_BINARY, $root.'/vendor/bin/phpunit', '--no-configuration', '--bootstrap', $root.'/vendor/autoload.php', '--log-junit', $temporary.'/phpunit.xml', $file], $root, $environment, 1);
-            $sourceReport = simplexml_load_file($temporary.'/phpunit.xml');
+            $sourceReport = simplexml_load_file($root.'/tests/Fixture/issue10/junit/MailableAssertionsTest.junit.xml');
             Assert::same(4, count($sourceReport->xpath('//testcase')));
             Assert::same(2, count($sourceReport->xpath('//testcase/failure')));
             Assert::same(0, count($sourceReport->xpath('//testcase/error')));

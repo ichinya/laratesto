@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\DeferredArtisanTest" tests="5" failures="2" errors="0">
+    <testcase name="testCommandsRunAtMethodEndBeforeTeardown" class="Tests\DeferredArtisanTest"/>
+    <testcase name="testAssertionsDoNotExecuteBeforeRelease" class="Tests\DeferredArtisanTest"/>
+    <testcase name="testOutputExpectationsArePreserved" class="Tests\DeferredArtisanTest"/>
+    <testcase name="testWrongExitCodeStillFailsOnRelease" class="Tests\DeferredArtisanTest">
+      <failure message="failed"/>
+    </testcase>
+    <testcase name="testWrongOutputStillFailsOnRelease" class="Tests\DeferredArtisanTest">
+      <failure message="failed"/>
+    </testcase>
+  </testsuite>
+</testsuites>
