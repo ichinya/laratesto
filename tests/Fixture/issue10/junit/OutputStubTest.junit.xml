@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\OutputStubTest" tests="5" failures="1" errors="0">
+    <testcase name="testMethodStubReturns" class="Tests\OutputStubTest"/>
+    <testcase name="testStaticStubReturns" class="Tests\OutputStubTest"/>
+    <testcase name="testNamedArgumentStub" class="Tests\OutputStubTest"/>
+    <testcase name="testStubWithoutReturnValueFails" class="Tests\OutputStubTest"/>
+    <testcase name="testWrongOutputFails" class="Tests\OutputStubTest">
+      <failure message="failed"/>
+    </testcase>
+  </testsuite>
+</testsuites>

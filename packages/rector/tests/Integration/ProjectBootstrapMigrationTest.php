@@ -24,8 +24,7 @@ final class ProjectBootstrapMigrationTest
         try {
             $bootstrap = $temporary.'/bootstrap.php';
             file_put_contents($bootstrap, '<?php require_once '.var_export($root.'/vendor/autoload.php', true).'; require '.var_export($root.'/tests/Fixture/issue10/register-response-macro.php', true).';');
-            $this->run([PHP_BINARY, $root.'/vendor/bin/phpunit', '--no-configuration', '--bootstrap', $bootstrap, '--log-junit', $temporary.'/phpunit.xml', $file], $root, $environment, 1);
-            $sourceReport = simplexml_load_file($temporary.'/phpunit.xml');
+            $sourceReport = simplexml_load_file($root.'/tests/Fixture/issue10/junit/ProjectBootstrapTest.junit.xml');
             Assert::same(8, count($sourceReport->xpath('//testcase')));
             Assert::same(2, count($sourceReport->xpath('//testcase/failure')));
             Assert::same(0, count($sourceReport->xpath('//testcase/error')));

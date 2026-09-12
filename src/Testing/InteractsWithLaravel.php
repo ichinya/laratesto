@@ -510,7 +510,7 @@ trait InteractsWithLaravel
     protected function pendingArtisan(string $command, array $parameters = []): DeferredArtisanCommand
     {
         if (!class_exists(\PHPUnit\Framework\TestCase::class)) {
-            throw new \LogicException('Deferred Artisan compatibility requires phpunit/phpunit as a dev dependency.');
+            throw new \LogicException('Deferred Artisan compatibility requires the PHPUnit compatibility shim or phpunit/phpunit to be available.');
         }
         $this->phpUnitConsole ??= new Internal\PhpUnitConsoleTestCase('consoleCompatibility');
         return new DeferredArtisanCommand(new \Illuminate\Testing\PendingCommand($this->phpUnitConsole, $this->app(), $command, $parameters));

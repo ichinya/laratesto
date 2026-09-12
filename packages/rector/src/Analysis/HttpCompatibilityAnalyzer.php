@@ -842,6 +842,20 @@ final class HttpCompatibilityAnalyzer
 
     private function isSymfonyResponse(Expr $expression): bool
     {
+        if ($expression instanceof Expr\New_) {
+            $className = $this->nodeNameResolver->getName($expression->class);
+            if (\in_array($className, [
+                'Illuminate\\Http\\Response',
+                'Illuminate\\Http\\JsonResponse',
+                'Illuminate\\Http\\RedirectResponse',
+                'Symfony\\Component\\HttpFoundation\\Response',
+                'Symfony\\Component\\HttpFoundation\\JsonResponse',
+                'Symfony\\Component\\HttpFoundation\\RedirectResponse',
+            ], true)) {
+                return true;
+            }
+        }
+
         $scope = $expression->getAttribute(AttributeKey::SCOPE);
         return $scope instanceof Scope
             && (new ObjectType('Symfony\\Component\\HttpFoundation\\Response'))
