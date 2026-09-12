@@ -27,10 +27,10 @@ final class PackageAutoloadTest
         $testoPhp = $testoComposer['require']['php'] ?? null;
 
         Assert::same('>=8.2', $testoPhp, 'The installed Testo version must keep the documented PHP minimum.');
-        Assert::same($testoPhp, $rootComposer['require']['php'] ?? null, 'Laratesto must use Testo\'s PHP minimum.');
+        Assert::same('>=8.3', $rootComposer['require']['php'] ?? null, 'Laratesto follows Laravel 13\'s PHP minimum, never below Testo\'s.');
         Assert::same($testoPhp, $packageComposer['require']['php'] ?? null, 'The Rector package must use Testo\'s PHP minimum.');
-        Assert::same('8.2.0', $rootComposer['config']['platform']['php'] ?? null, 'The lock file must resolve for the minimum supported PHP.');
-        Assert::same('^12.0 || ^13.0', $rootComposer['require']['laravel/framework'] ?? null, 'PHP 8.2 support requires the Laravel 12 compatibility branch.');
+        Assert::same('8.3.0', $rootComposer['config']['platform']['php'] ?? null, 'The lock file must resolve for the minimum supported PHP.');
+        Assert::same('^13.0', $rootComposer['require']['laravel/framework'] ?? null, 'Laravel 12 support was dropped; only the Laravel 13 branch is supported.');
     }
 
     #[Test]
@@ -84,8 +84,10 @@ final class PackageAutoloadTest
     public function compatibilityBaselineMatchesComposerJson(): void
     {
         // PR #8 review point 8: the documented compatibility baseline is the
-        // composer.json baseline — PHP >=8.2, the deliberate Rector pin, the
-        // supported bridge — and the runtime boundary names dev-main, not 0.6.9.
+        // composer.json baseline — the package keeps Testo's PHP >=8.2 floor
+        // while the migrated-to runtime requires PHP >=8.3 with Laravel ^13.0,
+        // the deliberate Rector pin, the supported bridge — and the runtime
+        // boundary names dev-main, not 0.6.9.
         $packageDir = \dirname(__DIR__, 2);
         $packageComposer = \json_decode((string) \file_get_contents($packageDir . '/composer.json'), true, flags: JSON_THROW_ON_ERROR);
         $readme = (string) \file_get_contents($packageDir . '/README.md');
@@ -99,11 +101,11 @@ final class PackageAutoloadTest
         Assert::true(\str_contains($suggest, 'PhpUnitCompatibility'), 'The suggest must name the generated code runtime dependency.');
         Assert::same('<=0.7.0', $packageComposer['conflict']['ichinya/laratesto'] ?? null);
 
-        foreach (['PHP `^8.3`', 'Laravel `^13.0`', '(`^0.6.9`)'] as $falseClaim) {
+        foreach (['PHP `^8.3`', '(`^0.6.9`)'] as $falseClaim) {
             Assert::true(!\str_contains($readme, $falseClaim), 'The README must not claim: ' . $falseClaim);
         }
 
-        foreach (['>=8.2', '^12.0 || ^13.0', 'dev-main', '0.6.9'] as $fact) {
+        foreach (['>=8.2', '>=8.3', '^13.0', 'dev-main', '0.6.9'] as $fact) {
             Assert::true(\str_contains($readme, $fact), 'The README compatibility baseline must state: ' . $fact);
         }
     }
