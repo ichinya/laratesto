@@ -6,19 +6,44 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-12
+
+### Added
+
+- Bundled PHPUnit compatibility shim (PR #16, issue #12): provides
+  `PHPUnit\Framework\TestCase`, `Assert`, `MockObject` stubs and metadata
+  classes when `phpunit/phpunit` is not installed, delegating assertions to
+  Testo and keeping `createStub()` and deferred Artisan assertions working
+  for consumers.
+- Canonical Rector autoload path discovery and a Testo Rector runner override
+  via classmap.
+- CI runs the self-test suite (`composer test`) on a self-hosted runner over
+  the locked Laravel 13 dependencies with PHP 8.3 through 8.5; pre-GA PHP 8.6
+  legs run as non-gating signal, since the locked dependencies still cap at
+  PHP 8.5 (issue #6).
+
 ### Changed
 
 - **Breaking**: dropped Laravel 12 support (issue #6). The package now
   requires `laravel/framework ^13.0` and PHP `>=8.3` — Laravel 13's own PHP
   floor — and the lock resolves against Composer's PHP 8.3 platform. The
   standalone rector package keeps Testo's `>=8.2` floor.
+- Bumped `testo/testo` requirement from `^0.10.42` to `^0.10.45` and pinned
+  the lockfile to the new release (PR #13).
 
-### Added
+### Fixed
 
-- CI runs the self-test suite (`composer test`) on a self-hosted runner over
-  the locked Laravel 13 dependencies with PHP 8.3 through 8.5; pre-GA PHP 8.6
-  legs run as non-gating signal, since the locked dependencies still cap at
-  PHP 8.5 (issue #6).
+- Normalized line endings in the PHPUnit migrator input so CRLF (and bare
+  CR) sources no longer cause duplicate `LaravelTestCase` import errors on
+  Windows checkouts (PR #15).
+- Kept the `DatabaseTruncation` probe free of PHP 8.5 deprecation noise when
+  exercising the pinned null-selector contract (PR #15).
+
+### Removed
+
+- Removed `phpunit/phpunit` from root `require-dev`; the bundled PHPUnit
+  compatibility shim replaces the dev dependency for the test suite and
+  Rector integration.
 
 ## [0.7.1] - 2026-09-08
 
