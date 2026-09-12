@@ -28,8 +28,7 @@ The bridge is a standalone Composer package. It does not require any changes to 
 
 ## Requirements
 
-- PHP 8.2+ with Laravel 12; PHP 8.3+ with Laravel 13
-- Laravel 12 or 13
+- PHP 8.3+ with Laravel 13
 - Testo `^0.10.42`
 
 ## Installation
@@ -742,12 +741,14 @@ generation (the fixture-test bridge and the machine-JSON output contract), and
 Rector minor releases routinely rename them. Bump the pin only together with a
 green fixture suite and the parity end-to-end gate.
 
-CI (`.github/workflows/ci.yml`) runs the locked Laravel 12 dependencies on Linux
-and Windows with PHP 8.2, 8.3 and 8.4, plus separately resolved Laravel 13 jobs
-on both systems with PHP 8.3 and 8.4. Every job checks the installed framework
-major and actual platform requirements. The Laravel 13 jobs resolve against the
-job's PHP runtime, then restore the committed Composer manifests for source
-contract checks while retaining the Laravel 13 vendor installation.
+CI (`.github/workflows/ci.yml`) runs on a self-hosted runner over the locked
+Laravel 13 dependencies with PHP 8.3 through 8.5, plus pre-GA PHP 8.6 legs as
+non-gating signal: the locked dependencies still cap at PHP 8.5, so those jobs
+report compatibility readiness instead of blocking the build. Every job checks
+the installed framework major and the actual platform requirements and runs the
+package's own self-test suite (`composer test`). Superseded runs for the same
+ref are cancelled, so a single runner never queues a stale matrix behind a
+fresher push.
 
 The jobs run `composer validate --strict`, a whitespace check over
 the changed lines of the triggering range (pull requests: merge base to head;
@@ -755,8 +756,8 @@ pushes: the pushed commits, or the whole tree when the previous SHA is
 unavailable), the rector package's composer validation (non-strict — the
 deliberate Rector pin triggers a warning) and the full `composer test` suite,
 which includes the migration end-to-end gate. The root lock is resolved with
-Composer's PHP 8.2 platform so the Laravel 12 compatibility lock remains
-installable on every PHP version in that matrix.
+Composer's PHP 8.3 platform so it stays installable on every PHP version in
+that matrix.
 
 ## License
 
