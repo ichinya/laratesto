@@ -133,10 +133,10 @@ from HEAD. Avoid broad destructive commands for rollback.
 | Test class | `Tests\TestCase` / `Illuminate\Foundation\Testing\TestCase` → `LaravelTestCase`; `setUp/tearDown` → `setUpLaravel/tearDownLaravel` | unresolved/custom or skipped parents, parameterized/static or trait-provided lifecycle/bootstrap (`CLASS_UNSAFE_HIERARCHY`, `LIFECYCLE_UNSUPPORTED`) |
 | Database | trait → attribute (`RefreshDatabase`, `DatabaseTransactions`, `DatabaseMigrations`, `DatabaseTruncation`) with literal options | overrides of hooks live for the selected strategy, dynamic options, strategies hidden inside project traits, multiple traits/adaptations (`DATABASE_UNSUPPORTED_CONFIGURATION`); the lazy `LazilyRefreshDatabase` strategy is never converted — the trait use stays and needs manual migration |
 | HTTP / responses | common request, header, session, cookie, database and response assertions keep working unchanged | unknown helpers/signatures, unsupported response API (`HTTP_UNSUPPORTED_SIGNATURE`, `RESPONSE_UNSUPPORTED_API`) |
-| Fakes | Laravel facade `assert*` calls keep their framework behavior and record assertions in Testo | retain `phpunit/phpunit` in `require-dev` for these framework assertions |
+| Fakes | Laravel facade `assert*` calls keep their framework behavior and record assertions in Testo through the bundled PHPUnit shim | no `phpunit/phpunit` needed in consumer projects |
 | Outside a convertible class | — | Laravel constructs in classes whose base does not resolve (`LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY`) |
 | Artisan chains | immediate chains, terminal literal expectations, and straight-line local variables migrated to deferred `pendingArtisan()` | interactive forms, retained commands in loops or catch/finally, and escaping variables (`ARTISAN_INTERACTION_UNSUPPORTED`) |
-| PHPUnit helpers | `createStub()` uses the installed PHPUnit generator; `expectOutputString()` checks exact setup/test output before teardown | keep PHPUnit installed for stubs and deferred console assertions; other unsupported helpers remain explicit residuals |
+| PHPUnit helpers | `createStub()` uses the bundled PHPUnit shim (Mockery-backed when PHPUnit is not installed); `expectOutputString()` checks exact setup/test output before teardown | stubs and deferred console assertions no longer need PHPUnit in consumer projects; other unsupported helpers remain explicit residuals |
 
 Public project `createApplication()` methods with no required arguments are
 preserved and invoked once before database setup and user lifecycle hooks.
@@ -147,9 +147,10 @@ is supported, including initialization before the user setup hook.
 The HTTP analysis accepts inferred types and named arguments whose parameter
 names match the runtime. It keeps nested classes and callback parameters in
 their own scope. Inertia `assertInertia()` / `inertiaPage()` and additional
-framework response assertions preserve the package implementation; keep
-`phpunit/phpunit` as an assertion-library dependency. Callbacks retain their
-original Inertia type and import alias.
+framework response assertions preserve the package implementation through the
+bundled PHPUnit shim; consumer projects no longer need `phpunit/phpunit` as an
+assertion-library dependency. Callbacks retain their original Inertia type and
+import alias.
 
 Other shared traits are not rewritten: PHPUnit test discovery in traits, source
 testing APIs in trait helpers, and Laravel `setUp<Trait>`/`tearDown<Trait>` hooks
