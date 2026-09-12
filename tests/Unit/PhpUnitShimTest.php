@@ -54,6 +54,21 @@ final class PhpUnitShimTest
 
         Assert::true($caught, 'Configured stub method must throw the configured exception.');
     }
+
+    #[Test]
+    public function shimProvidesArrayAndTypeAssertions(): void
+    {
+        \PHPUnit\Framework\Assert::resetCount();
+
+        \PHPUnit\Framework\Assert::assertIsArray(['component' => 'foo', 'props' => []]);
+        \PHPUnit\Framework\Assert::assertArrayHasKey('component', ['component' => 'foo']);
+        \PHPUnit\Framework\Assert::assertNotTrue(false);
+        \PHPUnit\Framework\Assert::assertNotTrue(0);
+        \PHPUnit\Framework\Assert::assertInstanceOf(StubService::class, new StubService());
+        \PHPUnit\Framework\Assert::assertSameSize([1, 2], [3, 4]);
+
+        Assert::same(6, \PHPUnit\Framework\Assert::getCount());
+    }
 }
 
 class StubService

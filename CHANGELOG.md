@@ -6,6 +6,13 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- PHPUnit compatibility shim: added missing `assertIsArray`, `assertArrayHasKey`,
+  `assertNotTrue`, `assertInstanceOf` and `assertSameSize` so Laravel testing
+  helpers (including `inertiajs/inertia-laravel`) work without
+  `phpunit/phpunit` installed (issue #18).
+
 ## [0.7.2] - 2026-09-12
 
 ### Added

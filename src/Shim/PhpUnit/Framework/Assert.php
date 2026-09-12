@@ -158,6 +158,102 @@ abstract class Assert
         });
     }
 
+    final public static function assertIsArray(mixed $actual, string $message = ''): void
+    {
+        if (!\is_array($actual)) {
+            self::fail($message !== '' ? $message : 'Failed asserting that ' . self::describe($actual) . ' is of type "array".');
+        }
+
+        ++self::$count;
+    }
+
+    final public static function assertArrayHasKey(mixed $key, mixed $array, string $message = ''): void
+    {
+        if (!\is_array($array) && !$array instanceof \ArrayAccess) {
+            self::fail($message !== '' ? $message : 'Failed asserting that ' . self::describe($array) . ' is an array or ArrayAccess.');
+        }
+
+        $has = $array instanceof \ArrayAccess ? $array->offsetExists($key) : \array_key_exists($key, $array);
+
+        if (!$has) {
+            self::fail($message !== '' ? $message : 'Failed asserting that an array has the key ' . self::describe($key) . '.');
+        }
+
+        ++self::$count;
+    }
+
+    final public static function assertNotTrue(mixed $condition, string $message = ''): void
+    {
+        if ($condition === true) {
+            self::fail($message !== '' ? $message : 'Failed asserting that ' . self::describe($condition) . ' is not true.');
+        }
+
+        ++self::$count;
+    }
+
+    final public static function assertInstanceOf(string $expected, mixed $actual, string $message = ''): void
+    {
+        if (!\class_exists($expected) && !\interface_exists($expected) && !\enum_exists($expected)) {
+            throw new \InvalidArgumentException(\sprintf('Class or interface "%s" does not exist.', $expected));
+        }
+
+        if (!$actual instanceof $expected) {
+            self::fail($message !== '' ? $message : 'Failed asserting that ' . self::describe($actual) . ' is an instance of class "' . $expected . '".');
+        }
+
+        ++self::$count;
+    }
+
+    final public static function assertSameSize(mixed $expected, mixed $actual, string $message = ''): void
+    {
+        $expectedCount = self::countValue($expected);
+        $actualCount = self::countValue($actual);
+
+        if ($expectedCount !== $actualCount) {
+            self::fail($message !== '' ? $message : \sprintf('Failed asserting that two arrays have the same size (%d vs %d).', $expectedCount, $actualCount));
+        }
+
+        ++self::$count;
+    }
+
+    private static function describe(mixed $value): string
+    {
+        if ($value === null || \is_scalar($value)) {
+            return \var_export($value, true);
+        }
+
+        if (\is_object($value)) {
+            return 'object(' . \get_class($value) . ')';
+        }
+
+        if (\is_array($value)) {
+            return 'array(' . \count($value) . ')';
+        }
+
+        if (\is_resource($value)) {
+            return 'resource';
+        }
+
+        return \gettype($value);
+    }
+
+    private static function countValue(mixed $value): int
+    {
+        if ($value instanceof \Generator) {
+            throw new \LogicException('Cannot count a Generator.');
+        }
+
+        if (\is_array($value) || $value instanceof \Countable) {
+            return \count($value);
+        }
+
+        if ($value instanceof \Traversable) {
+            return \iterator_count($value);
+        }
+
+        throw new \InvalidArgumentException('Value must be an array, Countable, or iterable.');
+    }
+
     /**
      * @param callable(): void $assertion
      */
