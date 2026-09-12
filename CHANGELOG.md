@@ -6,6 +6,15 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- CI matrix now covers PHP 8.5 for Laravel 12 and 13 on both Linux and
+  Windows (issue #6): the self-test suite (`composer test`) runs green on
+  PHP 8.5 against both framework majors.
+- Pre-GA PHP 8.6 legs added as non-gating signal jobs; the locked
+  dependencies still cap at PHP 8.5, so those combinations report
+  compatibility readiness without blocking the build.
+
 ## [0.7.1] - 2026-09-08
 
 ### Fixed

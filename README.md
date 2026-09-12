@@ -742,12 +742,16 @@ generation (the fixture-test bridge and the machine-JSON output contract), and
 Rector minor releases routinely rename them. Bump the pin only together with a
 green fixture suite and the parity end-to-end gate.
 
-CI (`.github/workflows/ci.yml`) runs the locked Laravel 12 dependencies on Linux
-and Windows with PHP 8.2, 8.3 and 8.4, plus separately resolved Laravel 13 jobs
-on both systems with PHP 8.3 and 8.4. Every job checks the installed framework
-major and actual platform requirements. The Laravel 13 jobs resolve against the
+CI (`.github/workflows/ci.yml`) runs the locked Laravel 12 dependencies on
+Linux and Windows with PHP 8.2 through 8.5, plus separately resolved Laravel 13
+jobs on both systems with PHP 8.3 through 8.5. Every job checks the installed
+framework major and actual platform requirements and runs the package's own
+self-test suite (`composer test`). The Laravel 13 jobs resolve against the
 job's PHP runtime, then restore the committed Composer manifests for source
-contract checks while retaining the Laravel 13 vendor installation.
+contract checks while retaining the Laravel 13 vendor installation. Pre-GA
+PHP 8.6 legs run as non-gating signal: the locked dependencies still cap at
+PHP 8.5, so those jobs report compatibility readiness instead of blocking the
+build.
 
 The jobs run `composer validate --strict`, a whitespace check over
 the changed lines of the triggering range (pull requests: merge base to head;
