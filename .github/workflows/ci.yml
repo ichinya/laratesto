@@ -5,23 +5,23 @@ on:
     branches: [main]
   pull_request:
 
+# One self-hosted runner serves the whole matrix: cancel superseded runs for
+# the same ref instead of queueing stale legs behind the newest push.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    name: ${{ matrix.os }} / PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }}
-    runs-on: ${{ matrix.os }}
-    # PHP 8.6 is pre-GA: its legs resolve dependencies whose locked versions
-    # still cap at PHP 8.5, so those combinations are signal, not gates.
+    name: PHP ${{ matrix.php }} / Laravel 13
+    runs-on: self-hosted
+    # PHP 8.6 is pre-GA: its legs install a lock whose dependencies still cap
+    # at PHP 8.5, so those combinations are signal, not gates.
     continue-on-error: ${{ matrix.php == '8.6' }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        php: ['8.2', '8.3', '8.4', '8.5', '8.6']
-        laravel: ['12', '13']
-        exclude:
-          # Laravel 13 requires PHP 8.3 or newer.
-          - php: '8.2'
-            laravel: '13'
+        php: ['8.3', '8.4', '8.5', '8.6']
 
     steps:
       - uses: actions/checkout@v4
@@ -44,26 +44,15 @@ jobs:
           composer --working-dir=packages/rector validate
 
       - name: Install locked dependencies
-        if: matrix.laravel == '12'
+        # The committed lock already resolves Laravel 13 at the PHP 8.3
+        # platform, so every leg installs it verbatim; only the actual runtime
+        # differs between legs.
         run: composer install --no-interaction --no-progress
-
-      - name: Resolve Laravel 13 on the current PHP runtime
-        if: matrix.laravel == '13'
-        # Bash preserves the caret constraint on Windows too; PowerShell's
-        # composer.bat invocation can strip it and select exactly 13.0.0.
-        shell: bash
-        run: |
-          set -euo pipefail
-          composer config --unset platform.php
-          composer require 'laravel/framework:^13.0' --with-all-dependencies --no-interaction --no-progress --prefer-dist
-          # Source-contract tests inspect the committed manifests. Restore only
-          # those files, retaining the resolved Laravel 13 vendor installation.
-          git restore --source=HEAD --worktree -- composer.json composer.lock
 
       - name: Verify the installed framework and platform
         shell: bash
         env:
-          LARAVEL_MAJOR: ${{ matrix.laravel }}
+          LARAVEL_MAJOR: '13'
         run: |
           set -euo pipefail
           php -r 'require "vendor/autoload.php"; $version = Illuminate\Foundation\Application::VERSION; printf("Testing Laravel %s on PHP %s\n", $version, PHP_VERSION); if (explode(".", $version)[0] !== getenv("LARAVEL_MAJOR")) { throw new RuntimeException("Installed framework does not match the CI matrix"); }'

@@ -227,7 +227,7 @@ Laravel constructs classified as unsupported are preserved with
 
 ## Compatibility baseline
 
-This package requires PHP `>=8.2` — the same minimum as Testo and the runtime. It
+This package requires PHP `>=8.2` — the same minimum as Testo. It
 intentionally pins Rector to `2.6.2` and supports `testo/bridge-rector` `0.2.4`.
 Bridge `0.2.4` still uses Rector's former `Container::tagged()` integration, which
 is absent from newer Rector versions tested for this release. Remove or widen the
@@ -239,12 +239,12 @@ Processing-scope checks also read the pinned Rector run configuration through
 input paths. When upgrading Rector, verify positional CLI overrides, parallel
 workers, and skipped or autoload-only bases as well as configured-path runs.
 
-The Laratesto runtime these rules migrate to supports PHP `>=8.2`,
-Laravel `^12.0 || ^13.0` and Testo `^0.10.42`. This package declares no Composer
-dependency on the runtime and only suggests it. Laravel 12 supports PHP 8.2;
-Laravel 13 requires PHP 8.3 or newer. CI tests locked Laravel 12 on PHP 8.2/8.3/8.4
-and separately resolved Laravel 13 on PHP 8.3/8.4, on Linux and Windows, asserting
-the actual installed framework major before running the suite.
+The Laratesto runtime these rules migrate to supports PHP `>=8.3`,
+Laravel `^13.0` and Testo `^0.10.42`. This package declares no Composer
+dependency on the runtime and only suggests it. CI tests the locked Laravel 13
+dependencies on a self-hosted runner with PHP 8.3 through 8.5, plus pre-GA
+PHP 8.6 legs as non-gating signal, asserting the actual installed framework
+major before running the suite.
 
 The rules rewrite database traits into the multi-connection attributes
 (`connections`, `tables`, `exceptTables` on

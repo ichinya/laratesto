@@ -6,14 +6,19 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking**: dropped Laravel 12 support (issue #6). The package now
+  requires `laravel/framework ^13.0` and PHP `>=8.3` — Laravel 13's own PHP
+  floor — and the lock resolves against Composer's PHP 8.3 platform. The
+  standalone rector package keeps Testo's `>=8.2` floor.
+
 ### Added
 
-- CI matrix now covers PHP 8.5 for Laravel 12 and 13 on both Linux and
-  Windows (issue #6): the self-test suite (`composer test`) runs green on
-  PHP 8.5 against both framework majors.
-- Pre-GA PHP 8.6 legs added as non-gating signal jobs; the locked
-  dependencies still cap at PHP 8.5, so those combinations report
-  compatibility readiness without blocking the build.
+- CI runs the self-test suite (`composer test`) on a self-hosted runner over
+  the locked Laravel 13 dependencies with PHP 8.3 through 8.5; pre-GA PHP 8.6
+  legs run as non-gating signal, since the locked dependencies still cap at
+  PHP 8.5 (issue #6).
 
 ## [0.7.1] - 2026-09-08
 
