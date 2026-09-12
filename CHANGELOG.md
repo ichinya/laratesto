@@ -6,6 +6,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-09-12
+
 ### Fixed
 
 - PHPUnit compatibility shim: added missing `assertIsArray`, `assertArrayHasKey`,
