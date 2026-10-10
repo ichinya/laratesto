@@ -32,6 +32,7 @@ final class DatabaseTransactionScope
         private readonly Application $application,
         private readonly array $connections,
         private readonly bool $guardsRefreshState = false,
+        private readonly ?\Closure $onSecondaryFailure = null,
     ) {}
 
     public function begin(): void
@@ -139,8 +140,16 @@ final class DatabaseTransactionScope
     {
         try {
             $this->close();
-        } catch (\Throwable) {
-            // The original test/pipeline/begin failure remains authoritative.
+        } catch (\Throwable $failure) {
+            try {
+                if ($this->onSecondaryFailure !== null) {
+                    ($this->onSecondaryFailure)($failure);
+                } else {
+                    FailureResult::report($failure, 'transaction rollback');
+                }
+            } catch (\Throwable) {
+                FailureResult::report($failure, 'transaction rollback');
+            }
         }
     }
 

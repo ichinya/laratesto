@@ -115,19 +115,25 @@ trait InteractsWithLaravel
         try {
             $this->tearDownLaravel();
         } finally {
-            $this->laravelApplication = null;
-            $this->phpUnitConsole = null;
-            $this->app = null;
-            $this->originalExceptionHandler = null;
-            $this->originalVite = null;
-            $this->originalMix = null;
-            $this->originalDeferredCallbacksCollection = null;
-            $this->cookies = [];
-            $this->defaultHeaders = [];
-            $this->serverVariables = [];
-            $this->followRedirects = false;
-            Carbon::setTestNow();
+            $this->clearLaravelApplicationReferences();
         }
+    }
+
+    /** @internal Releases bridge-owned state without invoking a user teardown hook. */
+    public function clearLaravelApplicationReferences(): void
+    {
+        $this->laravelApplication = null;
+        $this->phpUnitConsole = null;
+        $this->app = null;
+        $this->originalExceptionHandler = null;
+        $this->originalVite = null;
+        $this->originalMix = null;
+        $this->originalDeferredCallbacksCollection = null;
+        $this->cookies = [];
+        $this->defaultHeaders = [];
+        $this->serverVariables = [];
+        $this->followRedirects = false;
+        Carbon::setTestNow();
     }
 
     /**

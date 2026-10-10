@@ -40,9 +40,9 @@ final class AssertionCompatibilityE2eTest
 
             $location = \var_export([$tmp . '/corpus'], true);
             \file_put_contents($tmp . '/testo.php', "<?php return new \\Testo\\Application\\Config\\ApplicationConfig(suites: [new \\Testo\\Application\\Config\\SuiteConfig(name: 'Parity', location: {$location}, plugins: [new \\Testo\\Convention\\NamingConventionPlugin()])]);");
-            $testo = [\PHP_BINARY, $root . '/vendor/bin/testo', 'run', '--config', $tmp . '/testo.php', '--no-ansi', '--log-json=' . $tmp . '/result.json'];
+            $testo = [\PHP_BINARY, $root . '/vendor/bin/testo', 'run', '--config', $tmp . '/testo.php', '--no-ansi', '--log-json=' . $tmp . '/result.json', '--log-junit=' . $tmp . '/result.xml'];
             $this->run($testo, $root, 1);
-            $this->assertParity($tmp . '/result.json');
+            $this->assertParity($tmp, 23);
 
             $legacy = (new PhpUnitToTestoMigrator())->migrate($source);
             Assert::true($legacy->successful(), \implode('; ', $legacy->errors));
@@ -51,16 +51,23 @@ final class AssertionCompatibilityE2eTest
             Assert::true($strictLegacy->successful(), \implode('; ', $strictLegacy->errors));
             \file_put_contents($strictFile, $strictLegacy->code);
             $this->run($testo, $root, 1);
-            $this->assertParity($tmp . '/result.json');
+            // The legacy converter turns addToAssertionCount(2) into one successful assertion.
+            $this->assertParity($tmp, 22);
         } finally {
             (new Filesystem())->deleteDirectory($tmp);
         }
     }
 
-    private function assertParity(string $file): void
+    private function assertParity(string $directory, int $assertions): void
     {
-        $report = \json_decode((string) \file_get_contents($file), true, flags: JSON_THROW_ON_ERROR);
-        Assert::same(['total' => 13, 'passed' => 9, 'failed' => 4], $report['totals']);
+        $report = \json_decode((string) \file_get_contents($directory . '/result.json'), true, flags: JSON_THROW_ON_ERROR);
+        Assert::same(['total' => 13, 'passed' => 9, 'failed' => 4], array_diff_key($report['totals'], ['assertions' => true]));
+        Assert::same($assertions, $report['totals']['assertions'], 'Native assertion metric, including executed negative controls.');
+        $junit = simplexml_load_file($directory . '/result.xml');
+        Assert::same(13, count($junit->xpath('//testcase')));
+        Assert::same($assertions, (int) $junit['assertions']);
+        Assert::same(4, count($junit->xpath('//testcase/failure')));
+        Assert::same(0, count($junit->xpath('//testcase/error | //testcase/skipped')));
         $failed = \array_map(static fn (array $failure): string => \explode('::', $failure['test'])[1], $report['failures']);
         \sort($failed);
         Assert::same(['testNegativeEmptyMessage', 'testNegativeNoException', 'testNegativeWrongMessage', 'testNegativeWrongType'], $failed);

@@ -19,12 +19,13 @@ use Testo\Pipeline\Middleware\TestRunInterceptor;
  *
  * @api
  */
-#[InterceptorOptions(order: InterceptorOptions::ORDER_DEFAULT - 50_000)]
+#[InterceptorOptions(order: InterceptorOptions::ORDER_DEFAULT - 170)]
 final readonly class DatabaseMigrationsInterceptor implements TestRunInterceptor
 {
     public function __construct(
         private DatabaseMigrations $attribute,
         private LaravelApplicationFactory $factory,
+        private ?\Testo\Common\Messenger $messenger = null,
     ) {}
 
     #[\Override]
@@ -46,7 +47,7 @@ final readonly class DatabaseMigrationsInterceptor implements TestRunInterceptor
         try {
             $this->rollback();
         } catch (\Throwable $failure) {
-            return FailureResult::aborted($info, $failure);
+            return FailureResult::afterCleanup($result, $failure, 'migration rollback', $this->messenger);
         }
 
         return $result;
@@ -79,8 +80,8 @@ final readonly class DatabaseMigrationsInterceptor implements TestRunInterceptor
     {
         try {
             $this->rollback();
-        } catch (\Throwable) {
-            // The pipeline failure remains authoritative.
+        } catch (\Throwable $failure) {
+            FailureResult::report($failure, 'migration rollback', $this->messenger);
         }
     }
 

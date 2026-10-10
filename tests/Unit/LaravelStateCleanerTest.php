@@ -15,6 +15,34 @@ use Testo\Test;
 final class LaravelStateCleanerTest
 {
     #[Test]
+    public function disconnectFailureStillCleansOtherConnectionsAndGlobalState(): void
+    {
+        $application = new Application();
+        $failure = new \RuntimeException('disconnect failure');
+        $second = new class { public bool $disconnected = false; public function disconnect(): void { $this->disconnected = true; } };
+        $first = new class($failure) { public function __construct(private \Throwable $failure) {} public function disconnect(): void { throw $this->failure; } };
+        $application->instance('db', new class($first, $second) {
+            public function __construct(private object $first, private object $second) {}
+            public function getConnections(): array { return ['first' => $this->first, 'second' => $this->second]; }
+        });
+        \Illuminate\Support\Facades\Facade::setFacadeApplication($application);
+        Queue::createPayloadUsing(static fn() => ['leak' => true]);
+        Sleep::fake();
+        \Carbon\Carbon::setTestNow('2020-01-01');
+        $caught = null;
+        try { (new LaravelStateCleaner())->clean($application); } catch (\Throwable $error) { $caught = $error; }
+        Assert::same($failure, $caught);
+        Assert::true($second->disconnected);
+        Assert::false($application->bound('db'));
+        Assert::null(\Illuminate\Support\Facades\Facade::getFacadeApplication());
+        Assert::false(\Carbon\Carbon::hasTestNow());
+        $faked = false;
+        Sleep::whenFakingSleep(static function () use (&$faked) { $faked = true; });
+        Sleep::usleep(1);
+        Assert::false($faked);
+    }
+
+    #[Test]
     public function teardownRemovesPayloadHooksBeforeTheNextJob(): void
     {
         Queue::createPayloadUsing(static fn (): array => ['previous_test' => true]);

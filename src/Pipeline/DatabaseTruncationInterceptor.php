@@ -17,7 +17,7 @@ use Testo\Pipeline\Attribute\InterceptorOptions;
 use Testo\Pipeline\Middleware\TestRunInterceptor;
 
 /** Laravel-compatible first migration followed by selected multi-connection truncation. */
-#[InterceptorOptions(order: InterceptorOptions::ORDER_DEFAULT - 50_000)]
+#[InterceptorOptions(order: InterceptorOptions::ORDER_DEFAULT - 170)]
 final readonly class DatabaseTruncationInterceptor implements TestRunInterceptor
 {
     public function __construct(

@@ -47,6 +47,8 @@ use Illuminate\View\Component;
  */
 final class LaravelStateCleaner
 {
+    public function __construct(private readonly ?\Testo\Common\Messenger $messenger = null) {}
+
     /**
      * Static state resets: [class, method].
      *
@@ -91,46 +93,57 @@ final class LaravelStateCleaner
 
     public function clean(Application $application): void
     {
-        $this->disconnectDatabase($application);
-
-        $application->flush();
-
-        Facade::clearResolvedInstances();
-        Facade::setFacadeApplication(null);
+        $failures = [];
+        $this->attempt('database disconnect', function () use ($application, &$failures): void {
+            if (!$application->bound('db')) {
+                return;
+            }
+            foreach ($application['db']->getConnections() as $name => $connection) {
+                $this->attempt('disconnect '.$name, $connection->disconnect(...), $failures);
+            }
+        }, $failures);
+        $this->attempt('application flush', $application->flush(...), $failures);
+        $this->attempt('facade instances', Facade::clearResolvedInstances(...), $failures);
+        $this->attempt('facade application', static fn() => Facade::setFacadeApplication(null), $failures);
+        $this->attempt('container application', static fn() => \Illuminate\Container\Container::setInstance(null), $failures);
 
         foreach (self::RESETS as [$class, $method]) {
             if (\method_exists($class, $method)) {
-                $class::$method();
+                $this->attempt($class.'::'.$method, static fn() => $class::$method(), $failures);
             }
         }
 
         foreach (self::RESETS_WITH_ARGUMENTS as [$class, $method, $arguments]) {
             if (\method_exists($class, $method)) {
-                $class::$method(...$arguments);
+                $this->attempt($class.'::'.$method, static fn() => $class::$method(...$arguments), $failures);
             }
         }
 
         // Optional dependencies of the framework itself.
         if (\class_exists(Carbon::class)) {
-            Carbon::setTestNow();
+            $this->attempt('Carbon clock', Carbon::setTestNow(...), $failures);
         }
         if (\class_exists(CarbonImmutable::class)) {
-            CarbonImmutable::setTestNow();
+            $this->attempt('CarbonImmutable clock', CarbonImmutable::setTestNow(...), $failures);
+        }
+        foreach (array_slice($failures, 1) as [$stage, $failure]) {
+            \Laratesto\Pipeline\Internal\FailureResult::report($failure, $stage, $this->messenger);
+        }
+        if ($failures !== []) {
+            throw $failures[0][1];
         }
     }
 
     /**
-     * Close database connections so sockets and file handles are released
-     * before the application container is flushed.
+     * Collect a cleanup failure while allowing the remaining stages to run.
      */
-    private function disconnectDatabase(Application $application): void
+    private function attempt(string $stage, callable $action, array &$failures): void
     {
-        if (!$application->bound('db')) {
-            return;
-        }
-
-        foreach ($application['db']->getConnections() as $connection) {
-            $connection->disconnect();
+        \Laratesto\Pipeline\Internal\FailureResult::trace('cleanup '.$stage, $this->messenger);
+        try {
+            $action();
+        } catch (\Throwable $failure) {
+            $failures[] = [$stage, $failure];
         }
     }
 }

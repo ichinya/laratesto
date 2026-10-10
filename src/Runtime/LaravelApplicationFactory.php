@@ -61,6 +61,7 @@ final class LaravelApplicationFactory
             ));
         }
 
+        $this->application = $application;
         if (!$customFactory) {
             $application->make(ConsoleKernel::class)->bootstrap();
         }
@@ -78,7 +79,7 @@ final class LaravelApplicationFactory
             \Illuminate\Http\Request::create($application['config']->get('app.url', 'http://localhost')),
         );
 
-        return $this->application = $application;
+        return $application;
     }
 
     /**
@@ -100,5 +101,11 @@ final class LaravelApplicationFactory
     public function flush(): void
     {
         $this->application = null;
+    }
+
+    /** @internal Includes a validated application whose later bootstrap failed. */
+    public function acquired(): ?Application
+    {
+        return $this->application;
     }
 }

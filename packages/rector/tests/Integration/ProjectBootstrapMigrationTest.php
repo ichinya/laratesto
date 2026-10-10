@@ -42,9 +42,15 @@ final class ProjectBootstrapMigrationTest
             $location = var_export([$temporary.'/corpus'], true);
             $app = var_export($root.'/tests/Fixture/laravel', true);
             file_put_contents($temporary.'/testo.php', '<?php require '.var_export($bootstrap, true).'; return new \\Testo\\Application\\Config\\ApplicationConfig(suites: [new \\Testo\\Application\\Config\\SuiteConfig(name: "Migration", location: '.$location.', plugins: [new \\Testo\\Convention\\NamingConventionPlugin(), new \\Laratesto\\LaravelPlugin(new \\Laratesto\\Config\\LaravelConfig(basePath: '.$app.'))])]);');
-            $this->run([PHP_BINARY, $root.'/vendor/bin/testo', 'run', '--config', $temporary.'/testo.php', '--log-json='.$temporary.'/result.json'], $root, $environment, 1);
+            $this->run([PHP_BINARY, $root.'/vendor/bin/testo', 'run', '--config', $temporary.'/testo.php', '--log-json='.$temporary.'/result.json', '--log-junit='.$temporary.'/result.xml'], $root, $environment, 1);
             $report = json_decode(file_get_contents($temporary.'/result.json'), true, flags: JSON_THROW_ON_ERROR);
-            Assert::same(['total' => 8, 'passed' => 6, 'failed' => 2], $report['totals']);
+            Assert::same(['total' => 8, 'passed' => 6, 'failed' => 2], array_diff_key($report['totals'], ['assertions' => true]));
+            Assert::same(32, $report['totals']['assertions'], 'Native assertion metric, including executed negative controls.');
+            $junit = simplexml_load_file($temporary.'/result.xml');
+            Assert::same(8, count($junit->xpath('//testcase')));
+            Assert::same(32, (int) $junit['assertions']);
+            Assert::same(2, count($junit->xpath('//testcase/failure')));
+            Assert::same(0, count($junit->xpath('//testcase/error | //testcase/skipped')));
             $failures = array_column($report['failures'], 'test');
             sort($failures);
             Assert::same(['Tests\ProjectBootstrapTest::testNegativeFacadeAssertionStillFails', 'Tests\ProjectBootstrapTest::testNegativeFrameworkAssertionStillFails'], $failures);
