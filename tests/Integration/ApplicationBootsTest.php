@@ -14,6 +14,45 @@ final class ApplicationBootsTest
 
     private static int $previousApplicationId = 0;
 
+    public function testNativeRetryAndRepeatOwnFreshApplicationsAndKeepFailures(): void
+    {
+        $run = \Laratesto\Tests\Support\TestoCompatibilityRunner::run('retry');
+        Assert::same(1, $run['exit']);
+        Assert::same(8, $run['json']['totals']['total']);
+        Assert::same(5, $run['json']['totals']['passed']);
+        Assert::same(1, $run['json']['totals']['flaky']);
+        Assert::same(1, $run['json']['totals']['failed']);
+        Assert::same(1, $run['json']['totals']['skipped']);
+        $counts = array_count_values(array_column($run['events'], 'event'));
+        foreach (['acquired', 'booted', 'setup', 'body', 'teardown'] as $phase) {
+            Assert::same(16, $counts[$phase], $phase);
+        }
+        $bodies = array_filter($run['events'], static fn($event) => $event['event'] === 'body');
+        Assert::same(16, count(array_unique(array_column($bodies, 'owner'))));
+        Assert::string(json_encode($run['json']['failures']))->contains('primary exhausted body failure')->contains('secondary retry teardown');
+        $xml = $run['junit']->asXML();
+        Assert::string($xml)->contains('flakyFailure')->contains('rerunFailure')->contains('secondary retry teardown');
+        Assert::same(8, count($run['junit']->xpath('//testcase')));
+        // 16 executions × (4 setup + 3 body + 1 Mockery verification),
+        // three deliberate failures and six stacked-transaction assertions.
+        Assert::same(137, $run['json']['totals']['assertions']);
+    }
+
+    public function testNativeCleanupFailuresAreUnsuccessfulAndDoNotRetryAborts(): void
+    {
+        $run = \Laratesto\Tests\Support\TestoCompatibilityRunner::run('retry-cleanup');
+        Assert::same(1, $run['exit']);
+        Assert::same(['total' => 4, 'assertions' => 4, 'aborted' => 2, 'passed' => 2], $run['json']['totals']);
+        Assert::same(2, count($run['junit']->xpath('//testcase/error')));
+        $counts = array_count_values(array_column($run['events'], 'event'));
+        Assert::same(4, $counts['acquired']);
+        Assert::same(4, $counts['body']);
+        foreach ($run['events'] as $event) {
+            if ($event['event'] === 'clean') { Assert::true($event['facade']); }
+        }
+        Assert::string(json_encode($run['json']['failures']))->contains('standalone teardown error')->contains('standalone disconnect error');
+    }
+
     public function testBootsTheFramework(): void
     {
         $app = $this->app();

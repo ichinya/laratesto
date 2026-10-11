@@ -89,3 +89,33 @@ jobs:
 
       - name: Run the test suite (includes the migration end-to-end gate)
         run: composer test
+
+  coverage:
+    name: PHP 8.5 / required Line coverage compatibility
+    runs-on: self-hosted
+    timeout-minutes: 15
+    env:
+      XDEBUG_MODE: coverage
+      LARATESTO_REQUIRE_COVERAGE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: fileinfo, sqlite3, pdo_sqlite
+          coverage: xdebug
+          ini-values: xdebug.mode=coverage
+      - name: Install and validate the locked candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          composer validate --strict
+          composer install --no-interaction --no-progress
+          composer check-platform-reqs
+      - name: Verify real coverage checks executed
+        shell: bash
+        run: |
+          set -euo pipefail
+          php --ri xdebug
+          php vendor/bin/testo run --suite=Unit --filter=TestoCoverageCompatibilityTest --log-json=storage/framework/testing/coverage-gate.json --log-junit=storage/framework/testing/coverage-gate.xml
+          php tests/Support/verify-coverage-gate.php storage/framework/testing/coverage-gate.json storage/framework/testing/coverage-gate.xml

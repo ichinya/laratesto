@@ -6,6 +6,35 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Require Testo `^0.10.55` and update only its locked components. Keep Laravel
+  13.31.0, Rector 2.6.2 and testo/bridge-rector 0.2.4 in the root lock (issue #23).
+
+### Fixed
+
+- Bootstrap and database preparation now run inside native Retry/Repeat, with
+  a fresh Laravel application for each actual execution.
+- Keep original unsuccessful results and assertion metrics when teardown or
+  cleanup also fails; emit secondary diagnostics and continue framework cleanup.
+  Release partial applications and case references after failed bootstrap/setup.
+- Reject effective class Fiber RoundRobin/Random before hooks/providers/boot;
+  retain native skipped outcomes and support sequential Solo execution.
+- Reject Windows report device names independently of PHP stat visibility,
+  including names with extensions, so they cannot be accepted as new report files.
+
+### Added
+
+- Real subprocess compatibility controls for Skip, Fiber Solo, Inline sources,
+  Bench, JSON/JUnit, public Artisan selectors/exits and migrated PHPUnit fixtures.
+  Migration checks retain their semantic failures and verify native assertion
+  metrics without rewriting the hand-curated issue10 JUnit fixtures.
+- A blocking PHP 8.5 Xdebug Line coverage gate that requires executed checks,
+  including coverage selection/conflict and report-write negative controls.
+- An optional separately locked community PBT consumer with bounded generation,
+  shrinking/replay and coverage checks. Document shared benchmark/property state,
+  PHP 8.5 Inline load boundaries and opt-in `LARATESTO_DEBUG` tracing.
+
 ## [0.7.3] - 2026-09-12
 
 ### Fixed

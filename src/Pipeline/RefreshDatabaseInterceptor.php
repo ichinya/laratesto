@@ -17,12 +17,13 @@ use Testo\Pipeline\Attribute\InterceptorOptions;
 use Testo\Pipeline\Middleware\TestRunInterceptor;
 
 /** Laravel-compatible migrate-once plus per-test transaction strategy. */
-#[InterceptorOptions(order: InterceptorOptions::ORDER_DEFAULT - 50_000)]
+#[InterceptorOptions(order: InterceptorOptions::ORDER_DEFAULT - 170)]
 final readonly class RefreshDatabaseInterceptor implements TestRunInterceptor
 {
     public function __construct(
         private RefreshDatabase $attribute,
         private LaravelApplicationFactory $factory,
+        private ?\Testo\Common\Messenger $messenger = null,
     ) {}
 
     #[\Override]
@@ -41,7 +42,8 @@ final readonly class RefreshDatabaseInterceptor implements TestRunInterceptor
                 RefreshDatabaseState::$migrated = true;
             }
 
-            $scope = new DatabaseTransactionScope($application, $connections, guardsRefreshState: true);
+            $scope = new DatabaseTransactionScope($application, $connections, guardsRefreshState: true,
+                onSecondaryFailure: fn(\Throwable $failure) => FailureResult::report($failure, 'refresh rollback', $this->messenger));
             $scope->begin();
         } catch (\Throwable $failure) {
             RefreshDatabaseState::$migrated = false;
@@ -59,7 +61,7 @@ final readonly class RefreshDatabaseInterceptor implements TestRunInterceptor
         try {
             $scope->close();
         } catch (\Throwable $failure) {
-            return FailureResult::aborted($info, $failure);
+            return FailureResult::afterCleanup($result, $failure, 'refresh rollback', $this->messenger);
         }
 
         return $result;

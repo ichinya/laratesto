@@ -21,6 +21,7 @@ final readonly class DatabaseTransactionsInterceptor implements TestRunIntercept
     public function __construct(
         private DatabaseTransactions $attribute,
         private LaravelApplicationFactory $factory,
+        private ?\Testo\Common\Messenger $messenger = null,
     ) {}
 
     #[\Override]
@@ -34,7 +35,8 @@ final readonly class DatabaseTransactionsInterceptor implements TestRunIntercept
             // the cached connections so the transaction actually wraps migrated data.
             DatabaseRuntime::restoreInMemoryConnections($application, $connections);
 
-            $scope = new DatabaseTransactionScope($application, $connections);
+            $scope = new DatabaseTransactionScope($application, $connections,
+                onSecondaryFailure: fn(\Throwable $failure) => FailureResult::report($failure, 'transaction rollback', $this->messenger));
             $scope->begin();
         } catch (\Throwable $failure) {
             return FailureResult::aborted($info, $failure);
@@ -47,8 +49,8 @@ final readonly class DatabaseTransactionsInterceptor implements TestRunIntercept
 
             try {
                 DatabaseRuntime::cacheInMemoryConnections($application, $connections);
-            } catch (\Throwable) {
-                // The original pipeline failure remains authoritative.
+            } catch (\Throwable $failure) {
+                FailureResult::report($failure, 'in-memory connection cache', $this->messenger);
             }
 
             throw $pipelineFailure;
@@ -57,13 +59,13 @@ final readonly class DatabaseTransactionsInterceptor implements TestRunIntercept
         try {
             $scope->close();
         } catch (\Throwable $failure) {
-            return FailureResult::aborted($info, $failure);
+            $result = FailureResult::afterCleanup($result, $failure, 'transaction rollback', $this->messenger);
         }
 
         try {
             DatabaseRuntime::cacheInMemoryConnections($application, $connections);
         } catch (\Throwable $failure) {
-            return FailureResult::aborted($info, $failure);
+            $result = FailureResult::afterCleanup($result, $failure, 'in-memory connection cache', $this->messenger);
         }
 
         return $result;

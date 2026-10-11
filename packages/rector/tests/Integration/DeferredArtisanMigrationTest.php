@@ -40,9 +40,15 @@ final class DeferredArtisanMigrationTest
             $location = var_export([$temporary.'/corpus'], true);
             $app = var_export($root.'/tests/Fixture/laravel', true);
             file_put_contents($temporary.'/testo.php', '<?php return new \\Testo\\Application\\Config\\ApplicationConfig(suites: [new \\Testo\\Application\\Config\\SuiteConfig(name: "Migration", location: '.$location.', plugins: [new \\Testo\\Convention\\NamingConventionPlugin(), new \\Testo\\Bridge\\Mockery\\MockeryPlugin(), new \\Laratesto\\LaravelPlugin(new \\Laratesto\\Config\\LaravelConfig(basePath: '.$app.'))])]);');
-            $this->run([PHP_BINARY, $root.'/vendor/bin/testo', 'run', '--config', $temporary.'/testo.php', '--log-json='.$temporary.'/result.json'], $root, $environment, 1);
+            $this->run([PHP_BINARY, $root.'/vendor/bin/testo', 'run', '--config', $temporary.'/testo.php', '--log-json='.$temporary.'/result.json', '--log-junit='.$temporary.'/result.xml'], $root, $environment, 1);
             $report = json_decode(file_get_contents($temporary.'/result.json'), true, flags: JSON_THROW_ON_ERROR);
-            Assert::same(['total' => 5, 'passed' => 3, 'failed' => 2], $report['totals'], json_encode($report['failures']));
+            Assert::same(['total' => 5, 'passed' => 3, 'failed' => 2], array_diff_key($report['totals'], ['assertions' => true]));
+            Assert::same(16, $report['totals']['assertions'], 'Native assertion metric, including executed negative controls.');
+            $junit = simplexml_load_file($temporary.'/result.xml');
+            Assert::same(5, count($junit->xpath('//testcase')));
+            Assert::same(16, (int) $junit['assertions']);
+            Assert::same(2, count($junit->xpath('//testcase/failure')));
+            Assert::same(0, count($junit->xpath('//testcase/error | //testcase/skipped')));
             $failures = array_column($report['failures'], 'test');
             sort($failures);
             Assert::same(['Tests\DeferredArtisanTest::testWrongExitCodeStillFailsOnRelease', 'Tests\DeferredArtisanTest::testWrongOutputStillFailsOnRelease'], $failures);

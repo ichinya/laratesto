@@ -40,9 +40,16 @@ final class MailableAssertionsMigrationTest
             $location = var_export([$temporary.'/corpus'], true);
             $app = var_export($root.'/tests/Fixture/laravel', true);
             file_put_contents($temporary.'/testo.php', '<?php return new \\Testo\\Application\\Config\\ApplicationConfig(suites: [new \\Testo\\Application\\Config\\SuiteConfig(name: "Migration", location: '.$location.', plugins: [new \\Testo\\Convention\\NamingConventionPlugin(), new \\Laratesto\\LaravelPlugin(new \\Laratesto\\Config\\LaravelConfig(basePath: '.$app.'))])]);');
-            $this->run([PHP_BINARY, $root.'/vendor/bin/testo', 'run', '--config', $temporary.'/testo.php', '--log-json='.$temporary.'/result.json'], $root, $environment, 1);
+            $this->run([PHP_BINARY, $root.'/vendor/bin/testo', 'run', '--config', $temporary.'/testo.php', '--log-json='.$temporary.'/result.json', '--log-junit='.$temporary.'/result.xml'], $root, $environment, 1);
             $report = json_decode(file_get_contents($temporary.'/result.json'), true, flags: JSON_THROW_ON_ERROR);
-            Assert::same(['total' => 4, 'passed' => 2, 'failed' => 2], $report['totals']);
+            Assert::same(['total' => 4, 'passed' => 2, 'failed' => 2], array_diff_key($report['totals'], ['assertions' => true]));
+            // Seven mail expectations are recorded by the shim and compatibility adapter.
+            Assert::same(14, $report['totals']['assertions'], 'Native assertion metric, including executed negative controls.');
+            $junit = simplexml_load_file($temporary.'/result.xml');
+            Assert::same(4, count($junit->xpath('//testcase')));
+            Assert::same(14, (int) $junit['assertions']);
+            Assert::same(2, count($junit->xpath('//testcase/failure')));
+            Assert::same(0, count($junit->xpath('//testcase/error | //testcase/skipped')));
             $failures = array_column($report['failures'], 'test');
             sort($failures);
             Assert::same(['Tests\MailableAssertionsTest::testNegativeChainedAssertion', 'Tests\MailableAssertionsTest::testNegativeMailAssertion'], $failures);

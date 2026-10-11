@@ -1,0 +1,19 @@
+{
+    "name": "laratesto-consumer/property-testing-compatibility",
+    "description": "Separate bounded Testo property testing compatibility consumer.",
+    "license": "BSD-3-Clause",
+    "require": {
+        "php": "8.3 - 8.5",
+        "ichinya/laratesto": "@dev",
+        "rasuvaeff/property-testing-testo": "1.0.0",
+        "testo/testo": "0.10.55"
+    },
+    "repositories": [{"type": "path", "url": "../../..", "options": {"symlink": true}}],
+    "autoload": {
+        "psr-4": {
+            "LaratestoConsumer\\": "tests/",
+            "App\\": "../../Fixture/laravel/app/"
+        }
+    },
+    "config": {"platform": {"php": "8.3.0"}, "sort-packages": true}
+}

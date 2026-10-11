@@ -48,10 +48,15 @@ final readonly class LaravelPlugin implements PluginConfigurator
         $container->set($factory, LaravelApplicationFactory::class);
 
         $interceptors = $container->get(InterceptorCollector::class);
+        $interceptors->addInterceptor(new \Laratesto\Pipeline\LaravelFiberCompatibilityInterceptor(
+            $container->get(\Psr\EventDispatcher\EventDispatcherInterface::class),
+            $container->get(\Testo\Common\Messenger::class),
+        ));
         $interceptors->addInterceptor(new LaravelTestInterceptor(
             factory: $factory,
-            cleaner: new LaravelStateCleaner(),
+            cleaner: new LaravelStateCleaner($container->get(\Testo\Common\Messenger::class)),
+            messenger: $container->get(\Testo\Common\Messenger::class),
         ));
-        $interceptors->addInterceptor(new LaravelLifecycleInterceptor());
+        $interceptors->addInterceptor(new LaravelLifecycleInterceptor($container->get(\Testo\Common\Messenger::class)));
     }
 }

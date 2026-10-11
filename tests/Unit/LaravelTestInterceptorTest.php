@@ -23,6 +23,66 @@ use Testo\Test;
 final class LaravelTestInterceptorTest
 {
     #[Test]
+    public function partialSetupAndInjectionReleaseReferencesWithoutDuplicateUserHooks(): void
+    {
+        $run = \Laratesto\Tests\Support\TestoCompatibilityRunner::run('partial');
+        Assert::same(1, $run['exit']);
+        Assert::same(3, $run['json']['totals']['total']);
+        Assert::same(1, $run['json']['totals']['skipped']);
+        Assert::same(1, $run['json']['totals']['passed']);
+        Assert::same(1, $run['json']['totals']['aborted']);
+        $events = array_count_values(array_column($run['events'], 'event'));
+        Assert::same(3, $events['acquired']);
+        Assert::same(3, $events['booted']);
+        Assert::same(2, $events['setup']);
+        Assert::same(1, $events['teardown']);
+        Assert::same(1, $events['body']);
+        Assert::false(isset($events['unexpected body']));
+        foreach ($run['events'] as $event) {
+            if ($event['event'] === 'references') {
+                Assert::true($event['cleared']);
+            }
+        }
+    }
+
+    #[Test]
+    public function configurationFailureAfterCustomAcquisitionStillCleansTheApplication(): void
+    {
+        $instance = new class implements CaseInstance {
+            public ?\Illuminate\Foundation\Application $application = null;
+            public function getInstance(): object { return $this; }
+            public function hasInstance(): bool { return true; }
+            public function createApplication(): \Illuminate\Foundation\Application
+            {
+                $this->application = new \Illuminate\Foundation\Application();
+                $this->application->instance('config', new class extends \Illuminate\Config\Repository {
+                    public function set($key, $value = null) { throw new \RuntimeException('configuration failed'); }
+                });
+                return $this->application;
+            }
+        };
+        $factory = new LaravelApplicationFactory(new LaravelConfig(basePath: dirname(__DIR__).'/Fixture/laravel', config: ['marker' => true]));
+        $result = (new LaravelTestInterceptor($factory, new LaravelStateCleaner()))->runTest(self::info($instance), static fn() => throw new \LogicException('must not run'));
+        Assert::same('configuration failed', $result->failure?->getMessage());
+        Assert::null($factory->acquired());
+        Assert::false($instance->application->bound('config'));
+    }
+
+    #[Test]
+    public function partialKernelBootstrapStillFlushesTheAcquiredApplication(): void
+    {
+        $factory = new LaravelApplicationFactory(new LaravelConfig(basePath: dirname(__DIR__).'/Fixture/testo-compatibility/lifecycle/broken-app'));
+        $interceptor = new LaravelTestInterceptor($factory, new LaravelStateCleaner());
+        $called = false;
+        $result = $interceptor->runTest(self::info(), static function () use (&$called): never { $called = true; throw new \LogicException('must not run'); });
+        Assert::same(Status::Aborted, $result->status);
+        Assert::same('partial kernel bootstrap', $result->failure?->getMessage());
+        Assert::false($called);
+        Assert::null($factory->acquired());
+        Assert::null(\Illuminate\Support\Facades\Facade::getFacadeApplication());
+    }
+
+    #[Test]
     public function bootFailureReturnsAbortedResultWithRootCause(): void
     {
         $interceptor = self::brokenFixtureInterceptor();

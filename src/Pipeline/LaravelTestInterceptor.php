@@ -27,24 +27,29 @@ use Testo\Pipeline\Middleware\TestRunInterceptor;
  *
  * @api
  */
-#[InterceptorOptions(order: InterceptorOptions::ORDER_DEFAULT - 100_000)]
+#[InterceptorOptions(order: InterceptorOptions::ORDER_DEFAULT - 180)]
 final readonly class LaravelTestInterceptor implements TestRunInterceptor
 {
     public function __construct(
         private LaravelApplicationFactory $factory,
         private LaravelStateCleaner $cleaner,
+        private ?\Testo\Common\Messenger $messenger = null,
     ) {}
 
     #[\Override]
     public function runTest(TestInfo $info, callable $next): TestResult
     {
         $instance = $info->caseInfo->instance?->getInstance();
-        if ($instance !== null && method_exists($instance, 'beginPhpUnitOutputCapture')) {
-            $instance->beginPhpUnitOutputCapture();
-        }
         $result = null;
         try {
-            $result = $this->runLaravelTest($info, $next);
+            try {
+                if ($instance !== null && method_exists($instance, 'beginPhpUnitOutputCapture')) {
+                    $instance->beginPhpUnitOutputCapture();
+                }
+            } catch (\Throwable $failure) {
+                $result = FailureResult::fromLifecycle($info, $failure);
+            }
+            $result ??= $this->runLaravelTest($info, $next);
         } finally {
             if ($instance !== null && method_exists($instance, 'closePhpUnitOutputCapture')) {
                 try {
@@ -52,8 +57,21 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
                 } catch (\Throwable $cleanupFailure) {
                     // Preserve an existing result failure or a propagating
                     // pipeline exception; report cleanup failures on their own.
-                    if ($result !== null && $result->failure === null) {
-                        $result = FailureResult::aborted($info, $cleanupFailure);
+                    if ($result !== null) {
+                        $result = FailureResult::afterCleanup($result, $cleanupFailure, 'output buffer cleanup', $this->messenger);
+                    } else {
+                        FailureResult::report($cleanupFailure, 'output buffer cleanup', $this->messenger);
+                    }
+                }
+            }
+            if ($instance !== null && method_exists($instance, 'clearLaravelApplicationReferences')) {
+                try {
+                    $instance->clearLaravelApplicationReferences();
+                } catch (\Throwable $failure) {
+                    if ($result !== null) {
+                        $result = FailureResult::afterCleanup($result, $failure, 'case reference cleanup', $this->messenger);
+                    } else {
+                        FailureResult::report($failure, 'case reference cleanup', $this->messenger);
                     }
                 }
             }
@@ -65,13 +83,22 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
     {
         try {
             $application = $this->factory->boot($info->caseInfo->instance?->getInstance());
+            FailureResult::trace('application acquired #'.spl_object_id($application), $this->messenger);
         } catch (\Throwable $bootFailure) {
+            if (($application = $this->factory->acquired()) !== null) {
+                $this->cleanupQuietly($application);
+            }
             return FailureResult::aborted($info, $bootFailure);
         }
 
         try {
             $this->injectApplication($info, $application);
         } catch (\Throwable $injectionFailure) {
+            $instance = $info->caseInfo->instance?->getInstance();
+            if ($instance !== null && method_exists($instance, 'clearLaravelApplicationReferences')) {
+                try { $instance->clearLaravelApplicationReferences(); }
+                catch (\Throwable $failure) { FailureResult::report($failure, 'partial injection reference cleanup', $this->messenger); }
+            }
             $this->cleanupQuietly($application);
             return FailureResult::fromLifecycle($info, $injectionFailure);
         }
@@ -89,7 +116,7 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
             $this->cleaner->clean($application);
         } catch (\Throwable $cleanupFailure) {
             $this->factory->flush();
-            return FailureResult::aborted($info, $cleanupFailure);
+            return FailureResult::afterCleanup($result, $cleanupFailure, 'Laravel state cleanup', $this->messenger);
         }
 
         $this->factory->flush();
@@ -132,8 +159,8 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
     {
         try {
             $this->cleaner->clean($application);
-        } catch (\Throwable) {
-            // ignored on purpose
+        } catch (\Throwable $failure) {
+            FailureResult::report($failure, 'Laravel state cleanup', $this->messenger);
         }
 
         $this->factory->flush();

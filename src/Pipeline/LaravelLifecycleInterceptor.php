@@ -22,12 +22,22 @@ use Testo\Pipeline\Middleware\TestRunInterceptor;
 #[InterceptorOptions(order: InterceptorOptions::ORDER_DEFAULT + 50_000)]
 final readonly class LaravelLifecycleInterceptor implements TestRunInterceptor
 {
+    public function __construct(private ?\Testo\Common\Messenger $messenger = null) {}
+
     #[\Override]
     public function runTest(TestInfo $info, callable $next): TestResult
     {
         try {
             $this->setUp($info);
         } catch (\Throwable $failure) {
+            $instance = $this->instance($info);
+            if ($instance !== null && method_exists($instance, 'clearLaravelApplicationReferences')) {
+                try {
+                    $instance->clearLaravelApplicationReferences();
+                } catch (\Throwable $cleanupFailure) {
+                    FailureResult::report($cleanupFailure, 'partial setup reference cleanup', $this->messenger);
+                }
+            }
             return FailureResult::fromLifecycle($info, $failure);
         }
 
@@ -44,16 +54,13 @@ final readonly class LaravelLifecycleInterceptor implements TestRunInterceptor
                 $instance->finishPhpUnitOutputCapture($result->status === \Testo\Core\Value\Status::Passed);
             }
         } catch (\Throwable $failure) {
-            if (!$result->status->isFailure()) {
-                $result = $result->with(status: $failure instanceof \Testo\Assert\State\Record
-                    ? \Testo\Core\Value\Status::Failed : \Testo\Core\Value\Status::Aborted)->withFailure($failure);
-            }
+            $result = FailureResult::afterCleanup($result, $failure, 'output assertions', $this->messenger, lifecycle: true);
         }
 
         try {
             $this->tearDown($info);
         } catch (\Throwable $failure) {
-            return FailureResult::fromLifecycle($info, $failure);
+            return FailureResult::afterCleanup($result, $failure, 'Laravel teardown', $this->messenger, lifecycle: true);
         }
 
         return $result;
@@ -81,8 +88,8 @@ final readonly class LaravelLifecycleInterceptor implements TestRunInterceptor
     {
         try {
             $this->tearDown($info);
-        } catch (\Throwable) {
-            // The original pipeline failure remains authoritative.
+        } catch (\Throwable $failure) {
+            FailureResult::report($failure, 'Laravel teardown', $this->messenger);
         }
     }
 
