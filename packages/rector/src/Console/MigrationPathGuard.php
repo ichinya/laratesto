@@ -143,6 +143,17 @@ class MigrationPathGuard
             ));
         }
 
+        // Windows device names remain special with extensions even when PHP's
+        // stat functions report them as nonexistent (e.g. official PHP 8.5.11).
+        // Reject them by name before accepting a destination for a new report.
+        $stem = rtrim(explode('.', explode(':', $basename, 2)[0], 2)[0], ' ');
+        if (PHP_OS_FAMILY === 'Windows' && preg_match('/\A(?:CON|PRN|AUX|NUL|(?:COM|LPT)[1-9\x{00b9}\x{00b2}\x{00b3}])\z/iu', $stem) === 1) {
+            throw new \InvalidArgumentException(\sprintf(
+                'The report path "%s" is not a regular file.',
+                $this->display($root, $reportFile),
+            ));
+        }
+
         // An existing final component is inspected before the report writer replaces
         // it: directories and special files can never be atomically replaced, and
         // any link is rejected outright — fail-closed. is_link() misses Windows

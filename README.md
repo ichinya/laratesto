@@ -29,7 +29,7 @@ The bridge is a standalone Composer package. It does not require any changes to 
 ## Requirements
 
 - PHP 8.3+ with Laravel 13
-- Testo `^0.10.42`
+- Testo `^0.10.55` (the compatibility lock selects `0.10.55`)
 
 ## Installation
 
@@ -680,7 +680,7 @@ public function testLogsWarningOnFailure(): void
 
 ## How it works
 
-1. `LaravelTestInterceptor` runs before attribute interceptors for every test:
+1. `LaravelTestInterceptor` runs inside native Retry/Repeat for every execution:
    it forces `APP_ENV`, requires `bootstrap/app.php`, bootstraps the Console kernel
    and applies config overrides.
 2. The booted application is injected, database attributes prepare their state,
@@ -688,7 +688,7 @@ public function testLogsWarningOnFailure(): void
 3. After the test, `tearDownLaravel()` runs first; database transactions or
    migrations are rolled back next; finally connections are closed, the
    container is flushed, facades are cleared and framework static state resets.
-4. A new application instance is created for every test, which is what makes the
+4. A new application instance is created for every execution, which is what makes the
    cleanup sufficient: container-level state dies with the old application.
 5. Session cookies collected from each response are automatically bridged to the
    next request inside the same test, so multi-step flows (login → redirect →
@@ -709,11 +709,124 @@ public function testLogsWarningOnFailure(): void
   simple workarounds:
   - `$this->seed()` — call `Artisan::call('db:seed', ['--force' => true])`
     or `DB::table(...)->insert(...)` directly.
-- Laravel keeps a lot of state in process-global statics, so a Laravel suite must
-  run tests **sequentially**. Do not enable fiber-based concurrency for it.
+- Laravel keeps state in process-global statics, so tests must run sequentially.
+  Native Fiber `Schedule::Solo` is supported; effective class `RoundRobin` and
+  `Random` schedules are rejected before class hooks, providers or application
+  boot. A method-level `RunInFiber` runs Solo even when its argument names another
+  schedule; it does not override an interleaving class schedule.
 - `PluginConfigurator::configure()` currently receives Testo's internal container
   (`Internal\Container\Container`). The supported `testo/testo` range is pinned in
   `composer.json` and tested in CI against the released versions.
+
+## Native Testo compatibility
+
+The compatibility fixtures target Testo **0.10.55** without `phpunit/phpunit`.
+The core lock keeps Laravel **13.31.0**, Rector **2.6.2** and the Rector bridge
+**0.2.4**. PHP 8.3–8.5 remain the supported CI gates; PHP 8.6 is signal-only.
+The real plugin controls live in [tests/Fixture/testo-compatibility](tests/Fixture/testo-compatibility).
+Local Unit, Laravel and full Rector suites pass on PHP **8.3.35**, **8.4.26**
+and **8.5.11**. The full Rector matrix passed with the PHP versions run
+sequentially; earlier simultaneous runs encountered subprocess timeouts.
+Hosted CI for this change remains unverified.
+
+### Lifecycle, Retry, Repeat and Skip
+
+Each executed Retry attempt and Repeat iteration gets a fresh application,
+database preparation, Laravel setup and teardown. Database transactions still
+wrap the body/hooks and unwind their owned depth across selected connections.
+Partial bootstrap or setup failures release the acquired application and
+bridge-owned case references; a failed setup does not invoke user teardown.
+
+An existing unsuccessful result keeps its original failure, payload and assertion
+metrics if teardown, rollback, disconnect or output cleanup also fails. Secondary
+errors are emitted through Testo's scoped stderr and retained in native reports.
+A cleanup error after a passing body remains unsuccessful. Framework cleanup
+continues through other connections and global resets after a stage fails.
+
+Declarative `#[Skip]` is inert: skipped work does not construct a case or execute
+providers, Laravel boot or database work. A runtime `SkipTest` happens after an
+execution has started and still triggers its applicable cleanup. Entirely skipped
+or filtered-to-skipped Fiber cases do not receive an unsupported-schedule error.
+
+### Inline source tests
+
+Register `Testo\Inline\InlineTestPlugin` on a source suite with an explicit
+`location`; add `LaravelPlugin` when the source test needs Laravel. A basic
+expected-value attribute is valid across PHP 8.3–8.5:
+
+```php
+use Testo\Inline\TestInline;
+
+#[TestInline([1, 1], 2)]
+#[TestInline([40, 2], 42)]
+function sum(int $a, int $b): int { return $a + $b; }
+```
+
+Functions and private static methods can use the booted container/facades without
+extending `LaravelTestCase`. Instance source cases use Testo's native constructor:
+default arguments work; required constructor dependencies are not resolved through
+Laravel DI. Every executed attribute case receives its own Laravel application.
+
+Closure-valued result attributes require **PHP 8.5**. Keep them in a separate source
+directory and select the scan root **before loading/discovery**:
+
+```php
+$location = PHP_VERSION_ID >= 80500 ? ['src/Inline85'] : ['src/InlineBasic'];
+```
+
+Pass this value as `SuiteConfig`'s `location` with the Inline and Laravel plugins
+registered, as in the [tested suite configuration](tests/Fixture/testo-compatibility/inline/testo.php).
+
+The PHP 8.5 source can check a returned value through native assertions:
+
+```php
+use Testo\Assert;
+use Testo\Inline\TestInline;
+
+#[TestInline([42], static function (array $result) {
+    Assert::same([42], $result);
+    Assert::true($result[0] > 0);
+})]
+function wrapped(int $value): array { return [$value]; }
+```
+
+Do not put that source in unconditional Composer file autoload or an older-PHP
+scan root. The compatibility checks exercise both plain-source and Laravel suites,
+including intentional callback and constructor failures.
+
+### Benchmarks and coverage
+
+Native `#[Bench]` setup/teardown surround the whole benchmark attribute; warmup,
+calls, iterations and alternate callables share its application and may share
+database state. Check functional equivalence separately. The smoke uses `INF`
+tolerance and deterministic invocation counts; its failing verdict control uses
+controlled measurements. It does not gate performance on timings or ranks.
+Native JUnit excludes benchmarks by default; a benchmark-specific suite can opt
+in with `JUnitPlugin(testTypes: [])`. The package's default remains unchanged.
+
+Real Clover **Line** coverage was exercised with PHP **8.5.11** / Xdebug **3.5.3**:
+`Covers`, `CoversNothing`, inheritance, a same-level conflict, Fiber Solo and an
+invalid second report destination. A write failure returns an unsuccessful exit
+while preserving the first valid report. Branch/path coverage is not established
+by these Line checks. Normal no-driver suites explicitly skip driver checks;
+the required coverage gate fails when its driver or executed checks are missing.
+
+### Optional property-based testing
+
+The [separate consumer](tests/Consumer/property-testing/README.md) pins the community
+bridge 1.0.0 and Testo 0.10.55. It verifies fixed-seed generation, shrinking and
+seed/path replay on PHP 8.3.35, 8.4.26 and 8.5.11, plus driver-backed Line coverage.
+Generated/example/shrink trials share one application and Laravel hook pair per
+property. Use stateless properties or explicitly reset trial mutations; Laravel
+setup alone does not isolate each input. The consumer checks all-trials-skipped
+status and the next ordinary test's cleanup. It adds no root PBT dependency or
+mandatory PBT CI matrix.
+
+### Development diagnostics
+
+Set `LARATESTO_DEBUG=1` for application-owner and cleanup-stage traces on stderr;
+tracing is off by default. Cleanup and unsupported-schedule errors remain visible
+with tracing off. JSON stdout and JSON/JUnit reports retain their native formats.
 
 ## Development
 

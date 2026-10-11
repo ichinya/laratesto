@@ -163,8 +163,13 @@ final class MigrationPathGuardTest
     public function aSpecialFileReportTargetIsRejected(): void
     {
         if (PHP_OS_FAMILY === 'Windows') {
-            // The NUL device answers in every directory and is never a regular file.
-            $this->assertReportRejected('NUL', 'is not a regular file');
+            // Stat visibility differs between PHP builds; these stay devices.
+            foreach (['NUL', 'nul.json', 'NUL.tar.gz', 'NUL ', 'NUL:stream', 'CON', 'PRN.json', 'AUX', 'COM1.log', 'LPT9', 'COM'."\u{00b9}", 'LPT'."\u{00b2}".'.json'] as $device) {
+                $this->assertReportRejected($device, 'is not a regular file');
+            }
+            foreach (['NUL-safe.json', 'COM10.json', 'ordinary.json'] as $regular) {
+                Assert::true(str_ends_with($this->guard->resolveReportPath($this->root, $regular, [$this->real('tests')]), '/'.$regular));
+            }
 
             return;
         }
