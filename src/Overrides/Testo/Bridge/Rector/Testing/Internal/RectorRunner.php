@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Testo\Bridge\Rector\Testing\Internal;
 
+use Laratesto\Rector\Configuration\AutoloadPaths;
 use Psr\Log\LoggerInterface;
 use Rector\Application\ApplicationFileProcessor;
 use Rector\Configuration\ConfigurationFactory;
@@ -78,6 +79,11 @@ final readonly class RectorRunner
             return [];
         }
 
+        if (\class_exists(AutoloadPaths::class)) {
+            return AutoloadPaths::forPackage($packageRoot);
+        }
+
+        // The optional migration package need not be installed with the runtime.
         $vendorDir = \is_file($packageRoot . '/vendor/autoload.php')
             ? $packageRoot . '/vendor'
             : \dirname($packageRoot) . '/vendor';

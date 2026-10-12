@@ -34,7 +34,7 @@ return new ApplicationConfig(
         ),
         new SuiteConfig(
             name: 'Rector',
-            location: ['packages/rector/tests', 'packages/rector/src'],
+            location: ['tests/Rector', 'vendor/ichinya/laratesto-rector/src'],
             plugins: [
                 new RectorTestingPlugin(),
             ],

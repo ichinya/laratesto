@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "9bd925ba197c1c348f575bbae4863fbe",
+    "content-hash": "66395bae43c09b8f15590af622fff679",
     "packages": [
         {
             "name": "brick/math",
@@ -7273,12 +7273,19 @@
         {
             "name": "ichinya/laratesto-rector",
             "version": "dev-main",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/ichinya/ichinya-laratesto-rector.git",
+                "reference": "cbc0a36d0bf444212c003b71a5caa0850f0b6bd4"
+            },
             "dist": {
-                "type": "path",
-                "url": "packages/rector",
-                "reference": "d190d1adb9386dbfe04fb9ba6d08665e3abbfd6a"
+                "type": "zip",
+                "url": "https://api.github.com/repos/ichinya/ichinya-laratesto-rector/zipball/cbc0a36d0bf444212c003b71a5caa0850f0b6bd4",
+                "reference": "cbc0a36d0bf444212c003b71a5caa0850f0b6bd4",
+                "shasum": ""
             },
             "require": {
+                "composer-runtime-api": "^2.1",
                 "php": ">=8.2",
                 "rector/rector": "2.6.2",
                 "testo/bridge-rector": "^0.2.4"
@@ -7286,9 +7293,13 @@
             "conflict": {
                 "ichinya/laratesto": "<=0.7.0"
             },
-            "suggest": {
-                "ichinya/laratesto": "Install the matching runtime checkout (or a release after 0.7.0) with PhpUnitCompatibility and multi-connection database attributes. See README.md for monorepo path installation."
+            "require-dev": {
+                "ichinya/laratesto": "dev-main"
             },
+            "suggest": {
+                "ichinya/laratesto": "Install the matching runtime checkout (or a release after 0.7.0) with PhpUnitCompatibility and multi-connection database attributes. See README.md for consumer installation."
+            },
+            "default-branch": true,
             "type": "library",
             "extra": {
                 "branch-alias": {
@@ -7305,6 +7316,16 @@
                     "Laratesto\\Rector\\": "src/"
                 }
             },
+            "autoload-dev": {
+                "psr-4": {
+                    "Laratesto\\Rector\\Tests\\": "tests/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "testo run --suite=Rector"
+                ]
+            },
             "license": [
                 "BSD-3-Clause"
             ],
@@ -7315,6 +7336,7 @@
                 }
             ],
             "description": "Rector rules to migrate Laravel PHPUnit test suites to Laratesto.",
+            "homepage": "https://github.com/ichinya/ichinya-laratesto-rector",
             "keywords": [
                 "laravel",
                 "migration",
@@ -7322,10 +7344,11 @@
                 "rector",
                 "testo"
             ],
-            "transport-options": {
-                "symlink": true,
-                "relative": true
-            }
+            "support": {
+                "issues": "https://github.com/ichinya/ichinya-laratesto-rector/issues",
+                "source": "https://github.com/ichinya/ichinya-laratesto-rector"
+            },
+            "time": "2026-10-12T12:45:09+00:00"
         },
         {
             "name": "mockery/mockery",

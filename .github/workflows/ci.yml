@@ -41,13 +41,15 @@ jobs:
         # so its validation runs without --strict to tolerate the pin warning.
         run: |
           composer validate --strict
-          composer --working-dir=packages/rector validate
 
       - name: Install locked dependencies
         # The committed lock already resolves Laravel 13 at the PHP 8.3
         # platform, so every leg installs it verbatim; only the actual runtime
         # differs between legs.
         run: composer install --no-interaction --no-progress
+
+      - name: Validate the installed Rector package
+        run: composer --working-dir=vendor/ichinya/laratesto-rector validate --no-check-publish
 
       - name: Verify the installed framework and platform
         shell: bash

@@ -29,11 +29,8 @@
     },
     "repositories": [
         {
-            "type": "path",
-            "url": "packages/rector",
-            "options": {
-                "symlink": true
-            }
+            "type": "vcs",
+            "url": "https://github.com/ichinya/ichinya-laratesto-rector"
         }
     ],
     "autoload": {
@@ -50,7 +47,7 @@
     "autoload-dev": {
         "psr-4": {
             "Laratesto\\Tests\\": "tests/",
-            "Laratesto\\Rector\\Tests\\": "packages/rector/tests/",
+            "Laratesto\\Rector\\Tests\\": "tests/Rector/",
             "App\\": "tests/Fixture/laravel/app/"
         }
     },

@@ -179,7 +179,7 @@ vendor/bin/testo run --suite=Unit
 
 ## Migrating with Rector
 
-For full Laravel test suites the bridge ships a Rector-based migrator in the monorepo subpackage `packages/rector`. Install it using the [consumer path repository instructions](packages/rector/README.md#install); installing the runtime alone does not register the Rector command. The
+For full Laravel test suites the bridge ships a Rector-based migrator in the [standalone repository](https://github.com/ichinya/ichinya-laratesto-rector). Install it using the [consumer installation instructions](https://github.com/ichinya/ichinya-laratesto-rector#install); installing the runtime alone does not register the Rector command. The
 command wraps the pinned Rector binary with the public
 `Laratesto\Rector\Set\LaratestoRectorSetList::LARAVEL_PHPUNIT_TO_LARATESTO`
 set, prints the residual table and writes a deterministic `laratesto-residuals.json`:
@@ -863,11 +863,12 @@ cross-test isolation.
 
 ### Rector bridge development
 
-The migration rules live in the standalone package `packages/rector`
-(`ichinya/laratesto-rector`). The root repository wires it in as a Composer
-path repository in symlink mode, so `composer install` junctions the package
-into `vendor/` and the suite always exercises the live repo source — no
-duplicate `Laratesto\Rector\` autoload mapping is needed (or allowed).
+The migration rules and command live in the independent
+[`ichinya/laratesto-rector`](https://github.com/ichinya/ichinya-laratesto-rector)
+repository. Composer installs the locked package into `vendor/`; runtime
+migration integration tests live in `tests/Rector`. Rules and their inline
+fixtures are maintained in the Rector repository. There is no local package
+source copy or duplicate `Laratesto\Rector\` PSR-4 mapping.
 
 `rector/rector` is pinned to an exact version (`2.6.2`) in both the consuming
 application and the package: the rules depend on internals of that Rector

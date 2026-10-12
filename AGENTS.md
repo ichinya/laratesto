@@ -35,15 +35,20 @@ vendor/bin/testo run --suite=Rector
 
 Rector's static reflection needs explicit autoload paths when PHPUnit is
 absent. The canonical list lives in
-`packages/rector/src/Configuration/AutoloadPaths.php` and is used by:
+`ichinya/laratesto-rector`'s `src/Configuration/AutoloadPaths.php` and is used by:
 
-- `packages/rector/config/sets/laravel-phpunit-to-laratesto.php`
-- `packages/rector/tests/Support/FrontierPipeline.php`
+- the package's `config/sets/laravel-phpunit-to-laratesto.php`
+- `tests/Rector/Support/FrontierPipeline.php`
 - `src/Overrides/Testo/Bridge/Rector/Testing/Internal/RectorRunner.php`
 
 The `FrontierPipeline` builder merges these package paths with its own corpus
 paths because `RectorConfig::configure()->withAutoloadPaths()` overwrites the
 set's autoload configuration.
+
+The migration package is maintained independently at
+https://github.com/ichinya/ichinya-laratesto-rector. Root development installs it
+through Composer; keep its integration tests in `tests/Rector`. Do not recreate
+a local `packages/rector` source copy.
 
 ### Testo Rector override
 
