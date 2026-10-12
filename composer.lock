@@ -7276,12 +7276,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/ichinya/ichinya-laratesto-rector.git",
-                "reference": "cbc0a36d0bf444212c003b71a5caa0850f0b6bd4"
+                "reference": "e498c18f029aa85d2f6f8f56db428cea7f31b139"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/ichinya/ichinya-laratesto-rector/zipball/cbc0a36d0bf444212c003b71a5caa0850f0b6bd4",
-                "reference": "cbc0a36d0bf444212c003b71a5caa0850f0b6bd4",
+                "url": "https://api.github.com/repos/ichinya/ichinya-laratesto-rector/zipball/e498c18f029aa85d2f6f8f56db428cea7f31b139",
+                "reference": "e498c18f029aa85d2f6f8f56db428cea7f31b139",
                 "shasum": ""
             },
             "require": {
@@ -7348,7 +7348,7 @@
                 "issues": "https://github.com/ichinya/ichinya-laratesto-rector/issues",
                 "source": "https://github.com/ichinya/ichinya-laratesto-rector"
             },
-            "time": "2026-10-12T12:45:09+00:00"
+            "time": "2026-10-12T13:10:13+00:00"
         },
         {
             "name": "mockery/mockery",

@@ -43,7 +43,8 @@ final class ResidualCodeContractTest
     #[Test]
     public function migratingTableDocumentsExactlyTheCatalog(): void
     {
-        $migrating = (string) \file_get_contents(dirname(__DIR__, 2) . '/MIGRATING.md');
+        $packageRoot = \Composer\InstalledVersions::getInstallPath('ichinya/laratesto-rector');
+        $migrating = (string) \file_get_contents($packageRoot . '/MIGRATING.md');
 
         $documented = [];
         foreach (\explode("\n", $migrating) as $line) {
