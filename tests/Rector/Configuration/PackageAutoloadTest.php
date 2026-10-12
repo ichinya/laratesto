@@ -129,9 +129,9 @@ final class PackageAutoloadTest
             }
         }
 
-        Assert::true($entry !== null, 'composer.lock must contain the ichinya/laratesto-rector path package.');
+        Assert::true($entry !== null, 'composer.lock must contain the standalone ichinya/laratesto-rector package.');
         Assert::same('https://github.com/ichinya/laratesto-rector.git', $entry['source']['url'] ?? null, 'The locked package must come from its standalone source repository.');
-        Assert::same('dev-main', $entry['version'] ?? null, 'The path package must be locked from its dev branch.');
+        Assert::same('0.1.0', $entry['version'] ?? null, 'The standalone package must be locked to its tested release.');
 
         $expected = [
             'keywords' => $packageComposer['keywords'] ?? [],

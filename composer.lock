@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "969ea70d3db2b0e41c80d01b894a8eea",
+    "content-hash": "73df85ff1e963482f1b8ed9ff0b2482b",
     "packages": [
         {
             "name": "brick/math",
@@ -7272,7 +7272,7 @@
         },
         {
             "name": "ichinya/laratesto-rector",
-            "version": "dev-main",
+            "version": "0.1.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/ichinya/laratesto-rector.git",
@@ -7299,7 +7299,6 @@
             "suggest": {
                 "ichinya/laratesto": "Install the matching runtime checkout (or a release after 0.7.0) with PhpUnitCompatibility and multi-connection database attributes. See README.md for consumer installation."
             },
-            "default-branch": true,
             "type": "library",
             "extra": {
                 "branch-alias": {
@@ -7690,9 +7689,7 @@
     ],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {
-        "ichinya/laratesto-rector": 20
-    },
+    "stability-flags": {},
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {
