@@ -179,7 +179,7 @@ vendor/bin/testo run --suite=Unit
 
 ## Migrating with Rector
 
-For full Laravel test suites the bridge ships a Rector-based migrator in the [standalone repository](https://github.com/ichinya/ichinya-laratesto-rector). Install it using the [consumer installation instructions](https://github.com/ichinya/ichinya-laratesto-rector#install); installing the runtime alone does not register the Rector command. The
+For full Laravel test suites the bridge ships a Rector-based migrator in the [standalone repository](https://github.com/ichinya/laratesto-rector). Install it using the [consumer installation instructions](https://github.com/ichinya/laratesto-rector#install); installing the runtime alone does not register the Rector command. The
 command wraps the pinned Rector binary with the public
 `Laratesto\Rector\Set\LaratestoRectorSetList::LARAVEL_PHPUNIT_TO_LARATESTO`
 set, prints the residual table and writes a deterministic `laratesto-residuals.json`:
@@ -864,7 +864,7 @@ cross-test isolation.
 ### Rector bridge development
 
 The migration rules and command live in the independent
-[`ichinya/laratesto-rector`](https://github.com/ichinya/ichinya-laratesto-rector)
+[`ichinya/laratesto-rector`](https://github.com/ichinya/laratesto-rector)
 repository. Composer installs the locked package into `vendor/`; runtime
 migration integration tests live in `tests/Rector`. Rules and their inline
 fixtures are maintained in the Rector repository. There is no local package

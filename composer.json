@@ -30,7 +30,7 @@
     "repositories": [
         {
             "type": "vcs",
-            "url": "https://github.com/ichinya/ichinya-laratesto-rector"
+            "url": "https://github.com/ichinya/laratesto-rector"
         }
     ],
     "autoload": {

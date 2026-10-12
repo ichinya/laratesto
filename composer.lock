@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "66395bae43c09b8f15590af622fff679",
+    "content-hash": "969ea70d3db2b0e41c80d01b894a8eea",
     "packages": [
         {
             "name": "brick/math",
@@ -7275,13 +7275,13 @@
             "version": "dev-main",
             "source": {
                 "type": "git",
-                "url": "https://github.com/ichinya/ichinya-laratesto-rector.git",
-                "reference": "e498c18f029aa85d2f6f8f56db428cea7f31b139"
+                "url": "https://github.com/ichinya/laratesto-rector.git",
+                "reference": "c6359d46477a318dc7f7ec90a2f08853eba8b2b6"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/ichinya/ichinya-laratesto-rector/zipball/e498c18f029aa85d2f6f8f56db428cea7f31b139",
-                "reference": "e498c18f029aa85d2f6f8f56db428cea7f31b139",
+                "url": "https://api.github.com/repos/ichinya/laratesto-rector/zipball/c6359d46477a318dc7f7ec90a2f08853eba8b2b6",
+                "reference": "c6359d46477a318dc7f7ec90a2f08853eba8b2b6",
                 "shasum": ""
             },
             "require": {
@@ -7336,7 +7336,7 @@
                 }
             ],
             "description": "Rector rules to migrate Laravel PHPUnit test suites to Laratesto.",
-            "homepage": "https://github.com/ichinya/ichinya-laratesto-rector",
+            "homepage": "https://github.com/ichinya/laratesto-rector",
             "keywords": [
                 "laravel",
                 "migration",
@@ -7345,10 +7345,10 @@
                 "testo"
             ],
             "support": {
-                "issues": "https://github.com/ichinya/ichinya-laratesto-rector/issues",
-                "source": "https://github.com/ichinya/ichinya-laratesto-rector"
+                "issues": "https://github.com/ichinya/laratesto-rector/issues",
+                "source": "https://github.com/ichinya/laratesto-rector"
             },
-            "time": "2026-10-12T13:10:13+00:00"
+            "time": "2026-10-12T13:31:56+00:00"
         },
         {
             "name": "mockery/mockery",

@@ -46,7 +46,7 @@ paths because `RectorConfig::configure()->withAutoloadPaths()` overwrites the
 set's autoload configuration.
 
 The migration package is maintained independently at
-https://github.com/ichinya/ichinya-laratesto-rector. Root development installs it
+https://github.com/ichinya/laratesto-rector. Root development installs it
 through Composer; keep its integration tests in `tests/Rector`. Do not recreate
 a local `packages/rector` source copy.
 
