@@ -50,7 +50,7 @@ final class AutoloadPathsTest
         $root = \dirname(__DIR__, 3);
         Assert::same(AutoloadPaths::forPackage($root), AutoloadPaths::forPackage());
         Assert::true(\in_array($root . '/src/Shim/PhpUnit', AutoloadPaths::forPackage(), true));
-        $runner = new \ReflectionClass(\Testo\Bridge\Rector\Testing\Internal\RectorRunner::class);
+        $runner = new \ReflectionClass(\Laratesto\Rector\Testing\RectorRunner::class);
         Assert::same(
             AutoloadPaths::forPackage(\realpath($root)),
             $runner->getMethod('discoverAutoloadPaths')->invoke(null),

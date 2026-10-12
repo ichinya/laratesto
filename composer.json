@@ -22,10 +22,10 @@
     },
     "require-dev": {
         "fakerphp/faker": "^1.24",
-        "ichinya/laratesto-rector": "^0.1.0",
-        "rector/rector": "2.6.2",
+        "ichinya/laratesto-rector": "dev-feat/rector-27-compatibility as 0.2.0",
+        "rector/rector": "2.7.0",
         "testo/bridge-mockery": "^0.1.0",
-        "testo/bridge-rector": "^0.2.4"
+        "testo/bridge-rector": "^0.3.3"
     },
     "repositories": [
         {

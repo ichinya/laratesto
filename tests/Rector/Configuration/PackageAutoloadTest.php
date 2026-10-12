@@ -92,8 +92,8 @@ final class PackageAutoloadTest
         $readme = (string) \file_get_contents($packageDir . '/README.md');
 
         Assert::same('>=8.2', $packageComposer['require']['php'] ?? null, 'The package must keep Testo\'s PHP minimum.');
-        Assert::same('2.6.2', $packageComposer['require']['rector/rector'] ?? null, 'The Rector pin is deliberate; bumping it needs the corpus gates.');
-        Assert::same('^0.2.4', $packageComposer['require']['testo/bridge-rector'] ?? null, 'The supported bridge version must stay documented.');
+        Assert::same('2.7.0', $packageComposer['require']['rector/rector'] ?? null, 'The Rector pin is deliberate; bumping it needs the corpus gates.');
+        Assert::same('^0.3.3', $packageComposer['require']['testo/bridge-rector'] ?? null, 'The supported bridge version must stay documented.');
 
         $suggest = $packageComposer['suggest']['ichinya/laratesto'] ?? '';
         Assert::true(\str_contains($suggest, 'matching runtime checkout'), 'The suggest must name the consumer installation path.');
@@ -131,7 +131,7 @@ final class PackageAutoloadTest
 
         Assert::true($entry !== null, 'composer.lock must contain the standalone ichinya/laratesto-rector package.');
         Assert::same('https://github.com/ichinya/laratesto-rector.git', $entry['source']['url'] ?? null, 'The locked package must come from its standalone source repository.');
-        Assert::same('0.1.0', $entry['version'] ?? null, 'The standalone package must be locked to its tested release.');
+        Assert::same(\Composer\InstalledVersions::getPrettyVersion('ichinya/laratesto-rector'), $entry['version'] ?? null, 'The installed version must match the committed lock.');
 
         $expected = [
             'keywords' => $packageComposer['keywords'] ?? [],

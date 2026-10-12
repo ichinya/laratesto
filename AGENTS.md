@@ -52,8 +52,10 @@ a local `packages/rector` source copy.
 
 ### Testo Rector override
 
-`src/Overrides/Testo/Bridge/Rector/Testing/Internal/RectorRunner.php` replaces
-the Testo Bridge Rector fixture runner. It is registered via
+`src/Overrides/Testo/Bridge/Rector/Testing/Internal/RectorRunner.php` delegates
+to `Laratesto\\Rector\\Testing\\RectorRunner` in the optional migration package.
+The harness uses Rector 2.7's `findByContract()`, supports sets and reports system
+errors. The delegate is registered via
 `composer.json` `autoload.classmap` so it takes precedence over the vendor
 class.
 

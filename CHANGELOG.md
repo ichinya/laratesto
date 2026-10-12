@@ -12,7 +12,9 @@ versions follow [Semantic Versioning](https://semver.org/).
   `ichinya/laratesto-rector` repository; install it through Composer. Retain
   runtime migration integration tests in `tests/Rector`.
 - Require Testo `^0.10.55` and update only its locked components. Keep Laravel
-  13.31.0, Rector 2.6.2 and testo/bridge-rector 0.2.4 in the root lock (issue #23).
+  13.31.0 in the root lock (issue #23).
+- Adapt the migration package to Rector 2.7.0 and testo/bridge-rector 0.3.3;
+  delegate the fixture runner to the independent package's updated harness.
 
 ### Fixed
 

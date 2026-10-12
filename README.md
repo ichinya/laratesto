@@ -721,8 +721,8 @@ public function testLogsWarningOnFailure(): void
 ## Native Testo compatibility
 
 The compatibility fixtures target Testo **0.10.55** without `phpunit/phpunit`.
-The core lock keeps Laravel **13.31.0**, Rector **2.6.2** and the Rector bridge
-**0.2.4**. PHP 8.3–8.5 remain the supported CI gates; PHP 8.6 is signal-only.
+The core lock keeps Laravel **13.31.0**, Rector **2.7.0** and the Rector bridge
+**0.3.3**. PHP 8.3–8.5 remain the supported CI gates; PHP 8.6 is signal-only.
 The real plugin controls live in [tests/Fixture/testo-compatibility](tests/Fixture/testo-compatibility).
 Local Unit, Laravel and full Rector suites pass on PHP **8.3.35**, **8.4.26**
 and **8.5.11**. The full Rector matrix passed with the PHP versions run
@@ -870,7 +870,7 @@ migration integration tests live in `tests/Rector`. Rules and their inline
 fixtures are maintained in the Rector repository. There is no local package
 source copy or duplicate `Laratesto\Rector\` PSR-4 mapping.
 
-`rector/rector` is pinned to an exact version (`2.6.2`) in both the consuming
+`rector/rector` is pinned to an exact version (`2.7.0`) in both the consuming
 application and the package: the rules depend on internals of that Rector
 generation (the fixture-test bridge and the machine-JSON output contract), and
 Rector minor releases routinely rename them. Bump the pin only together with a
