@@ -727,7 +727,22 @@ The real plugin controls live in [tests/Fixture/testo-compatibility](tests/Fixtu
 Local Unit, Laravel and full Rector suites pass on PHP **8.3.35**, **8.4.26**
 and **8.5.11**. The full Rector matrix passed with the PHP versions run
 sequentially; earlier simultaneous runs encountered subprocess timeouts.
-Hosted CI for this change remains unverified.
+Hosted [CI run 38128631229](https://github.com/ichinya/laratesto/actions/runs/38128631229)
+passed on commit `faac75ecda65fe87667ff3d79773d42013f10255` (2026-10-11),
+with Laravel **13.31.0** and PHP **8.3.33**, **8.4.25** and **8.5.10**.
+Each required matrix job reports **650 tests: 641 passed, 9 skipped**;
+PHP 8.3/8.4 report **5315 assertions**, PHP 8.5 reports **5319**. The skips
+are two coverage checks executed by the separate driver job, one intentional
+lifecycle skip, and six Windows-only lock/junction checks. The required PHP 8.5
+Xdebug Line coverage job passed **2 tests / 12 assertions / zero skips**.
+
+The PHP 8.6 signal job failed its platform check because locked `nette/schema`
+**1.3.6** requires PHP **8.1–8.5**; its test suites did not execute.
+
+The original full Rector baseline run failed due to local memory/paging limits,
+so a successful full baseline-versus-candidate runtime comparison is unavailable.
+Discovery identities and available report counts were compared; the successful
+candidate runs do not establish full baseline runtime parity.
 
 ### Lifecycle, Retry, Repeat and Skip
 
@@ -821,6 +836,12 @@ property. Use stateless properties or explicitly reset trial mutations; Laravel
 setup alone does not isolate each input. The consumer checks all-trials-skipped
 status and the next ordinary test's cleanup. It adds no root PBT dependency or
 mandatory PBT CI matrix.
+
+One early local PHP 8.5 driver-enabled consumer repeat failed with an unresolved
+cause and no retained failure message. After bounded failure diagnostics were
+added, two subsequent repeats passed the expected outcome checks. Those results
+do not establish the cause of the earlier failure or prove the consumer is free
+of intermittent failures.
 
 ### Development diagnostics
 
