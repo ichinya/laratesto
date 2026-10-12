@@ -1,5 +1,13 @@
 # Agent Notes
 
+## Documentation
+
+| Document | Path | Description |
+|----------|------|-------------|
+| README | `README.md` | Usage, migration, compatibility results and support boundaries |
+| Changelog | `CHANGELOG.md` | Package changes by release |
+| PBT consumer | `tests/Consumer/property-testing/README.md` | Optional consumer verification and shared trial state |
+
 ## PHPUnit removal (issue #12)
 
 The repository no longer requires `phpunit/phpunit` in the root `composer.json`.
