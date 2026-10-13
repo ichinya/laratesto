@@ -115,6 +115,9 @@ final class DatabaseTransactionScope
             } catch (\Throwable $failure) {
                 $firstFailure ??= $failure;
                 $this->guardsRefreshState and RefreshDatabaseState::$migrated = false;
+                if ($owned['floor'] === 0) {
+                    $this->recoverFailedRollback($owned['name'], $connection);
+                }
             } finally {
                 // Hand the connection back exactly what begin() replaced: an
                 // outer scope's manager or the application's own, so afterCommit
@@ -151,6 +154,47 @@ final class DatabaseTransactionScope
                 FailureResult::report($failure, 'transaction rollback');
             }
         }
+    }
+
+    /** Recover only a transaction we own completely; never roll back an outer scope. */
+    private function recoverFailedRollback(string $name, Connection $connection): void
+    {
+        try {
+            $pdo = $connection->getRawPdo() ?? RefreshDatabaseState::$inMemoryConnections[$name] ?? null;
+            if ($pdo instanceof \PDO && $pdo->inTransaction()) {
+                $pdo->rollBack();
+                if ($pdo->inTransaction()) {
+                    throw new \RuntimeException('The database transaction remains open after fallback rollback.');
+                }
+            }
+            // Reset Laravel's depth even if rollBack() threw after the physical
+            // rollback. The same healthy in-memory database can then be reused.
+            $connection->setPdo($pdo);
+        } catch (\Throwable $failure) {
+            $this->reportSecondary($failure);
+            unset(RefreshDatabaseState::$inMemoryConnections[$name]);
+            RefreshDatabaseState::$migrated = false;
+            // Detach an unusable PDO so cacheInMemoryConnections() cannot put
+            // its open transaction back into the next application's cache.
+            foreach ([$connection->setPdo(...), $connection->setReadPdo(...)] as $detach) {
+                try {
+                    $detach(null);
+                } catch (\Throwable $detachFailure) {
+                    $this->reportSecondary($detachFailure);
+                }
+            }
+        }
+    }
+
+    private function reportSecondary(\Throwable $failure): void
+    {
+        try {
+            if ($this->onSecondaryFailure !== null) {
+                ($this->onSecondaryFailure)($failure);
+                return;
+            }
+        } catch (\Throwable) {}
+        FailureResult::report($failure, 'transaction rollback recovery');
     }
 
     /**

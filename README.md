@@ -870,6 +870,20 @@ wrapper, `tests/Integration` boots the fixture application in `tests/Fixture/lar
 (SQLite in-memory) and exercises HTTP requests, the database attributes and
 cross-test isolation.
 
+Lifecycle fault meta-tests run native Testo children with deliberate bootstrap,
+setup, teardown, rollback and disconnect failures. They verify the original
+failure in JSON/JUnit, a fresh application and clean container/facade/auth state
+in the following test, and recovery or removal of a failed in-memory connection.
+A rollback fallback never rolls back a transaction owned by an outer scope.
+
+Commit boundary tests use a separate fixture in `tests/Fixture/commit-boundary`
+without `RefreshDatabase` or `DatabaseTransactions`. Each child uses a disposable
+SQLite file, publishes a checkpoint before or after a physical commit, and is
+forcibly killed (SIGKILL on POSIX; taskkill on Windows). Independent PDOs check
+visibility and durable rows, verify that PHP shutdown cleanup did not run, and
+acquire a new write lock after termination. These checks cover process crashes
+on SQLite; they do not establish power-loss durability or other database engines.
+
 ### Rector bridge development
 
 The migration rules and command live in the independent

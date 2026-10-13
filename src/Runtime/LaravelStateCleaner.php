@@ -91,18 +91,20 @@ final class LaravelStateCleaner
         [Sleep::class, 'fake', [false]],
     ];
 
-    public function clean(Application $application): void
+    public function clean(?Application $application = null): void
     {
         $failures = [];
         $this->attempt('database disconnect', function () use ($application, &$failures): void {
-            if (!$application->bound('db')) {
+            if ($application === null || !$application->bound('db')) {
                 return;
             }
             foreach ($application['db']->getConnections() as $name => $connection) {
                 $this->attempt('disconnect '.$name, $connection->disconnect(...), $failures);
             }
         }, $failures);
-        $this->attempt('application flush', $application->flush(...), $failures);
+        if ($application !== null) {
+            $this->attempt('application flush', $application->flush(...), $failures);
+        }
         $this->attempt('facade instances', Facade::clearResolvedInstances(...), $failures);
         $this->attempt('facade application', static fn() => Facade::setFacadeApplication(null), $failures);
         $this->attempt('container application', static fn() => \Illuminate\Container\Container::setInstance(null), $failures);

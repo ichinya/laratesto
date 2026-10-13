@@ -85,9 +85,7 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
             $application = $this->factory->boot($info->caseInfo->instance?->getInstance());
             FailureResult::trace('application acquired #'.spl_object_id($application), $this->messenger);
         } catch (\Throwable $bootFailure) {
-            if (($application = $this->factory->acquired()) !== null) {
-                $this->cleanupQuietly($application);
-            }
+            $this->cleanupQuietly($this->factory->acquired());
             return FailureResult::aborted($info, $bootFailure);
         }
 
@@ -155,7 +153,7 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
      * Best-effort cleanup used when the test or pipeline already failed:
      * the original failure is more useful than a cleanup error.
      */
-    private function cleanupQuietly(\Illuminate\Contracts\Foundation\Application $application): void
+    private function cleanupQuietly(?\Illuminate\Contracts\Foundation\Application $application): void
     {
         try {
             $this->cleaner->clean($application);
