@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "a14d80580e044c16cb753f71a68989a1",
+    "content-hash": "326f5df6c9b84870131da99f6a5d608f",
     "packages": [
         {
             "name": "brick/math",
@@ -7272,16 +7272,16 @@
         },
         {
             "name": "ichinya/laratesto-rector",
-            "version": "dev-feat/rector-27-compatibility",
+            "version": "0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/ichinya/laratesto-rector.git",
-                "reference": "d2290f6dcdf14e01d5de016fd6df6097ff732092"
+                "reference": "4e9b8c7814d29dd35ac02eb11c40bdbcbdd5aa89"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/ichinya/laratesto-rector/zipball/d2290f6dcdf14e01d5de016fd6df6097ff732092",
-                "reference": "d2290f6dcdf14e01d5de016fd6df6097ff732092",
+                "url": "https://api.github.com/repos/ichinya/laratesto-rector/zipball/4e9b8c7814d29dd35ac02eb11c40bdbcbdd5aa89",
+                "reference": "4e9b8c7814d29dd35ac02eb11c40bdbcbdd5aa89",
                 "shasum": ""
             },
             "require": {
@@ -7301,13 +7301,13 @@
             },
             "type": "library",
             "extra": {
-                "branch-alias": {
-                    "dev-main": "1.x-dev"
-                },
                 "laravel": {
                     "providers": [
                         "Laratesto\\Rector\\LaratestoRectorServiceProvider"
                     ]
+                },
+                "branch-alias": {
+                    "dev-main": "1.x-dev"
                 }
             },
             "autoload": {
@@ -7315,16 +7315,7 @@
                     "Laratesto\\Rector\\": "src/"
                 }
             },
-            "autoload-dev": {
-                "psr-4": {
-                    "Laratesto\\Rector\\Tests\\": "tests/"
-                }
-            },
-            "scripts": {
-                "test": [
-                    "testo run --suite=Rector"
-                ]
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "BSD-3-Clause"
             ],
@@ -7347,7 +7338,7 @@
                 "issues": "https://github.com/ichinya/laratesto-rector/issues",
                 "source": "https://github.com/ichinya/laratesto-rector"
             },
-            "time": "2026-10-12T14:34:03+00:00"
+            "time": "2026-10-13T06:07:42+00:00"
         },
         {
             "name": "mockery/mockery",
@@ -7684,18 +7675,9 @@
             "time": "2026-09-29T11:18:01+00:00"
         }
     ],
-    "aliases": [
-        {
-            "package": "ichinya/laratesto-rector",
-            "version": "dev-feat/rector-27-compatibility",
-            "alias": "0.2.0",
-            "alias_normalized": "0.2.0.0"
-        }
-    ],
+    "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {
-        "ichinya/laratesto-rector": 20
-    },
+    "stability-flags": {},
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {

@@ -6,6 +6,18 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve PHPUnit filesystem existence semantics for directories as well as
+  ordinary files in `assertFileExists` and `assertFileDoesNotExist`.
+
+### Changed
+
+- Install the released migrator with `^0.2.0` from Packagist instead of a
+  feature-branch alias and custom VCS repository.
+
+## [0.8.0] - 2026-10-13
+
 ### Changed
 
 - Move Rector rules and the migration command into the independent

@@ -146,12 +146,12 @@ final class PhpUnitCompatibility
 
     public static function assertFileExists(string $filename, string $message = ''): void
     {
-        Assert::true(\is_file($filename), $message);
+        Assert::true(\file_exists($filename), $message);
     }
 
     public static function assertFileDoesNotExist(string $filename, string $message = ''): void
     {
-        Assert::false(\is_file($filename), $message);
+        Assert::false(\file_exists($filename), $message);
     }
 
     public static function assertDirectoryExists(string $directory, string $message = ''): void
