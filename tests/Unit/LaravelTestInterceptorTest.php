@@ -23,6 +23,42 @@ use Testo\Test;
 final class LaravelTestInterceptorTest
 {
     #[Test]
+    public function bootstrapFileThrowingBeforeReturnStillCleansItsPartialApplication(): void
+    {
+        $factory = new LaravelApplicationFactory(self::fixtureConfig('testo-compatibility/lifecycle-faults/broken-app'));
+        $interceptor = new LaravelTestInterceptor($factory, new LaravelStateCleaner());
+        $result = $interceptor->runTest(self::info(), static fn() => throw new \LogicException('must not run'));
+        Assert::same(Status::Aborted, $result->status);
+        Assert::same('primary bootstrap file fault', $result->failure?->getMessage());
+        Assert::null($factory->acquired());
+        Assert::null(\Illuminate\Support\Facades\Facade::getFacadeApplication());
+        Assert::false(\Illuminate\Container\Container::getInstance()->bound('fault.partial'));
+        $queue = new class extends \Illuminate\Queue\SyncQueue {
+            public function payload(): array { return json_decode($this->createPayload('Example@handle', 'default'), true); }
+        };
+        Assert::false(isset($queue->payload()['fault_hook']));
+    }
+
+    #[Test]
+    public function failureBeforeApplicationCreationDoesNotFlushTheEarlierContainer(): void
+    {
+        $earlier = new \Illuminate\Foundation\Application();
+        $earlier->instance('caller.owned', true);
+        $instance = new class implements CaseInstance {
+            public function getInstance(): object { return $this; }
+            public function hasInstance(): bool { return true; }
+            public function createApplication(): never { throw new \RuntimeException('no new application'); }
+        };
+        $factory = new LaravelApplicationFactory(self::fixtureConfig('laravel'));
+        $interceptor = new LaravelTestInterceptor($factory, new LaravelStateCleaner());
+        $result = $interceptor->runTest(self::info($instance), static fn() => throw new \LogicException('must not run'));
+        Assert::same('no new application', $result->failure?->getMessage());
+        Assert::true($earlier->bound('caller.owned'));
+        Assert::null($factory->acquired());
+        Assert::null(\Illuminate\Support\Facades\Facade::getFacadeApplication());
+    }
+
+    #[Test]
     public function partialSetupAndInjectionReleaseReferencesWithoutDuplicateUserHooks(): void
     {
         $run = \Laratesto\Tests\Support\TestoCompatibilityRunner::run('partial');

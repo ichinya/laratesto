@@ -6,6 +6,8 @@ namespace Laratesto\Runtime;
 
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Container\Container;
+use Illuminate\Support\Facades\Facade;
 use Laratesto\Config\LaravelConfig;
 
 /**
@@ -48,17 +50,33 @@ final class LaravelApplicationFactory
         // Their public createApplication() owns that bootstrap, just as it does
         // under Laravel's PHPUnit runner. Never bootstrap its result a second time.
         $customFactory = $testCase !== null && \is_callable([$testCase, 'createApplication']);
-        $application = $customFactory
-            ? $testCase->createApplication()
-            : require $this->config->bootstrapFile();
+        $previousContainer = Container::getInstance();
+        $previousFacadeApplication = Facade::getFacadeApplication();
+        try {
+            $application = $customFactory
+                ? $testCase->createApplication()
+                : require $this->config->bootstrapFile();
 
-        if (!$application instanceof Application) {
-            throw new \RuntimeException(\sprintf(
-                'The file "%s" must return an instance of %s, got %s.',
-                $this->config->bootstrapFile(),
-                Application::class,
-                \get_debug_type($application),
-            ));
+            if (!$application instanceof Application) {
+                throw new \RuntimeException(\sprintf(
+                    'The file "%s" must return an instance of %s, got %s.',
+                    $this->config->bootstrapFile(),
+                    Application::class,
+                    \get_debug_type($application),
+                ));
+            }
+        } catch (\Throwable $failure) {
+            // Application construction registers the container before the caller
+            // returns. Retain only newly installed applications for cleanup;
+            // never flush a container belonging to the caller's earlier scope.
+            $container = Container::getInstance();
+            $facadeApplication = Facade::getFacadeApplication();
+            if ($container instanceof Application && $container !== $previousContainer) {
+                $this->application = $container;
+            } elseif ($facadeApplication instanceof Application && $facadeApplication !== $previousFacadeApplication) {
+                $this->application = $facadeApplication;
+            }
+            throw $failure;
         }
 
         $this->application = $application;
@@ -103,7 +121,7 @@ final class LaravelApplicationFactory
         $this->application = null;
     }
 
-    /** @internal Includes a validated application whose later bootstrap failed. */
+    /** @internal Includes a newly installed application whose creation or bootstrap failed. */
     public function acquired(): ?Application
     {
         return $this->application;

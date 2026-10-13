@@ -23,6 +23,48 @@ use Testo\Test;
 final class LaravelLifecycleInterceptorTest
 {
     #[Test]
+    public function failedInnerRollbackNeverRollsBackTheOuterTransaction(): void
+    {
+        $previousContainer = \Illuminate\Container\Container::getInstance();
+        $application = new \Illuminate\Foundation\Application();
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->exec('CREATE TABLE probe (id INTEGER)');
+        $failure = new \RuntimeException('rollback hook fault');
+        $connection = new class($pdo, $failure) extends \Illuminate\Database\SQLiteConnection {
+            public function __construct(\PDO $pdo, private \Throwable $failure) { parent::__construct($pdo); }
+            public function rollBack($toLevel = null): void { throw $this->failure; }
+        };
+        $connection->setEventDispatcher(new \Illuminate\Events\Dispatcher($application));
+        $application->instance('db', new class($connection) {
+            public function __construct(private $connection) {}
+            public function connection($name) { return $this->connection; }
+        });
+        try {
+            $outer = new DatabaseTransactionScope($application, ['sqlite']);
+            $outer->begin();
+            $pdo->exec('INSERT INTO probe VALUES (1)');
+            $inner = new DatabaseTransactionScope($application, ['sqlite']);
+            $inner->begin();
+            $caught = null;
+            try { $inner->close(); } catch (\Throwable $error) { $caught = $error; }
+            Assert::same($failure, $caught);
+            Assert::true($pdo->inTransaction());
+            Assert::same(2, $connection->transactionLevel());
+            Assert::same(1, (int) $pdo->query('SELECT COUNT(*) FROM probe')->fetchColumn());
+
+            $caught = null;
+            try { $outer->close(); } catch (\Throwable $error) { $caught = $error; }
+            Assert::same($failure, $caught);
+            Assert::false($pdo->inTransaction());
+            Assert::same(0, $connection->transactionLevel());
+            Assert::same(0, (int) $pdo->query('SELECT COUNT(*) FROM probe')->fetchColumn());
+        } finally {
+            if ($pdo->inTransaction()) { $pdo->rollBack(); }
+            \Illuminate\Container\Container::setInstance($previousContainer);
+        }
+    }
+
+    #[Test]
     public function allDatabaseStrategiesAreInsideNativeRetryAndRepeat(): void
     {
         $classes = [

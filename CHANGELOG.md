@@ -8,6 +8,11 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Clean partially constructed applications and Laravel static state when a
+  bootstrap callback or file throws before returning an application (issue #19).
+- Recover an owned transaction through PDO after a Laravel rollback failure;
+  discard unusable cached connections and retain the primary failure. Preserve
+  transactions owned by outer scopes (issue #19).
 - Preserve PHPUnit filesystem existence semantics for directories as well as
   ordinary files in `assertFileExists` and `assertFileDoesNotExist`.
 
@@ -15,6 +20,12 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 - Install the released migrator with `^0.2.0` from Packagist instead of a
   feature-branch alias and custom VCS repository.
+
+### Added
+
+- Native lifecycle fault meta-tests and separate disposable-SQLite crash tests
+  before and after physical commit, observed through independent connections
+  without graceful PHP cleanup (issue #19).
 
 ## [0.8.0] - 2026-10-13
 
