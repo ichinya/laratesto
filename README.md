@@ -34,7 +34,7 @@ The bridge is a standalone Composer package. It does not require any changes to 
 ## Installation
 
 ```bash
-composer require --dev ichinya/laratesto
+composer require --dev ichinya/laratesto:^0.8.0
 ```
 
 Register the plugin for a suite in `testo.php`:
@@ -178,6 +178,15 @@ vendor/bin/testo run --suite=Unit
 ```
 
 ## Migrating with Rector
+
+Install the released pair from Packagist without custom repositories:
+
+```bash
+composer require --dev ichinya/laratesto:^0.8.0 ichinya/laratesto-rector:^0.2.0
+```
+
+The migrator's [rule ownership table](https://github.com/ichinya/laratesto-rector/blob/main/docs/RULE-OWNERSHIP.md)
+documents upstream reuse and why compatibility guards remain.
 
 For full Laravel test suites the bridge ships a Rector-based migrator in the [standalone repository](https://github.com/ichinya/laratesto-rector). Install it using the [consumer installation instructions](https://github.com/ichinya/laratesto-rector#install); installing the runtime alone does not register the Rector command. The
 command wraps the pinned Rector binary with the public

@@ -164,6 +164,10 @@ final class PackageAutoloadTest
         \sort($actual['keywords']);
         \ksort($expected['require']);
         \ksort($actual['require']);
+        // Packagist may reorder the associative extra metadata compared with
+        // the source manifest; its key/value contract is independent of order.
+        \ksort($expected['extra']);
+        \ksort($actual['extra']);
 
         Assert::same($expected, $actual, 'composer.lock metadata must match the installed standalone package.');
     }
