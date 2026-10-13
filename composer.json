@@ -22,18 +22,15 @@
     },
     "require-dev": {
         "fakerphp/faker": "^1.24",
-        "ichinya/laratesto-rector": "@dev",
-        "rector/rector": "2.6.2",
+        "ichinya/laratesto-rector": "dev-feat/rector-27-compatibility as 0.2.0",
+        "rector/rector": "2.7.0",
         "testo/bridge-mockery": "^0.1.0",
-        "testo/bridge-rector": "^0.2.4"
+        "testo/bridge-rector": "^0.3.3"
     },
     "repositories": [
         {
-            "type": "path",
-            "url": "packages/rector",
-            "options": {
-                "symlink": true
-            }
+            "type": "vcs",
+            "url": "https://github.com/ichinya/laratesto-rector"
         }
     ],
     "autoload": {
@@ -50,7 +47,7 @@
     "autoload-dev": {
         "psr-4": {
             "Laratesto\\Tests\\": "tests/",
-            "Laratesto\\Rector\\Tests\\": "packages/rector/tests/",
+            "Laratesto\\Rector\\Tests\\": "tests/Rector/",
             "App\\": "tests/Fixture/laravel/app/"
         }
     },

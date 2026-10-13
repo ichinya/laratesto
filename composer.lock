@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "9bd925ba197c1c348f575bbae4863fbe",
+    "content-hash": "a14d80580e044c16cb753f71a68989a1",
     "packages": [
         {
             "name": "brick/math",
@@ -7272,22 +7272,32 @@
         },
         {
             "name": "ichinya/laratesto-rector",
-            "version": "dev-main",
+            "version": "dev-feat/rector-27-compatibility",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/ichinya/laratesto-rector.git",
+                "reference": "d2290f6dcdf14e01d5de016fd6df6097ff732092"
+            },
             "dist": {
-                "type": "path",
-                "url": "packages/rector",
-                "reference": "d190d1adb9386dbfe04fb9ba6d08665e3abbfd6a"
+                "type": "zip",
+                "url": "https://api.github.com/repos/ichinya/laratesto-rector/zipball/d2290f6dcdf14e01d5de016fd6df6097ff732092",
+                "reference": "d2290f6dcdf14e01d5de016fd6df6097ff732092",
+                "shasum": ""
             },
             "require": {
+                "composer-runtime-api": "^2.1",
                 "php": ">=8.2",
-                "rector/rector": "2.6.2",
-                "testo/bridge-rector": "^0.2.4"
+                "rector/rector": "2.7.0",
+                "testo/bridge-rector": "^0.3.3"
             },
             "conflict": {
                 "ichinya/laratesto": "<=0.7.0"
             },
+            "require-dev": {
+                "ichinya/laratesto": "dev-main"
+            },
             "suggest": {
-                "ichinya/laratesto": "Install the matching runtime checkout (or a release after 0.7.0) with PhpUnitCompatibility and multi-connection database attributes. See README.md for monorepo path installation."
+                "ichinya/laratesto": "Install the matching runtime checkout (or a release after 0.7.0) with PhpUnitCompatibility and multi-connection database attributes. See README.md for consumer installation."
             },
             "type": "library",
             "extra": {
@@ -7305,6 +7315,16 @@
                     "Laratesto\\Rector\\": "src/"
                 }
             },
+            "autoload-dev": {
+                "psr-4": {
+                    "Laratesto\\Rector\\Tests\\": "tests/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "testo run --suite=Rector"
+                ]
+            },
             "license": [
                 "BSD-3-Clause"
             ],
@@ -7315,6 +7335,7 @@
                 }
             ],
             "description": "Rector rules to migrate Laravel PHPUnit test suites to Laratesto.",
+            "homepage": "https://github.com/ichinya/laratesto-rector",
             "keywords": [
                 "laravel",
                 "migration",
@@ -7322,10 +7343,11 @@
                 "rector",
                 "testo"
             ],
-            "transport-options": {
-                "symlink": true,
-                "relative": true
-            }
+            "support": {
+                "issues": "https://github.com/ichinya/laratesto-rector/issues",
+                "source": "https://github.com/ichinya/laratesto-rector"
+            },
+            "time": "2026-10-12T14:34:03+00:00"
         },
         {
             "name": "mockery/mockery",
@@ -7411,11 +7433,11 @@
         },
         {
             "name": "phpstan/phpstan",
-            "version": "2.2.13",
+            "version": "2.3.1",
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/9ba9ac76ee9c5cf5b56d58eb5deec6315b7a0260",
-                "reference": "9ba9ac76ee9c5cf5b56d58eb5deec6315b7a0260",
+                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/6155239b488e95d26d1ebd95c6b4bb294d7f09db",
+                "reference": "6155239b488e95d26d1ebd95c6b4bb294d7f09db",
                 "shasum": ""
             },
             "require": {
@@ -7471,34 +7493,31 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-09-03T20:38:19+00:00"
+            "time": "2026-10-08T21:09:11+00:00"
         },
         {
             "name": "rector/rector",
-            "version": "2.6.2",
+            "version": "2.7.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/rectorphp/rector.git",
-                "reference": "03cd615cdd5648abb5f10ff3a684fdb976687190"
+                "reference": "4d6a39b7fff302cac0ce90cd959a53c2f6a32776"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/rectorphp/rector/zipball/03cd615cdd5648abb5f10ff3a684fdb976687190",
-                "reference": "03cd615cdd5648abb5f10ff3a684fdb976687190",
+                "url": "https://api.github.com/repos/rectorphp/rector/zipball/4d6a39b7fff302cac0ce90cd959a53c2f6a32776",
+                "reference": "4d6a39b7fff302cac0ce90cd959a53c2f6a32776",
                 "shasum": ""
             },
             "require": {
                 "php": "^7.4|^8.0",
-                "phpstan/phpstan": "^2.2.6"
+                "phpstan/phpstan": "^2.3.0"
             },
             "conflict": {
                 "rector/rector-doctrine": "*",
                 "rector/rector-downgrade-php": "*",
                 "rector/rector-phpunit": "*",
                 "rector/rector-symfony": "*"
-            },
-            "suggest": {
-                "ext-dom": "To manipulate phpunit.xml via the custom-rule command"
             },
             "bin": [
                 "bin/rector"
@@ -7523,7 +7542,7 @@
             ],
             "support": {
                 "issues": "https://github.com/rectorphp/rector/issues",
-                "source": "https://github.com/rectorphp/rector/tree/2.6.2"
+                "source": "https://github.com/rectorphp/rector/tree/2.7.0"
             },
             "funding": [
                 {
@@ -7531,7 +7550,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-08-12T06:23:05+00:00"
+            "time": "2026-10-06T08:46:45+00:00"
         },
         {
             "name": "testo/bridge-mockery",
@@ -7598,28 +7617,28 @@
         },
         {
             "name": "testo/bridge-rector",
-            "version": "0.2.4",
+            "version": "0.3.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/php-testo/bridge-rector.git",
-                "reference": "ba310f73e9f786103654bad10d4d3f922772cba5"
+                "reference": "394d1f1cd7854d50d2da0244a6b40185f369dbde"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/php-testo/bridge-rector/zipball/ba310f73e9f786103654bad10d4d3f922772cba5",
-                "reference": "ba310f73e9f786103654bad10d4d3f922772cba5",
+                "url": "https://api.github.com/repos/php-testo/bridge-rector/zipball/394d1f1cd7854d50d2da0244a6b40185f369dbde",
+                "reference": "394d1f1cd7854d50d2da0244a6b40185f369dbde",
                 "shasum": ""
             },
             "require": {
                 "internal/path": "^1.2",
                 "php": ">=8.2",
-                "rector/rector": "^2.0"
+                "rector/rector": "^2.6.4"
             },
             "require-dev": {
-                "testo/assert": "^0.1.13",
-                "testo/data": "^0.1.8",
-                "testo/filter": "^0.1.6",
-                "testo/testo": "0.10.42 - 1"
+                "testo/assert": "^0.1.17",
+                "testo/data": "^0.1.10",
+                "testo/filter": "^0.1.8",
+                "testo/testo": "0.10.54 - 1"
             },
             "suggest": {
                 "testo/testo": "To test your Rector rules inline with the bundled Testo\\Bridge\\Rector\\Testing harness."
@@ -7654,7 +7673,7 @@
                 "testo"
             ],
             "support": {
-                "source": "https://github.com/php-testo/bridge-rector/tree/0.2.4"
+                "source": "https://github.com/php-testo/bridge-rector/tree/0.3.3"
             },
             "funding": [
                 {
@@ -7662,10 +7681,17 @@
                     "type": "boosty"
                 }
             ],
-            "time": "2026-08-18T05:56:45+00:00"
+            "time": "2026-09-29T11:18:01+00:00"
         }
     ],
-    "aliases": [],
+    "aliases": [
+        {
+            "package": "ichinya/laratesto-rector",
+            "version": "dev-feat/rector-27-compatibility",
+            "alias": "0.2.0",
+            "alias_normalized": "0.2.0.0"
+        }
+    ],
     "minimum-stability": "stable",
     "stability-flags": {
         "ichinya/laratesto-rector": 20

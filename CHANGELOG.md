@@ -8,11 +8,18 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Move Rector rules and the migration command into the independent
+  `ichinya/laratesto-rector` repository; install it through Composer. Retain
+  runtime migration integration tests in `tests/Rector`.
 - Require Testo `^0.10.55` and update only its locked components. Keep Laravel
-  13.31.0, Rector 2.6.2 and testo/bridge-rector 0.2.4 in the root lock (issue #23).
+  13.31.0 in the root lock (issue #23).
+- Adapt the migration package to Rector 2.7.0 and testo/bridge-rector 0.3.3;
+  delegate the fixture runner to the independent package's updated harness.
 
 ### Fixed
 
+- Discover Rector reflection sources through Composer installation paths,
+  including standalone archives and custom dependency directories.
 - Bootstrap and database preparation now run inside native Retry/Repeat, with
   a fresh Laravel application for each actual execution.
 - Keep original unsuccessful results and assertion metrics when teardown or
