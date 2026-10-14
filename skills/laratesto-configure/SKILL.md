@@ -6,7 +6,7 @@ description: Configure the Laratesto Laravel bridge in testo.php. Use when regis
 # Configure the Laravel bridge
 
 Check the project's instructions and installed Composer versions first. This
-package supports PHP 8.3+, Laravel 13 and Testo `^0.10.55`. Resolve package paths
+package supports PHP 8.3+, Laravel 13 and Testo `^0.10.56`. Resolve package paths
 through `Composer\InstalledVersions::getInstallPath()` if the project uses a
 custom vendor directory. The installed `Laratesto\Config\LaravelConfig` and
 `Laratesto\Testing\` classes are authoritative.

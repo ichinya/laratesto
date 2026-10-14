@@ -6,6 +6,7 @@ declare(strict_types=1);
 require dirname(__DIR__, 3) . '/vendor/autoload.php';
 
 use Illuminate\Filesystem\Filesystem;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
 
@@ -24,7 +25,7 @@ function write(string $path, string $contents): void
     check(file_put_contents($path, $contents) !== false, 'Cannot write ' . $path);
 }
 
-function execute(array $command, string $directory, int $expected = 0, int $timeout = 180): string
+function execute(array $command, string $directory, int $expected = 0, int $timeout = 180, bool $stream = false): string
 {
     $process = new Process($command, $directory, [
         'PATH' => dirname(PHP_BINARY) . PATH_SEPARATOR . getenv('PATH'),
@@ -36,7 +37,14 @@ function execute(array $command, string $directory, int $expected = 0, int $time
         'COMPOSER' => false,
         'COMPOSER_NO_DEV' => false,
     ], timeout: $timeout);
-    $exit = $process->run();
+    try {
+        $exit = $process->run($stream ? static function (string $type, string $buffer): void {
+            fwrite($type === Process::ERR ? STDERR : STDOUT, $buffer);
+        } : null);
+    } catch (ProcessTimedOutException $failure) {
+        throw new RuntimeException('Timed out after ' . $timeout . ' seconds: ' . implode(' ', $command)
+            . "\n" . substr($process->getOutput() . $process->getErrorOutput(), -16000), previous: $failure);
+    }
     check($exit === $expected, 'Unexpected exit ' . $exit . ' from ' . implode(' ', $command)
         . "\n" . $process->getOutput() . $process->getErrorOutput());
     return $process->getOutput();
@@ -67,7 +75,9 @@ $root = dirname(__DIR__, 3);
 foreach (['zip', 'pdo_sqlite', 'SimpleXML'] as $extension) {
     check(extension_loaded($extension), 'Consumer verification requires PHP extension: ' . $extension);
 }
-$composerBinary = $argv[1] ?? (new ExecutableFinder())->find('composer');
+$updateLock = in_array('--update-lock', $argv, true);
+$arguments = array_values(array_filter(array_slice($argv, 1), static fn(string $argument): bool => $argument !== '--update-lock'));
+$composerBinary = $arguments[0] ?? (new ExecutableFinder())->find('composer');
 check(is_string($composerBinary) && $composerBinary !== '', 'Composer executable not found; pass its PHAR path as the first argument.');
 $composer = str_ends_with($composerBinary, '.phar') ? [PHP_BINARY, $composerBinary] : [$composerBinary];
 $owned = sys_get_temp_dir() . '/laratesto-skills-' . bin2hex(random_bytes(8));
@@ -93,22 +103,46 @@ try {
     check(is_file($archive), 'Missing Composer archive.');
     $package = json_decode(file_get_contents($root . '/composer.json'), true, flags: JSON_THROW_ON_ERROR);
     $package['version'] = '0.8.99'; // Local test version, never published.
-    $package['dist'] = ['type' => 'zip', 'url' => str_replace('\\', '/', $archive)];
+    mkdir($consumer . '/archive');
+    copy($archive, $consumer . '/archive/laratesto.zip');
+    $package['dist'] = ['type' => 'zip', 'url' => 'archive/laratesto.zip'];
     write($consumer . '/composer.json', json_encode([
         'name' => 'laratesto-tests/agent-skills-consumer',
+        'license' => 'BSD-3-Clause',
         'repositories' => [['type' => 'package', 'package' => $package]],
         'require-dev' => [
             'ichinya/laratesto' => '0.8.99', 'llm/skills' => '1.14.0',
-            'testo/testo' => '0.10.55', 'laravel/framework' => '13.31.0',
+            'testo/testo' => '0.10.56', 'laravel/framework' => '13.31.0',
         ],
-        'config' => ['allow-plugins' => ['llm/skills' => true]],
+        'config' => ['platform' => ['php' => '8.3.0'], 'allow-plugins' => ['llm/skills' => true]],
     ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
     write($consumer . '/skills.json', json_encode([
         'target' => '.agents/skills', 'aliases' => [], 'auto-sync' => false,
         'dependencies' => ['composer' => ['trusted' => ['ichinya/laratesto', 'testo/testo']]],
     ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
     $settings = file_get_contents($consumer . '/skills.json');
-    execute([...$composer, 'install', '--no-interaction', '--no-progress', '--prefer-dist'], $consumer, timeout: 600);
+    $lock = __DIR__ . '/composer.lock';
+    if ($updateLock) {
+        execute([...$composer, 'update', '--no-install', '--no-interaction', '--no-progress'], $consumer, timeout: 600, stream: true);
+        copy($consumer . '/composer.lock', $lock);
+    } else {
+        check(is_file($lock), 'Missing consumer lock; run this verifier with --update-lock first.');
+        copy($lock, $consumer . '/composer.lock');
+    }
+    // Only the locally built distribution changes between runs. Keep every
+    // resolved dependency fixed, but bind this temporary lock to the current
+    // archive so Composer cannot reuse a stale synthetic 0.8.99 ZIP from cache.
+    $locked = json_decode(file_get_contents($consumer . '/composer.lock'), true, flags: JSON_THROW_ON_ERROR);
+    foreach ($locked['packages-dev'] as &$lockedPackage) {
+        if ($lockedPackage['name'] === 'ichinya/laratesto') {
+            $lockedPackage['dist']['url'] = str_replace('\\', '/', $consumer . '/archive/laratesto.zip');
+            $lockedPackage['dist']['shasum'] = sha1_file($archive);
+        }
+    }
+    unset($lockedPackage);
+    write($consumer . '/composer.lock', json_encode($locked, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+    execute([...$composer, 'validate', '--strict', '--no-check-publish'], $consumer);
+    execute([...$composer, 'install', '--no-interaction', '--no-progress', '--prefer-dist'], $consumer, timeout: 600, stream: true);
     $donor = $consumer . '/vendor/ichinya/laratesto';
     check(is_dir($donor . '/src') && !is_dir($donor . '/tests') && !is_dir($donor . '/.ai-factory'), 'Unexpected archive contents.');
     check(hashes($root . '/skills') === hashes($donor . '/skills'), 'Archive lost or changed skill files.');

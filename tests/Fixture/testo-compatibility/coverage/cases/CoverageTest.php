@@ -13,12 +13,19 @@ use function Laratesto\Tests\Fixture\Compatibility\event;
 
 require_once dirname(__DIR__).'/src/Covered.php';
 require_once dirname(__DIR__).'/src/Excluded.php';
+require_once dirname(__DIR__).'/src/Ignored.php';
 
 #[Covers(Covered::class)]
+#[Covers(Ignored::class)]
 abstract class CoveredParent
 {
     #[Test]
-    public function inheritedCoverage(): void { event('body'); Assert::same(42, Covered::value()); }
+    public function inheritedCoverage(): void
+    {
+        event('body');
+        event('ignored', ['value' => Ignored::value()]);
+        Assert::same(42, Covered::value());
+    }
 }
 final class CoveredChild extends CoveredParent
 {

@@ -22,6 +22,14 @@ final class TestoCoverageCompatibilityTest
         $excluded = $run['coverage']->xpath('//file[contains(@name,"Excluded.php")]/line[@count > 0]');
         Assert::true(count($covered) > 0, 'A real source line must have driver-recorded hits.');
         Assert::same([], $excluded);
+        $uncovered = $run['coverage']->xpath('//file[contains(@name,"Excluded.php")]/line[@count = 0]');
+        Assert::true(count($uncovered) > 0, 'Executed code outside Covers targets must remain uncovered in the report.');
+        $unloaded = $run['coverage']->xpath('//file[contains(@name,"NeverLoaded.php")]/line[@count = 0]');
+        Assert::true(count($unloaded) > 0, 'Source files that no test loads must remain in the coverage denominator.');
+        $ignored = $run['coverage']->xpath('//file[contains(@name,"Ignored.php")]/line');
+        Assert::same([], $ignored, 'codeCoverageIgnore methods must not contribute executable lines.');
+        $ignoredEvents = array_values(array_filter($run['events'], static fn(array $event): bool => $event['event'] === 'ignored'));
+        Assert::same(-1, $ignoredEvents[0]['value'], 'The ignored method must actually execute.');
         $counts = array_count_values(array_column($run['events'], 'event'));
         Assert::same(3, $counts['body']);
         Assert::false(isset($counts['unexpected body']));

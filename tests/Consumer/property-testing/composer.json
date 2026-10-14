@@ -6,7 +6,7 @@
         "php": "8.3 - 8.5",
         "ichinya/laratesto": "@dev",
         "rasuvaeff/property-testing-testo": "1.0.0",
-        "testo/testo": "0.10.55"
+        "testo/testo": "0.10.56"
     },
     "repositories": [{"type": "path", "url": "../../..", "options": {"symlink": true}}],
     "autoload": {
