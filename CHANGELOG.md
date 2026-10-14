@@ -23,6 +23,9 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Ship three Laravel agent skills with Composer donor metadata, optional
+  `llm/skills` installation instructions, outcome-preservation checks and a
+  real archive/sync/runnable-example consumer gate (issue #20).
 - Native lifecycle fault meta-tests and separate disposable-SQLite crash tests
   before and after physical commit, observed through independent connections
   without graceful PHP cleanup (issue #19).

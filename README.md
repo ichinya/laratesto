@@ -80,6 +80,44 @@ Run with:
 vendor/bin/testo run --suite=Laravel
 ```
 
+## AI agent skills
+
+The Composer package includes three Laravel-specific skills:
+[`laratesto-configure`](skills/laratesto-configure/SKILL.md),
+[`laratesto-write-tests`](skills/laratesto-write-tests/SKILL.md) and
+[`laratesto-migrate-from-phpunit`](skills/laratesto-migrate-from-phpunit/SKILL.md).
+They complement [Testo's skills](https://github.com/php-testo/testo/tree/0.10.55/skills)
+for general assertions, discovery, doubles and migration. Use the installed
+package source when its API differs from a skill's text.
+
+Install the optional [llm/skills Composer plugin](https://github.com/roxblnfk/skills)
+in your application, allow it when Composer prompts, and choose your agent's
+target directory and trusted packages with its initializer:
+
+```bash
+composer require --dev llm/skills
+composer skills:init
+composer skills:show ichinya/laratesto testo/testo --no-discovery
+composer skills:update ichinya/laratesto testo/testo --no-discovery
+```
+
+The consumer owns `skills.json`, target, aliases, trust and auto-sync choices.
+Laratesto only declares `extra.skills.source = "skills"` and suggests the plugin;
+installing the runtime does not force agent settings or enable a Composer plugin.
+For manual installation, copy the complete selected skill directories from the
+installed package's `skills/` into a skills root your agent reads, such as
+`.agents/skills/` or `.claude/skills/`. Keep their bundled references/scripts.
+Testo's directories can be copied the same way. With a custom vendor directory,
+resolve package paths through `Composer\InstalledVersions::getInstallPath()`.
+
+For package development, `php tests/Support/verify-skills.php` checks metadata
+and local references. `php tests/Consumer/agent-skills/verify.php` builds a
+Composer archive, installs it in an isolated consumer with `llm/skills`, checks
+discovery and byte-identical copying, then executes the documentation's PHP
+examples on a minimal Laravel application. It needs Composer, Git, SQLite,
+SimpleXML and the PHP zip extension; an optional first argument specifies a
+Composer PHAR path.
+
 ## Running all application tests
 
 Package discovery registers a separate `laratesto:test` command with a unified

@@ -27,6 +27,9 @@
         "testo/bridge-mockery": "^0.1.0",
         "testo/bridge-rector": "^0.3.3"
     },
+    "suggest": {
+        "llm/skills": "Sync the bundled Laratesto and Testo agent skills into your project's chosen skills directory."
+    },
     "autoload": {
         "psr-4": {
             "Laratesto\\": "src/"
@@ -46,6 +49,9 @@
         }
     },
     "extra": {
+        "skills": {
+            "source": "skills"
+        },
         "laravel": {
             "providers": [
                 "Laratesto\\LaratestoServiceProvider"
