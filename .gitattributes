@@ -1,0 +1,17 @@
+* text=auto
+
+# Keep the runtime, config and agent skills in Composer archives. Development
+# fixtures, dependencies and local agent state are not part of the package.
+/.github export-ignore
+/.ai-factory export-ignore
+/.idea export-ignore
+/.playwright-mcp export-ignore
+/.repowise export-ignore
+/vendor export-ignore
+/tests export-ignore
+/storage export-ignore
+/testo.php export-ignore
+/composer.lock export-ignore
+
+/skills -export-ignore
+/skills/** -export-ignore
