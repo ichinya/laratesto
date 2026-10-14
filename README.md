@@ -29,7 +29,7 @@ The bridge is a standalone Composer package. It does not require any changes to 
 ## Requirements
 
 - PHP 8.3+ with Laravel 13
-- Testo `^0.10.55` (the compatibility lock selects `0.10.55`)
+- Testo `^0.10.56` (the compatibility lock selects `0.10.56`)
 
 ## Installation
 
@@ -86,7 +86,7 @@ The Composer package includes three Laravel-specific skills:
 [`laratesto-configure`](skills/laratesto-configure/SKILL.md),
 [`laratesto-write-tests`](skills/laratesto-write-tests/SKILL.md) and
 [`laratesto-migrate-from-phpunit`](skills/laratesto-migrate-from-phpunit/SKILL.md).
-They complement [Testo's skills](https://github.com/php-testo/testo/tree/0.10.55/skills)
+They complement [Testo's skills](https://github.com/php-testo/testo/tree/0.10.56/skills)
 for general assertions, discovery, doubles and migration. Use the installed
 package source when its API differs from a skill's text.
 
@@ -117,6 +117,15 @@ discovery and byte-identical copying, then executes the documentation's PHP
 examples on a minimal Laravel application. It needs Composer, Git, SQLite,
 SimpleXML and the PHP zip extension; an optional first argument specifies a
 Composer PHAR path.
+
+The archive consumer installs the committed
+`tests/Consumer/agent-skills/composer.lock`, so ordinary verification does not
+resolve a fresh dependency graph. After intentionally changing its dependency
+pins or the package's Composer metadata, regenerate that lock with
+`php tests/Consumer/agent-skills/verify.php --update-lock` and commit it. Each run
+binds the temporary local package entry to the new archive URL and checksum;
+all external dependency versions and references remain fixed. Composer install
+progress and bounded timeout diagnostics are preserved in CI.
 
 ## Running all application tests
 
@@ -767,10 +776,16 @@ public function testLogsWarningOnFailure(): void
 
 ## Native Testo compatibility
 
-The compatibility fixtures target Testo **0.10.55** without `phpunit/phpunit`.
+The compatibility fixtures target Testo **0.10.56** without `phpunit/phpunit`.
 The core lock keeps Laravel **13.31.0**, Rector **2.7.0** and the Rector bridge
 **0.3.3**. PHP 8.3–8.5 remain the supported CI gates; PHP 8.6 is signal-only.
 The real plugin controls live in [tests/Fixture/testo-compatibility](tests/Fixture/testo-compatibility).
+Native discovery controls exercise directory exclusions, explicit file inclusion
+and keyword-named arguments/members. Driver-backed coverage checks retain
+unloaded source files and code outside `#[Covers]` as uncovered, while removing
+executed `@codeCoverageIgnore` methods from the coverage denominator.
+
+The following recorded matrix is historical Testo 0.10.55 evidence:
 Local Unit, Laravel and full Rector suites pass on PHP **8.3.35**, **8.4.26**
 and **8.5.11**. The full Rector matrix passed with the PHP versions run
 sequentially; earlier simultaneous runs encountered subprocess timeouts.
@@ -876,7 +891,7 @@ the required coverage gate fails when its driver or executed checks are missing.
 ### Optional property-based testing
 
 The [separate consumer](tests/Consumer/property-testing/README.md) pins the community
-bridge 1.0.0 and Testo 0.10.55. It verifies fixed-seed generation, shrinking and
+bridge 1.0.0 and Testo 0.10.56. It verifies fixed-seed generation, shrinking and
 seed/path replay on PHP 8.3.35, 8.4.26 and 8.5.11, plus driver-backed Line coverage.
 Generated/example/shrink trials share one application and Laravel hook pair per
 property. Use stateless properties or explicitly reset trial mutations; Laravel

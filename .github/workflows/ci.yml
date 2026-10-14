@@ -36,6 +36,18 @@ jobs:
           extensions: fileinfo, sqlite3, pdo_sqlite, zip
           coverage: none
 
+      - name: Locate Composer download cache
+        id: composer-cache
+        shell: bash
+        run: echo "directory=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.directory }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock', 'tests/Consumer/agent-skills/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-
+
       - name: Validate composer files
         # The rector package's exact Rector pin is deliberate (see the README),
         # so its validation runs without --strict to tolerate the pin warning.

@@ -11,7 +11,7 @@ Each directory is independently copyable; references and scripts stay inside it.
 
 Use the installed version's source when an API differs. Testo supplies the general
 testing skills; these skills add Laravel behavior and support boundaries. See the
-[Testo skills index](https://github.com/php-testo/testo/tree/0.10.55/skills).
+[Testo skills index](https://github.com/php-testo/testo/tree/0.10.56/skills).
 
 Install through the optional [llm/skills](https://github.com/roxblnfk/skills) Composer
 plugin, or copy selected directories into a skills root your agent reads. The

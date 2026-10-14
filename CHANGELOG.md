@@ -6,6 +6,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-14
+
 ### Fixed
 
 - Clean partially constructed applications and Laravel static state when a
@@ -13,6 +15,30 @@ versions follow [Semantic Versioning](https://semver.org/).
 - Recover an owned transaction through PDO after a Laravel rollback failure;
   discard unusable cached connections and retain the primary failure. Preserve
   transactions owned by outer scopes (issue #19).
+
+### Changed
+
+- Require Testo `^0.10.56`; update its locked core and Codecov 0.2.5 components,
+  the optional PBT consumer and the released Rector adapter to 0.2.1.
+- Install the agent-skills consumer from a committed PHP 8.3 dependency lock,
+  stream Composer progress and include bounded timeout diagnostics. Cache
+  Composer downloads in CI instead of resolving the consumer on every run.
+
+### Added
+
+- Native discovery/tokenizer controls and real coverage probes for unexecuted
+  sources, `#[Covers]` exclusions and `@codeCoverageIgnore` support in Testo 0.10.56.
+- Ship three Laravel agent skills with Composer donor metadata, optional
+  `llm/skills` installation instructions, outcome-preservation checks and a
+  real archive/sync/runnable-example consumer gate (issue #20).
+- Native lifecycle fault meta-tests and separate disposable-SQLite crash tests
+  before and after physical commit, observed through independent connections
+  without graceful PHP cleanup (issue #19).
+
+## [0.8.1] - 2026-10-13
+
+### Fixed
+
 - Preserve PHPUnit filesystem existence semantics for directories as well as
   ordinary files in `assertFileExists` and `assertFileDoesNotExist`.
 
@@ -20,15 +46,6 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 - Install the released migrator with `^0.2.0` from Packagist instead of a
   feature-branch alias and custom VCS repository.
-
-### Added
-
-- Ship three Laravel agent skills with Composer donor metadata, optional
-  `llm/skills` installation instructions, outcome-preservation checks and a
-  real archive/sync/runnable-example consumer gate (issue #20).
-- Native lifecycle fault meta-tests and separate disposable-SQLite crash tests
-  before and after physical commit, observed through independent connections
-  without graceful PHP cleanup (issue #19).
 
 ## [0.8.0] - 2026-10-13
 

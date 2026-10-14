@@ -1,7 +1,7 @@
 # Optional property testing consumer
 
 This installation is separate from the package's core acceptance suites. It pins
-Testo 0.10.55 and `rasuvaeff/property-testing-testo` 1.0.0. Its committed consumer
+Testo 0.10.56 and `rasuvaeff/property-testing-testo` 1.0.0. Its committed consumer
 lock selects property-testing-core 1.2.0 and Laravel 13.35.0; the root lock remains
 Laravel 13.31.0. `ichinya/laratesto` is a runtime path dependency pointing to the
 current working tree. The consumer explicitly autoloads its fixture application
