@@ -15,8 +15,6 @@ versions follow [Semantic Versioning](https://semver.org/).
 - Recover an owned transaction through PDO after a Laravel rollback failure;
   discard unusable cached connections and retain the primary failure. Preserve
   transactions owned by outer scopes (issue #19).
-- Preserve PHPUnit filesystem existence semantics for directories as well as
-  ordinary files in `assertFileExists` and `assertFileDoesNotExist`.
 
 ### Changed
 
@@ -25,8 +23,6 @@ versions follow [Semantic Versioning](https://semver.org/).
 - Install the agent-skills consumer from a committed PHP 8.3 dependency lock,
   stream Composer progress and include bounded timeout diagnostics. Cache
   Composer downloads in CI instead of resolving the consumer on every run.
-- Install the released migrator with `^0.2.0` from Packagist instead of a
-  feature-branch alias and custom VCS repository.
 
 ### Added
 
@@ -38,6 +34,18 @@ versions follow [Semantic Versioning](https://semver.org/).
 - Native lifecycle fault meta-tests and separate disposable-SQLite crash tests
   before and after physical commit, observed through independent connections
   without graceful PHP cleanup (issue #19).
+
+## [0.8.1] - 2026-10-13
+
+### Fixed
+
+- Preserve PHPUnit filesystem existence semantics for directories as well as
+  ordinary files in `assertFileExists` and `assertFileDoesNotExist`.
+
+### Changed
+
+- Install the released migrator with `^0.2.0` from Packagist instead of a
+  feature-branch alias and custom VCS repository.
 
 ## [0.8.0] - 2026-10-13
 
