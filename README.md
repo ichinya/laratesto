@@ -1,330 +1,115 @@
-# Testo Laravel Bridge
+# Laratesto
 
-Native [Testo](https://github.com/php-testo/testo) plugin that boots [Laravel](https://laravel.com) around every test. The core runtime works without PHPUnit. A bundled PHPUnit compatibility shim lets migrated Laravel fake, mailable and package assertions such as Inertia, as well as `createStub()` and deferred Artisan assertions, run without `phpunit/phpunit` in the consumer project.
+[Laravel](https://laravel.com) integration for [Testo](https://github.com/php-testo/testo).
+Boot a fresh application for every test and use Laravel's HTTP, database,
+authentication, session, fake and Artisan helpers without installing PHPUnit.
 
-The bridge is a standalone Composer package. It does not require any changes to Testo or to your application: it registers a `TestRunInterceptor` through the standard plugin API (the same mechanism `testo/bridge-mockery` uses).
-
-> The `testo` vendor namespace on Packagist belongs to the framework author, so this package is published as `ichinya/laratesto`. If the bridge is ever adopted upstream, it can move to `testo/bridge-laravel` following the ecosystem convention.
-
-## Features
-
-- Boots the framework the same way `artisan` does: `bootstrap/app.php` + Console kernel bootstrap.
-- A **fresh application per test** with guaranteed cleanup of Laravel static state afterwards.
-- `.env.testing` support via the standard `APP_ENV` mechanism.
-- Service container, facades, global `app()` helper, Artisan.
-- HTTP requests through the HTTP kernel (`get`, `post`, `postJson`, …) with a Testo-native `LaravelResponse` wrapper (`assertOk`, `assertStatus`, `assertJson`, `assertJsonPath`, `assertJsonStructure`, `assertRedirect`, … — no PHPUnit).
-- `actingAs`, `actingAsGuest`, `assertAuthenticated`, `assertGuest`, `assertAuthenticatedAs`.
-- `assertDatabaseHas`, `assertDatabaseMissing`, `assertDatabaseCount`.
-- `assertSessionHas`, `assertSessionMissing`, `assertSessionHasErrors`.
-- `assertExitCode` for Artisan commands.
-- `withoutMiddleware` (all or specific middleware classes).
-- Session cookies are automatically bridged across requests within the same test.
-- `#[RefreshDatabase]`, `#[DatabaseMigrations]` and `#[DatabaseTransactions]`
-  attributes with Laravel-compatible lifecycle ordering.
-- Safe `php artisan laratesto:migrate-phpunit` source converter with dry-run,
-  conflict protection and explicit diagnostics for manual-only constructs.
-- Unified `php artisan laratesto:test` entry point: Testo first, then Pest or PHPUnit when
-  a legacy-compatible runner is still installed.
+**Documentation:** [Русский](https://php-testo.github.io/ru/docs/bridge/laravel) · [English](https://php-testo.github.io/docs/bridge/laravel)
 
 ## Requirements
 
-- PHP 8.3+ with Laravel 13
-- Testo `^0.10.56` (the compatibility lock selects `0.10.56`)
+- PHP 8.3 or newer.
+- Laravel 13.
+- Testo `^0.10.56` (installed automatically with the bridge).
 
-## Installation
+## Quick start
+
+Install the package in your Laravel application:
 
 ```bash
-composer require --dev ichinya/laratesto:^0.8.0
+composer require --dev ichinya/laratesto
 ```
 
-Register the plugin for a suite in `testo.php`:
+Create `testo.php` in the application root:
 
 ```php
 <?php
 
 declare(strict_types=1);
 
-use Testo\Application\Config\ApplicationConfig;
-use Testo\Application\Config\SuiteConfig;
 use Laratesto\Config\LaravelConfig;
 use Laratesto\LaravelPlugin;
-use Testo\Convention\NamingConventionPlugin;
+use Testo\Application\Config\ApplicationConfig;
+use Testo\Application\Config\SuiteConfig;
 
 return new ApplicationConfig(
     suites: [
         new SuiteConfig(
-            name: 'Unit',
-            location: ['tests/Unit'],
-        ),
-        new SuiteConfig(
             name: 'Laravel',
-            location: ['tests/Feature'],
+            location: ['tests/Testo'],
             plugins: [
-                new NamingConventionPlugin(),
-                new LaravelPlugin(
-                    new LaravelConfig(
-                        basePath: __DIR__,
-                    ),
-                ),
+                new LaravelPlugin(new LaravelConfig(basePath: __DIR__)),
             ],
         ),
     ],
 );
 ```
 
-`NamingConventionPlugin` is optional; with it, `*Test.php` classes and `test*()` methods are discovered automatically and no `#[Test]` attributes are needed.
+Create `tests/Testo/ApplicationTest.php`:
 
-Class-level `#[Test]` is also supported with `LaravelTestCase` or
-`InteractsWithLaravel`. `LaravelPlugin` excludes bridge helper implementations
-from discovery while preserving user-defined and inherited tests. Use
-method-level attributes when only selected methods should run.
+```php
+<?php
 
-Run with:
+declare(strict_types=1);
+
+namespace Tests\Testo;
+
+use Laratesto\Testing\LaravelTestCase;
+use Testo\Assert;
+use Testo\Test;
+
+#[Test]
+final class ApplicationTest extends LaravelTestCase
+{
+    public function bootsTheApplication(): void
+    {
+        Assert::same($this->app()->environment(), 'testing');
+    }
+}
+```
+
+Run the suite:
 
 ```bash
 vendor/bin/testo run --suite=Laravel
 ```
 
-## AI agent skills
+The separate `tests/Testo` directory lets existing PHPUnit/Pest suites keep
+their own runner. You can also use the `InteractsWithLaravel` trait instead of
+the base class. See the [guide](https://php-testo.github.io/ru/docs/bridge/laravel)
+for HTTP tests, database isolation, configuration and lifecycle hooks.
 
-The Composer package includes three Laravel-specific skills:
-[`laratesto-configure`](skills/laratesto-configure/SKILL.md),
-[`laratesto-write-tests`](skills/laratesto-write-tests/SKILL.md) and
-[`laratesto-migrate-from-phpunit`](skills/laratesto-migrate-from-phpunit/SKILL.md).
-They complement [Testo's skills](https://github.com/php-testo/testo/tree/0.10.56/skills)
-for general assertions, discovery, doubles and migration. Use the installed
-package source when its API differs from a skill's text.
-
-Install the optional [llm/skills Composer plugin](https://github.com/roxblnfk/skills)
-in your application, allow it when Composer prompts, and choose your agent's
-target directory and trusted packages with its initializer:
-
-```bash
-composer require --dev llm/skills
-composer skills:init
-composer skills:show ichinya/laratesto testo/testo --no-discovery
-composer skills:update ichinya/laratesto testo/testo --no-discovery
-```
-
-The consumer owns `skills.json`, target, aliases, trust and auto-sync choices.
-Laratesto only declares `extra.skills.source = "skills"` and suggests the plugin;
-installing the runtime does not force agent settings or enable a Composer plugin.
-For manual installation, copy the complete selected skill directories from the
-installed package's `skills/` into a skills root your agent reads, such as
-`.agents/skills/` or `.claude/skills/`. Keep their bundled references/scripts.
-Testo's directories can be copied the same way. With a custom vendor directory,
-resolve package paths through `Composer\InstalledVersions::getInstallPath()`.
-
-For package development, `php tests/Support/verify-skills.php` checks metadata
-and local references. `php tests/Consumer/agent-skills/verify.php` builds a
-Composer archive, installs it in an isolated consumer with `llm/skills`, checks
-discovery and byte-identical copying, then executes the documentation's PHP
-examples on a minimal Laravel application. It needs Composer, Git, SQLite,
-SimpleXML and the PHP zip extension; an optional first argument specifies a
-Composer PHAR path.
-
-The archive consumer installs the committed
-`tests/Consumer/agent-skills/composer.lock`, so ordinary verification does not
-resolve a fresh dependency graph. After intentionally changing its dependency
-pins or the package's Composer metadata, regenerate that lock with
-`php tests/Consumer/agent-skills/verify.php --update-lock` and commit it. Each run
-binds the temporary local package entry to the new archive URL and checksum;
-all external dependency versions and references remain fixed. Composer install
-progress and bounded timeout diagnostics are preserved in CI.
-
-## Running all application tests
-
-Package discovery registers a separate `laratesto:test` command with a unified
-runner:
+To run Testo followed by an installed Pest/PHPUnit runner:
 
 ```bash
 php artisan laratesto:test
 ```
 
-The command always runs `php vendor/bin/testo run` first. It then runs Pest when
-`vendor/bin/pest` exists, otherwise PHPUnit when `vendor/bin/phpunit` exists. It
-never runs Pest and PHPUnit separately because Pest already uses PHPUnit as its
-test engine; doing both would execute the same legacy suite twice. If neither is
-installed, a successful Testo run is the complete result.
+## Migrating from PHPUnit
 
-Every started runner contributes to the final exit code. By default the next
-runner still executes after a failure so one CI job reports the full picture;
-`--fail-fast` stops before the next stage instead.
+The Rector migrator is a separate package with its own documentation and releases:
 
 ```bash
-# Testo only, useful after the migration is complete.
-php artisan laratesto:test --testo-only
+composer require --dev ichinya/laratesto-rector
 
-# Only the detected Pest/PHPUnit runner.
-php artisan laratesto:test --legacy-only
-
-# Common selectors are translated for each runner.
-php artisan laratesto:test --filter=User --testsuite=Feature --path=tests/Feature
-
-# Runner-specific arguments are passed literally without a shell.
-php artisan laratesto:test --testo-arg=--json --legacy-arg=--colors=always
-```
-
-Supported shared options are `--filter`, `--group`, `--suite` / `--testsuite`,
-`--path`, `--coverage` and `--no-coverage`. Positional paths are accepted as
-well. `--without-tty` remains available for Laravel CI command compatibility;
-the child processes are always streamed without an interactive TTY.
-
-Collision keeps ownership of `php artisan test` by default. Existing CI commands
-such as `php artisan test --coverage --min=70 --coverage-clover=coverage.xml`
-therefore continue to use Collision, including its coverage threshold. Actual
-coverage collection still requires a supported coverage driver.
-
-To explicitly replace that command with the unified runner, publish the config
-and set `replace_test_command` to `true` in `config/laratesto.php`:
-
-```bash
-php artisan vendor:publish --tag=laratesto-config
-```
-
-Rebuild any cached application configuration after changing this option.
-`laratesto:test` remains available in either mode. The unified runner has no
-Collision `--min` equivalent. Keep the coverage/threshold job on Collision and
-run Testo in a separate job, or implement an explicit threshold check over your
-Testo coverage report. `--legacy-arg=--coverage-clover=coverage.xml` forwards a
-report argument to PHPUnit/Pest; it does not implement Collision's threshold.
-
-## Migrating PHPUnit tests
-
-Laravel package discovery registers a conservative migration command:
-
-```bash
-# Preview the default tests/Unit -> tests/Testo/Unit migration.
-php artisan laratesto:migrate-phpunit --dry-run
-
-# Convert a directory while keeping the PHPUnit sources.
-php artisan laratesto:migrate-phpunit tests/Unit
-
-# Move sources only after every generated target has been verified on disk.
-php artisan laratesto:migrate-phpunit tests/Unit --remove-source
-```
-
-Pass `--target=tests/Testo/Custom` for a non-standard layout. Existing targets
-are never overwritten unless `--force` is present. `--dry-run` performs the
-same parsing and compatibility checks but does not write or remove anything.
-
-The command converts the common mechanical surface: PHPUnit assertion argument
-order, `TestCase` removal, Laravel's `Tests\TestCase` bridge, database traits,
-`setUp()` / `tearDown()` hooks, exception expectations, skips and Laravel
-response accessors. It refuses a file when it finds data providers, dependencies,
-coverage/group metadata, PHPUnit mocks, constraints, regex exception matching,
-class-level lifecycle hooks or another construct without a faithful Testo
-equivalent. Those files need an explicit human migration; the command will not
-write a partial target for them.
-
-The deprecated converter only replaces a project base whose source is verified as an empty subclass of Laravel TestCase. Custom bootstrap, hooks, traits, unknown helpers, unsupported response APIs and conflicting import aliases are refused; use the Rector hierarchy analysis or migrate them manually. Commented database trait uses retain their comments. Exception messages keep substring matching and their expected type; string assertions preserve PHP caller coercion.
-
-The converter intentionally does not rewrite `phpunit.xml`: reproduce its
-environment overrides and suite boundaries in `testo.php`. Generated `test*()`
-methods also require `NamingConventionPlugin` in the target suite.
-
-After conversion, run the exact Testo scope before removing PHPUnit:
-
-```bash
-vendor/bin/testo run --suite=Unit
-```
-
-## Migrating with Rector
-
-Install the released pair from Packagist without custom repositories:
-
-```bash
-composer require --dev ichinya/laratesto:^0.8.0 ichinya/laratesto-rector:^0.2.0
-```
-
-The migrator's [rule ownership table](https://github.com/ichinya/laratesto-rector/blob/main/docs/RULE-OWNERSHIP.md)
-documents upstream reuse and why compatibility guards remain.
-
-For full Laravel test suites the bridge ships a Rector-based migrator in the [standalone repository](https://github.com/ichinya/laratesto-rector). Install it using the [consumer installation instructions](https://github.com/ichinya/laratesto-rector#install); installing the runtime alone does not register the Rector command. The
-command wraps the pinned Rector binary with the public
-`Laratesto\Rector\Set\LaratestoRectorSetList::LARAVEL_PHPUNIT_TO_LARATESTO`
-set, prints the residual table and writes a deterministic `laratesto-residuals.json`:
-
-```bash
-# Dry-run (default): sources stay untouched, report is written.
+# Preview changes and write the residual report.
 php artisan laratesto:migrate-rector
 
-# Process specific paths and write to a custom report location.
-php artisan laratesto:migrate-rector --path=tests/Feature --report=storage/residuals.json
-
-# Rewrite committed, clean sources in place (guarded unless --allow-dirty).
+# Apply after committing the source tests.
 php artisan laratesto:migrate-rector --apply
-
-# Choose the conversion target and additional project base classes.
-# Forward slashes are accepted everywhere; quote the backslash form on POSIX shells.
-php artisan laratesto:migrate-rector --target-mode=trait --base-class=Tests/ApiTestCase
 ```
 
-`--base-class` values are canonicalized before use: surrounding whitespace is
-trimmed, forward slashes become backslashes, and a leading separator is accepted
-zero or exactly one time — `Tests/ApiTestCase`, `\Tests\ApiTestCase`,
-`/Tests/ApiTestCase` and `' Tests\ApiTestCase '` all become `Tests\ApiTestCase` —
-duplicates are removed. Anything that cannot be a PHP class name is rejected
-with exit `1`: an empty value, repeated or mixed leading separators (`//Tests`,
-`\\Tests`), an empty internal segment such as the double backslash of a wrongly
-escaped `Tests\\\\ApiTestCase`, a trailing separator, dots, colons or embedded
-whitespace. Pass forward slashes, or quote the backslash form: in POSIX shells
-an unquoted `Tests\ApiTestCase` silently loses the backslash.
+Review the diff, resolve residuals and run the migrated test scope before removing
+PHPUnit. See the [migration guide](https://github.com/ichinya/laratesto-rector/blob/main/MIGRATING.md)
+for supported conversions, target modes and report details.
 
-Exit contract: `0` — no manual residuals; `1` — execution, guard or report
-failure; `2` — manual residuals present (Rector's dry-run "changes found" exit
-is a successful execution here).
+<details>
+<summary>Rector set and residual codes</summary>
 
-Every external process is bounded: Git guard calls and the Rector run must
-finish within 10 minutes (`SymfonyProcessRunner::DEFAULT_TIMEOUT_SECONDS`),
-after which the process is killed and the run fails with exit `1` — never an
-unbounded hang. A process that cannot start (e.g. Git is not installed for the
-`--apply` guard, or the pinned Rector binary is missing — the binary is checked
-explicitly first) fails the command with exit `1` and its stderr diagnostics
-instead of a raw exception trace.
+For a custom Rector configuration, use
+`Laratesto\Rector\Set\LaratestoRectorSetList::LARAVEL_PHPUNIT_TO_LARATESTO`.
 
-`--apply` requires a Git work tree, refuses staged or unstaged changes in the
-processed paths, and also refuses untracked or ignored PHP files in those paths.
-Commit the source files first; unrelated untracked/ignored files outside the
-scope and untracked/ignored non-PHP files do not block the run. `--allow-dirty`
-bypasses these Git checks with a warning: make your own backup before using it.
-An apply can leave partial edits after a failure; no automatic rollback runs.
-After reviewing the diff, `git restore --source=HEAD -- tests` restores committed
-sources in that scope, but cannot recover uncommitted edits or files absent from
-HEAD. Substitute the paths you actually processed.
-
-### Target modes
-
-- `base_class` (default) — the project base `Tests\TestCase` is converted
-  exactly once: it extends `Laratesto\Testing\LaravelTestCase` and keeps all of
-  its custom helpers and setup. Classes extending the Laravel foundation
-  `TestCase` directly are converted the same way. **Descendants of the project
-  base keep their `extends` untouched** — the converted base carries the
-  Laravel binding, and the descendant only receives lifecycle, HTTP and
-  database conversions.
-- `trait` — the project base drops its parent and uses
-  `Laratesto\Testing\InteractsWithLaravel`; concrete classes extending the
-  foundation `TestCase` directly do the same. Descendants keep inheriting from
-  the project base.
-
-A project base excluded by Rector's file/path/glob or base-rule `withSkip`
-configuration is outside the conversion scope: descendants retain their source
-hierarchy and receive a residual. Excluding a required database conversion with
-`withSkip` also preserves the class carrying the strategy and its descendants.
-
-Shared traits are not rewritten. Trait-provided PHPUnit tests, helpers that
-depend on the source testing API, and Laravel `setUp<Trait>`/`tearDown<Trait>`
-hooks require manual migration, including nested uses and aliases. Ordinary
-traits with proven local helper implementations remain supported. When a
-processed descendant has an unsupported trait dependency, its shared source
-base is preserved too. Move and review the required behavior before converting
-the hierarchy.
-
-### Fail-closed residuals
-
-When the safety of a transformation cannot be proven, the migrator leaves the
-construct untouched and attaches a stable `laratesto-residual(code=…)` marker
-comment. The full catalog:
+Unsupported constructs remain in source with a residual marker:
 
 - `CLASS_UNSAFE_HIERARCHY`
 - `LIFECYCLE_UNSUPPORTED`
@@ -335,341 +120,38 @@ comment. The full catalog:
 - `LARAVEL_FAKE_UNSUPPORTED`
 - `LARAVEL_CONSTRUCT_OUTSIDE_HIERARCHY`
 
-The marker is keyed by `code`: one class carries at most one marker comment per
-code, and every rule that fails that code contributes its own `rule=…` segment
-into the single comment, sorted by rule class-string. Later rules never overwrite
-or lose earlier reasons, and the scanner reports one finding per contribution.
+</details>
 
-Re-running the migrator reconciles the markers: a rule refreshes only its own
-segment when its constructs changed, unchanged runs stay byte-identical (repeat
-applies are idempotent), and a fixed construct loses its marker only when you
-delete the marker comment together with the fix — a marker left in place keeps
-being reported.
+## AI agent skills
 
-These checks cover the analyzed Laravel and PHPUnit syntax. Review the complete
-diff and run the migrated test scope even when the report contains no residuals.
-A class with a residual may still extend its original PHPUnit base or retain a
-Laravel strategy trait; it is not necessarily a converted Laratesto class ready
-to run. Resolve the reported boundary before moving it to the Testo runner.
+The package includes skills for [configuration](skills/laratesto-configure/SKILL.md),
+[writing tests](skills/laratesto-write-tests/SKILL.md) and
+[migration](skills/laratesto-migrate-from-phpunit/SKILL.md).
+They complement Testo's general testing skills.
 
-`parent::assertX()` calls that the upstream assertion rules leave in place
-receive `HTTP_UNSUPPORTED_SIGNATURE`. Supported parent helpers and methods
-provably declared on a project parent remain available. A `parent::setUp()` or
-`parent::tearDown()` call converts only as a direct statement in its matching
-class lifecycle method; calls inside branches or from other methods require
-manual migration.
+To sync them with the optional [llm/skills plugin](https://github.com/roxblnfk/skills),
+choose your agent directory and trusted packages during initialization:
 
-Dynamic method names on `$this`, `self::`, `static::` and nullsafe calls remain
-outside the automatic helper/signature matrix, even when a name resembles a
-supported helper.
-
-Direct writes, reference bindings, `isset()`/`unset()`, destructuring and foreach
-targets involving `$this->app` preserve the source class with
-`HTTP_UNSUPPORTED_SIGNATURE`; they cannot become an `app()` method call.
-Passing the property to a parameter proven by-reference also blocks conversion,
-including named, variadic and constructor arguments. An unresolved callee
-signature also receives a residual because by-value passing cannot be proven,
-including dynamic callbacks and invokable objects. Ordinary reads, member
-accesses and calls with proven by-value parameters remain convertible.
-
-`new TestResponse($response)` converts only with one non-null argument whose
-native type is proven to extend Symfony's `Response`, passed positionally or as
-`response:`. This includes direct constructors, inferred variables and typed
-parameters. Static factories such as `TestResponse::fromBaseResponse()`, nullable
-or unknown values, and additional constructor arguments keep the Laravel type
-with `RESPONSE_UNSUPPORTED_API`. A blocked response use can also prevent the
-file-wide type swap for a sibling class; review that residual before changing
-its response declarations manually.
-
-Residual detection checks native receiver types: a method such as
-`$dto->assertDownload()` on a proven unrelated DTO is not marked merely for its
-name. Unknown receivers, a broad `object` type, or a union that can still contain
-a Laravel response remain conservative residuals.
-
-Laravel keeps a retained Pending Artisan command deferred until it is released;
-`assertExitCode()` records an expectation rather than forcing execution.
-The Rector set rewrites supported straight-line local variables to
-`pendingArtisan()`, which uses Laravel's own deferred command and records its
-assertions in Testo. Release through `unset()` or method return keeps its timing.
-Immediate chains and terminal literal expectations also remain supported.
-Interactive commands, retained commands in loops or catch/finally, and variables
-escaping through closures, references or static/global storage still receive
-`ARTISAN_INTERACTION_UNSUPPORTED` and need review.
-
-The Rector set also supports `createStub()` through the bundled PHPUnit shim
-(Mockery-backed when PHPUnit is not installed) and `expectOutputString()` through
-a per-test output buffer. Exact output is checked after the test body, before
-teardown, including setup output. Stubs and deferred console assertions no
-longer need `phpunit/phpunit` in consumer projects.
-
-### Database trait conversion
-
-`RefreshDatabase`, `DatabaseTransactions`, `DatabaseMigrations` and
-`DatabaseTruncation` convert to their Laratesto attributes when the option
-properties are non-static literals with the supported shape, are not read by
-class code, and no project override replaces machinery the selected strategy
-actually runs. For example, `beforeRefreshingDatabase()` blocks
-`RefreshDatabase`/`DatabaseMigrations`, while `beforeTruncatingDatabase()` blocks
-`DatabaseTruncation`; a hook belonging only to a different strategy does not
-block conversion. The same check covers live hooks supplied by project traits
-and shared migration concerns such as `migrateFreshUsing()`.
-Multi-property declarations keep their unrelated
-siblings (`protected bool $seed = true, $keepMe = false;` loses only `$seed`).
-Unsupported database configurations receive `DATABASE_UNSUPPORTED_CONFIGURATION`.
-
-Laravel `#[Seed]` and `#[Seeder(...)]` metadata lifts only when the installed
-framework is positively identified as Laravel 13. Any inherited `Seed` enables
-seeding before the property fallback, and the nearest `Seeder` attribute wins
-unless the class has its own. Supported literal seeder class names retain their
-meaning across files; ancestor metadata remains available to other descendants.
-The metadata checks reject duplicate declarations and unsupported arguments.
-Laravel 12 ignores these attributes; on Laravel 12 or an unknown framework
-version, relevant metadata stays in source with
-`DATABASE_UNSUPPORTED_CONFIGURATION` instead of changing seeding behavior.
-
-Live constructor-promoted database option properties on the class, a project ancestor
-or a used project trait require manual migration. Redeclaring a literal option
-in the child does not bypass this check: an inherited constructor can still
-assign its promoted value to that property. Review and restructure the
-constructor before replacing its configuration with attribute arguments.
-
-An option property declared on a resolved project ancestor (a configured base
-such as `Tests\TestCase`, or any resolvable class between it and the trait) stays
-live for the trait machinery through `property_exists()`, so a descendant's
-conversion fails closed with `DATABASE_UNSUPPORTED_CONFIGURATION` instead of
-dropping it; move the option into a literal attribute argument on the class that
-carries the trait. Outside the constructor-promotion case above, an option the
-class itself redeclares is the exception: PHP
-resolves the `property_exists()` gate and the value read to the most-derived
-declaration, so only the class's own (already lifted) literal is live and the
-ancestor's same-named declaration is inert at every chain depth. Trait machinery
-methods on the same ancestor are deliberately not flagged: a trait import in the
-child overrides same-named inherited methods, so such an override never executed.
-A project reader above the class bounds that relaxation: the redeclare is what
-every project method higher up observes, so lifting the class's own declaration
-would silently repoint their reads at the nearest remaining declaration. The
-preflight fails the lift closed for readers in resolved ancestors, in the traits
-those ancestors compose, and in the project traits the converting class itself
-composes (trait methods execute with the consumer's scope) — except the proven
-inert shape where the reader's own scope declares the option privately: a
-more-derived redeclare never shadows it there, so the private slot answers
-identically before and after the lift. Statically named instance reads
-(`$this->seed`, `$this->{'seed'}`, nullsafe fetches) count; a dynamic property
-name (`$this->{$option}`) cannot be proven either way; static property fetches
-never resolve an instance declaration.
-
-Reads through method-local aliases such as `$self = $this; $self->seed` count as
-well, including chained/reference assignments, captured closures and possible
-aliases in conditional or coalescing expressions. The same checks apply in
-project ancestors and composed traits. Alias tracking is conservative: a later
-assignment does not automatically erase a possible alias. Unrelated DTO reads
-and the proven private-slot exemption above remain outside this blocker.
-
-A descendant can inherit a database strategy without repeating its trait. Its
-effective options must still match the single attribute inherited from the
-converted base. Changed options, live hook overrides and dynamic configuration
-receive a database residual; the shared strategy owner in the processed scope
-is preserved as well. Proven unchanged defaults and irrelevant options remain
-supported. Include the complete test hierarchy in the migration inputs.
-
-When a class re-declares the same database trait a project ancestor already
-uses, that is a duplicate of one strategy, not a second one — Laravel collapsed
-it to a single behavior through `class_uses_recursive()`. The conversion
-therefore emits no second attribute for the duplicate: it removes the trait use
-(and any identical option declarations) and the class keeps inheriting the
-ancestor's single attribute, so the database interceptor runs exactly once. The
-merge is only taken when the effective option configuration below the topmost
-duplicate ancestor is provably identical to the configuration that ancestor
-carries — same names, same literal values, or nothing on both sides. Anything
-else fails closed with `DATABASE_UNSUPPORTED_CONFIGURATION`; remove the
-duplicated trait and its options, or align them with the ancestor. An ancestor
-that already carries the migrated attribute counts the same way, so migrating
-files one at a time cannot stack a second interceptor either.
-
-The same applies to option properties supplied by non-Laravel project traits:
-traits flatten their whole composition tree into every consuming class, so `use
-RefreshDatabase` plus `use ProjectOptions { protected bool $seed = true; }`
-seeds today, yet no class-level scan sees a trait property. The preflight
-resolves the directly used traits of the class and of every resolvable ancestor
-(same-file first, then reflection), inspects their composition trees, and fails
-the conversion closed with `DATABASE_UNSUPPORTED_CONFIGURATION` instead. A used
-trait that cannot be resolved cannot be proven option-free and blocks as well.
-Private members of a directly used trait are live (they flatten into the
-consumer's own scope); private members of an ancestor-used trait stay private to
-the ancestor and are not flagged; static members are never flagged in either
-scope — the traits read their options through `$this`, which never resolves to a
-static declaration. Trait uses inside nested class-likes belong to those
-class-likes and are not flagged.
-
-A framework database strategy hidden inside a project trait's composition tree
-also stays in source with a residual, including when the project trait lives in
-another file. Its setup cannot be replaced by simply removing a direct class
-trait use. The lazy `LazilyRefreshDatabase` strategy requires manual migration
-because the eager attributes change when refresh happens.
-
-### Dry-run report contract
-
-`laratesto-residuals.json` is deterministic: stable schema version, sorted
-residuals (file, line as an integer, code, rule), no timestamps. Dry-run and
-apply report residuals identically: every processed PHP file is scanned exactly
-once, and in a dry-run a machine-JSON diff overlays the reconstructed new-side
-content for its file — freshly added markers are reported, markers a change
-would remove are not, and markers already on disk (from an earlier apply) stay
-reported even when the second run is a no-op. Only whole canonical PHP marker
-comments are scanned; quoted examples in strings/heredocs or prose embedded in
-other comments do not become residuals. Unreadable source files and invalid diff
-hunks fail with exit `1` rather than producing an incomplete report.
-The report is replaced atomically only after successful processing and scanning
-(including runs with residuals and exit `2`). Configuration, Git, Rector, JSON,
-source-read or report-write failures preserve the previous report. An apply may
-already have changed source files even when no new report was written.
-
-## Writing tests
-
-### Base class
-
-```php
-use Laratesto\Testing\LaravelTestCase;
-
-final class UserControllerTest extends LaravelTestCase
-{
-    public function testIndexReturnsUsers(): void
-    {
-        $this->get('/users')
-            ->assertOk()
-            ->assertJson(['users' => []]);
-    }
-}
+```bash
+composer require --dev llm/skills
+composer skills:init
+composer skills:update ichinya/laratesto testo/testo --no-discovery
 ```
 
-### Trait (no inheritance)
-
-```php
-use Laratesto\Testing\InteractsWithLaravel;
-
-final class UserServiceTest
-{
-    use InteractsWithLaravel;
-
-    public function testCreatesUser(): void
-    {
-        $service = $this->make(UserService::class);
-
-        $service->create(...);
-
-        // ...
-    }
-}
-```
-
-### Setup and teardown hooks
-
-`LaravelTestCase` calls hooks after application injection and before final state
-cleanup. PHPUnit lifecycle methods migrate as follows:
-
-```php
-protected function setUpLaravel(): void
-{
-    // Laravel application is available here.
-}
-
-protected function tearDownLaravel(): void
-{
-    // Runs after the test while Laravel is still available.
-}
-```
-
-### Function style
-
-After the framework is booted, global helpers work in plain test functions too:
-
-```php
-use Testo\Assert;
-
-function testResolvesUserService(): void
-{
-    Assert::instanceOf(app(UserService::class), UserService::class);
-}
-```
-
-## Configuration
-
-`LaravelConfig` options:
-
-| Option         | Default     | Description                                                                    |
-| -------------- | ----------- | ------------------------------------------------------------------------------ |
-| `basePath`     | —           | Laravel project root; `bootstrap/app.php` is loaded from it.                   |
-| `environment`  | `testing`   | Forced into `APP_ENV` before boot, so `.env.testing` is loaded when present.   |
-| `config`       | `[]`        | Config overrides applied after boot (`config()->set($key, $value)`).           |
-
-## Database attributes
-
-```php
-use Laratesto\Attribute\DatabaseMigrations;
-use Laratesto\Attribute\DatabaseTransactions;
-use Laratesto\Attribute\RefreshDatabase;
-
-final class BillingTest
-{
-    use InteractsWithLaravel;
-
-    #[RefreshDatabase]          // migrate:fresh before the test (seed: true to run seeders)
-    public function testInvoicesAreCreated(): void { /* ... */ }
-
-    #[DatabaseMigrations]       // migrate:fresh before, migrate:rollback afterwards
-    public function testLegacyMigrationFlow(): void { /* ... */ }
-
-    #[DatabaseTransactions]     // wrap the test in a transaction, roll back afterwards
-    public function testPaymentIsProcessed(): void { /* ... */ }
-}
-```
-
-`DatabaseMigrations` and `DatabaseTransactions` can be combined; migrations run
-first, then the wrapping transaction. The interceptors resolve the application
-booted by the plugin, so they require the `LaravelPlugin` in the suite.
-
-A hand-written `#[DatabaseTruncation(connections: ['sqlite', 'audit'])]` migrates,
-truncates and, when seeding is requested, seeds each selected connection.
-Laravel's source trait keeps its initial `migrate:fresh` and subsequent `db:seed`
-on the default connection, so
-the migrator leaves named connection selections residual-marked for manual
-review. An explicit empty `connections: []` selection touches no connections
-and preserves the previous migration state. A later default refresh still
-performs this process's first migration, even if a migrations table already
-exists from a previous run.
-Nested transaction scopes restore the previous transaction manager on each
-connection as well as the application's binding, including when cleanup fails.
+You can also copy the complete skill directories from the installed package's
+`skills/` directory into your agent's skills directory.
 
 ## HTTP helpers
 
-Available via `LaravelTestCase` or the `InteractsWithLaravel` trait:
+Both `LaravelTestCase` and `InteractsWithLaravel` provide protected request,
+authentication, database, session and Artisan helpers. Responses expose
+Testo-backed assertions such as `assertOk()`, `assertJson()` and `assertRedirect()`.
 
-| Method                                              | Description                              |
-| --------------------------------------------------- | ---------------------------------------- |
-| `$this->app()`                                      | The application booted for current test. |
-| `$this->make($abstract)`                            | Resolve a service.                       |
-| `$this->get($uri, $headers)`                        | GET request.                             |
-| `$this->post($uri, $parameters, $headers)`          | POST with form parameters.               |
-| `$this->postJson($uri, $payload, $headers)`         | POST with a JSON body.                   |
-| `$this->sendRequest($method, $uri, ...)`            | Arbitrary method.                        |
-| `$this->artisan($command, $parameters)`             | Run an Artisan command, returns exit code. |
-| **Authentication**                                  |                                          |
-| `$this->actingAs($user, $guard)`                    | Set the authenticated user on the guard. |
-| `$this->actingAsGuest($guard)`                      | Clear the authenticated user.            |
-| `$this->assertAuthenticated($guard)`                | Assert the user is authenticated.        |
-| `$this->assertGuest($guard)`                        | Assert the user is not authenticated.    |
-| `$this->assertAuthenticatedAs($user, $guard)`       | Assert the current user is the given one.|
-| **Database**                                        |                                          |
-| `$this->assertDatabaseHas($table, $data, $conn)`    | Assert a row exists.                     |
-| `$this->assertDatabaseMissing($table, $data, $conn)`| Assert a row does not exist.             |
-| `$this->assertDatabaseCount($table, $count, $conn)` | Assert the row count.                    |
-| **Session**                                         |                                          |
-| `$this->assertSessionHas($key, $value)`             | Assert a session key exists (and value). |
-| `$this->assertSessionMissing($key)`                 | Assert a session key is absent.          |
-| `$this->assertSessionHasErrors(array $fields)`      | Assert validation errors.                |
-| `$this->session()`                                  | The session store.                       |
-| **Artisan**                                         |                                          |
-| `$this->assertExitCode($code, $command, $params)`   | Assert an Artisan command exit code.     |
+See the [usage guide](https://php-testo.github.io/ru/docs/bridge/laravel) and
+the [helper signatures](src/Testing/InteractsWithLaravel.php).
+
+<details>
+<summary>LaravelResponse API</summary>
 
 `LaravelResponse` methods:
 `status()`, `getStatusCode()`, `headers()`, `header()`, `body()`, `getContent()`, `json()`, `response()`, `getSession()`,
@@ -681,300 +163,27 @@ Available via `LaravelTestCase` or the `InteractsWithLaravel` trait:
 `assertSessionHas()`, `assertSessionMissing()`, `assertSessionHasErrors()`, `assertSessionHasNoErrors()`,
 `assertInertia()`, `assertJsonMissing()`, `assertJsonCount()`, `assertCookie()`, `assertServerError()`, `viewData()`, `inertiaPage()`.
 
-Package assertions such as `assertInertia()` run the installed package's own
-Laravel `TestResponse` macro through the bundled PHPUnit shim. Framework-backed
-JSON, cookie and session assertions, as well as the assertions above, record
-their counts and failures in Testo without requiring `phpunit/phpunit` in
-consumer projects. The Inertia callback keeps its original
-`Inertia\Testing\AssertableInertia` type and import alias.
-
-The Rector migration preserves a public, zero-required-argument project
-`createApplication()` and calls it once before database setup and user lifecycle
-hooks. That method owns bootstrapping, including pre-boot service registration.
-`WithFaker` migrates to `Laratesto\Testing\WithFaker`, initialized before the user
-setup hook. Container mocking, `withoutVite()`, `withoutExceptionHandling()`,
-`withExceptionHandling()`, `withMiddleware()` and `assertModelExists()` are also
-available to migrated tests. Unresolved bootstrap contracts still receive a residual.
-
-`assertHeader($name, $value)` matches both the header name and expected value
-case-insensitively, as Laravel does; differences beyond case still fail.
-`assertJson()` callbacks receive the native `AssertableJson` wrapper, including
-its `when()`/`unless()` conditionals and macro support.
-
-## Mockery
-
-For suites that need [Mockery](https://github.com/mockery/mockery), use the
-[`testo/bridge-mockery`](https://packagist.org/packages/testo/bridge-mockery)
-plugin: it calls `Mockery::close()` automatically after every test (verifying
-expectations and preventing state leaks), so no teardown boilerplate is needed.
-
-```bash
-composer require --dev mockery/mockery testo/bridge-mockery
-```
-
-```php
-use Testo\Bridge\Mockery\MockeryPlugin;
-
-new SuiteConfig(
-    name: 'Laravel',
-    location: ['tests/Feature'],
-    plugins: [
-        new NamingConventionPlugin(),
-        new MockeryPlugin(),
-        new LaravelPlugin(new LaravelConfig(basePath: __DIR__)),
-    ],
-);
-```
-
-This works with Laravel facade mocking too:
-
-```php
-use Illuminate\Support\Facades\Log;
-
-public function testLogsWarningOnFailure(): void
-{
-    Log::shouldReceive('warning')->once()->with('something went wrong');
-
-    // ... run the code under test ...
-}
-```
-
-## How it works
-
-1. `LaravelTestInterceptor` runs inside native Retry/Repeat for every execution:
-   it forces `APP_ENV`, requires `bootstrap/app.php`, bootstraps the Console kernel
-   and applies config overrides.
-2. The booted application is injected, database attributes prepare their state,
-   and only then `setUpLaravel()` runs, matching Laravel's PHPUnit lifecycle.
-3. After the test, `tearDownLaravel()` runs first; database transactions or
-   migrations are rolled back next; finally connections are closed, the
-   container is flushed, facades are cleared and framework static state resets.
-4. A new application instance is created for every execution, which is what makes the
-   cleanup sufficient: container-level state dies with the old application.
-5. Session cookies collected from each response are automatically bridged to the
-   next request inside the same test, so multi-step flows (login → redirect →
-   follow-up) work out of the box.
+</details>
 
 ## Limitations
 
-- **PHPUnit/Pest test discovery must be migrated before running under Testo.**
-  The Rector set converts test metadata, lifecycle and the supported assertions.
-  It can retain Laravel package assertions through the compatibility helpers;
-  those use the bundled PHPUnit compatibility shim as an assertion library.
-- **Facade fakes (`Queue::fake()`, `Event::fake()`, …) use the bundled PHPUnit
-  shim** for their `assert*` methods. The fake setup itself works without any
-  bridge — the facades resolve on the booted application — and the framework's
-  `PHPUnit\Framework\Assert` calls are routed to Testo. Consumer projects do not
-  need `phpunit/phpunit` installed for these assertions.
-- **The following Laravel TestCase conveniences are not (yet) ported** and have
-  simple workarounds:
-  - `$this->seed()` — call `Artisan::call('db:seed', ['--force' => true])`
-    or `DB::table(...)->insert(...)` directly.
-- Laravel keeps state in process-global statics, so tests must run sequentially.
-  Native Fiber `Schedule::Solo` is supported; effective class `RoundRobin` and
-  `Random` schedules are rejected before class hooks, providers or application
-  boot. A method-level `RunInFiber` runs Solo even when its argument names another
-  schedule; it does not override an interleaving class schedule.
-- `PluginConfigurator::configure()` currently receives Testo's internal container
-  (`Internal\Container\Container`). The supported `testo/testo` range is pinned in
-  `composer.json` and tested in CI against the released versions.
-
-## Native Testo compatibility
-
-The compatibility fixtures target Testo **0.10.56** without `phpunit/phpunit`.
-The core lock keeps Laravel **13.31.0**, Rector **2.7.0** and the Rector bridge
-**0.3.3**. PHP 8.3–8.5 remain the supported CI gates; PHP 8.6 is signal-only.
-The real plugin controls live in [tests/Fixture/testo-compatibility](tests/Fixture/testo-compatibility).
-Native discovery controls exercise directory exclusions, explicit file inclusion
-and keyword-named arguments/members. Driver-backed coverage checks retain
-unloaded source files and code outside `#[Covers]` as uncovered, while removing
-executed `@codeCoverageIgnore` methods from the coverage denominator.
-
-The following recorded matrix is historical Testo 0.10.55 evidence:
-Local Unit, Laravel and full Rector suites pass on PHP **8.3.35**, **8.4.26**
-and **8.5.11**. The full Rector matrix passed with the PHP versions run
-sequentially; earlier simultaneous runs encountered subprocess timeouts.
-Hosted [CI run 38128631229](https://github.com/ichinya/laratesto/actions/runs/38128631229)
-passed on commit `faac75ecda65fe87667ff3d79773d42013f10255` (2026-10-11),
-with Laravel **13.31.0** and PHP **8.3.33**, **8.4.25** and **8.5.10**.
-Each required matrix job reports **650 tests: 641 passed, 9 skipped**;
-PHP 8.3/8.4 report **5315 assertions**, PHP 8.5 reports **5319**. The skips
-are two coverage checks executed by the separate driver job, one intentional
-lifecycle skip, and six Windows-only lock/junction checks. The required PHP 8.5
-Xdebug Line coverage job passed **2 tests / 12 assertions / zero skips**.
-
-The PHP 8.6 signal job failed its platform check because locked `nette/schema`
-**1.3.6** requires PHP **8.1–8.5**; its test suites did not execute.
-
-The original full Rector baseline run failed due to local memory/paging limits,
-so a successful full baseline-versus-candidate runtime comparison is unavailable.
-Discovery identities and available report counts were compared; the successful
-candidate runs do not establish full baseline runtime parity.
-
-### Lifecycle, Retry, Repeat and Skip
-
-Each executed Retry attempt and Repeat iteration gets a fresh application,
-database preparation, Laravel setup and teardown. Database transactions still
-wrap the body/hooks and unwind their owned depth across selected connections.
-Partial bootstrap or setup failures release the acquired application and
-bridge-owned case references; a failed setup does not invoke user teardown.
-
-An existing unsuccessful result keeps its original failure, payload and assertion
-metrics if teardown, rollback, disconnect or output cleanup also fails. Secondary
-errors are emitted through Testo's scoped stderr and retained in native reports.
-A cleanup error after a passing body remains unsuccessful. Framework cleanup
-continues through other connections and global resets after a stage fails.
-
-Declarative `#[Skip]` is inert: skipped work does not construct a case or execute
-providers, Laravel boot or database work. A runtime `SkipTest` happens after an
-execution has started and still triggers its applicable cleanup. Entirely skipped
-or filtered-to-skipped Fiber cases do not receive an unsupported-schedule error.
-
-### Inline source tests
-
-Register `Testo\Inline\InlineTestPlugin` on a source suite with an explicit
-`location`; add `LaravelPlugin` when the source test needs Laravel. A basic
-expected-value attribute is valid across PHP 8.3–8.5:
-
-```php
-use Testo\Inline\TestInline;
-
-#[TestInline([1, 1], 2)]
-#[TestInline([40, 2], 42)]
-function sum(int $a, int $b): int { return $a + $b; }
-```
-
-Functions and private static methods can use the booted container/facades without
-extending `LaravelTestCase`. Instance source cases use Testo's native constructor:
-default arguments work; required constructor dependencies are not resolved through
-Laravel DI. Every executed attribute case receives its own Laravel application.
-
-Closure-valued result attributes require **PHP 8.5**. Keep them in a separate source
-directory and select the scan root **before loading/discovery**:
-
-```php
-$location = PHP_VERSION_ID >= 80500 ? ['src/Inline85'] : ['src/InlineBasic'];
-```
-
-Pass this value as `SuiteConfig`'s `location` with the Inline and Laravel plugins
-registered, as in the [tested suite configuration](tests/Fixture/testo-compatibility/inline/testo.php).
-
-The PHP 8.5 source can check a returned value through native assertions:
-
-```php
-use Testo\Assert;
-use Testo\Inline\TestInline;
-
-#[TestInline([42], static function (array $result) {
-    Assert::same([42], $result);
-    Assert::true($result[0] > 0);
-})]
-function wrapped(int $value): array { return [$value]; }
-```
-
-Do not put that source in unconditional Composer file autoload or an older-PHP
-scan root. The compatibility checks exercise both plain-source and Laravel suites,
-including intentional callback and constructor failures.
-
-### Benchmarks and coverage
-
-Native `#[Bench]` setup/teardown surround the whole benchmark attribute; warmup,
-calls, iterations and alternate callables share its application and may share
-database state. Check functional equivalence separately. The smoke uses `INF`
-tolerance and deterministic invocation counts; its failing verdict control uses
-controlled measurements. It does not gate performance on timings or ranks.
-Native JUnit excludes benchmarks by default; a benchmark-specific suite can opt
-in with `JUnitPlugin(testTypes: [])`. The package's default remains unchanged.
-
-Real Clover **Line** coverage was exercised with PHP **8.5.11** / Xdebug **3.5.3**:
-`Covers`, `CoversNothing`, inheritance, a same-level conflict, Fiber Solo and an
-invalid second report destination. A write failure returns an unsuccessful exit
-while preserving the first valid report. Branch/path coverage is not established
-by these Line checks. Normal no-driver suites explicitly skip driver checks;
-the required coverage gate fails when its driver or executed checks are missing.
-
-### Optional property-based testing
-
-The [separate consumer](tests/Consumer/property-testing/README.md) pins the community
-bridge 1.0.0 and Testo 0.10.56. It verifies fixed-seed generation, shrinking and
-seed/path replay on PHP 8.3.35, 8.4.26 and 8.5.11, plus driver-backed Line coverage.
-Generated/example/shrink trials share one application and Laravel hook pair per
-property. Use stateless properties or explicitly reset trial mutations; Laravel
-setup alone does not isolate each input. The consumer checks all-trials-skipped
-status and the next ordinary test's cleanup. It adds no root PBT dependency or
-mandatory PBT CI matrix.
-
-One early local PHP 8.5 driver-enabled consumer repeat failed with an unresolved
-cause and no retained failure message. After bounded failure diagnostics were
-added, two subsequent repeats passed the expected outcome checks. Those results
-do not establish the cause of the earlier failure or prove the consumer is free
-of intermittent failures.
-
-### Development diagnostics
-
-Set `LARATESTO_DEBUG=1` for application-owner and cleanup-stage traces on stderr;
-tracing is off by default. Cleanup and unsupported-schedule errors remain visible
-with tracing off. JSON stdout and JSON/JUnit reports retain their native formats.
+- Laravel tests run sequentially because the framework keeps global state.
+  Testo Fiber `Schedule::Solo` is supported; interleaving schedules are rejected.
+- The bundled PHPUnit shim supports Laravel assertions and fakes, but is not a
+  complete PHPUnit replacement. Use Testo's Mockery bridge for mocks.
 
 ## Development
 
 ```bash
-composer update
+composer install
 composer test
 ```
 
-The package's own test suite runs under Testo: `tests/Unit` covers the response
-wrapper, `tests/Integration` boots the fixture application in `tests/Fixture/laravel`
-(SQLite in-memory) and exercises HTTP requests, the database attributes and
-cross-test isolation.
-
-Lifecycle fault meta-tests run native Testo children with deliberate bootstrap,
-setup, teardown, rollback and disconnect failures. They verify the original
-failure in JSON/JUnit, a fresh application and clean container/facade/auth state
-in the following test, and recovery or removal of a failed in-memory connection.
-A rollback fallback never rolls back a transaction owned by an outer scope.
-
-Commit boundary tests use a separate fixture in `tests/Fixture/commit-boundary`
-without `RefreshDatabase` or `DatabaseTransactions`. Each child uses a disposable
-SQLite file, publishes a checkpoint before or after a physical commit, and is
-forcibly killed (SIGKILL on POSIX; taskkill on Windows). Independent PDOs check
-visibility and durable rows, verify that PHP shutdown cleanup did not run, and
-acquire a new write lock after termination. These checks cover process crashes
-on SQLite; they do not establish power-loss durability or other database engines.
-
-### Rector bridge development
-
-The migration rules and command live in the independent
-[`ichinya/laratesto-rector`](https://github.com/ichinya/laratesto-rector)
-repository. Composer installs the locked package into `vendor/`; runtime
-migration integration tests live in `tests/Rector`. Rules and their inline
-fixtures are maintained in the Rector repository. There is no local package
-source copy or duplicate `Laratesto\Rector\` PSR-4 mapping.
-
-`rector/rector` is pinned to an exact version (`2.7.0`) in both the consuming
-application and the package: the rules depend on internals of that Rector
-generation (the fixture-test bridge and the machine-JSON output contract), and
-Rector minor releases routinely rename them. Bump the pin only together with a
-green fixture suite and the parity end-to-end gate.
-
-CI (`.github/workflows/ci.yml`) runs on a self-hosted runner over the locked
-Laravel 13 dependencies with PHP 8.3 through 8.5, plus pre-GA PHP 8.6 legs as
-non-gating signal: the locked dependencies still cap at PHP 8.5, so those jobs
-report compatibility readiness instead of blocking the build. Every job checks
-the installed framework major and the actual platform requirements and runs the
-package's own self-test suite (`composer test`). Superseded runs for the same
-ref are cancelled, so a single runner never queues a stale matrix behind a
-fresher push.
-
-The jobs run `composer validate --strict`, a whitespace check over
-the changed lines of the triggering range (pull requests: merge base to head;
-pushes: the pushed commits, or the whole tree when the previous SHA is
-unavailable), the rector package's composer validation (non-strict — the
-deliberate Rector pin triggers a warning) and the full `composer test` suite,
-which includes the migration end-to-end gate. The root lock is resolved with
-Composer's PHP 8.3 platform so it stays installable on every PHP version in
-that matrix.
+Migration rules are maintained in
+[ichinya/laratesto-rector](https://github.com/ichinya/laratesto-rector).
+This repository keeps their runtime integration tests. See
+[CI](.github/workflows/ci.yml) for the supported PHP matrix and coverage checks.
 
 ## License
 
-BSD 3-Clause. See [LICENSE](LICENSE).
+BSD-3-Clause. See [LICENSE](LICENSE).
