@@ -74,6 +74,11 @@ return new ApplicationConfig(
 
 `NamingConventionPlugin` is optional; with it, `*Test.php` classes and `test*()` methods are discovered automatically and no `#[Test]` attributes are needed.
 
+Class-level `#[Test]` is also supported with `LaravelTestCase` or
+`InteractsWithLaravel`. `LaravelPlugin` excludes bridge helper implementations
+from discovery while preserving user-defined and inherited tests. Use
+method-level attributes when only selected methods should run.
+
 Run with:
 
 ```bash

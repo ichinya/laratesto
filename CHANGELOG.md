@@ -6,6 +6,12 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Exclude bridge helper implementations from class-level Testo discovery for
+  LaravelTestCase and InteractsWithLaravel, including trait aliases. Preserve
+  user overrides, inherited tests and unrelated methods with matching names.
+
 ## [0.8.2] - 2026-10-14
 
 ### Fixed

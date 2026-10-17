@@ -106,10 +106,12 @@ final class TraitSmokeTest
 
 ## Lifecycle and database choices
 
-Use method-level `#[Test]` for LaravelTestCase and InteractsWithLaravel classes.
-Class-level discovery also includes their public bridge plumbing, which must
-not be executed as tests. NamingConventionPlugin with `test*()` methods is an
-alternative if the suite already uses that convention.
+Class-level `#[Test]` works with LaravelTestCase and InteractsWithLaravel:
+LaravelPlugin excludes the bridge's helper implementations from discovery.
+Use method-level attributes when only some methods are tests. User-defined
+methods, including inherited tests and overrides, retain Testo's usual discovery.
+NamingConventionPlugin with `test*()` methods is an alternative if the suite
+already uses that convention.
 
 Initialize application-dependent state in protected `setUpLaravel()` after
 injection; release it in protected `tearDownLaravel()`. Do not manually bootstrap

@@ -6,6 +6,7 @@ namespace Laratesto;
 
 use Internal\Container\Container;
 use Laratesto\Config\LaravelConfig;
+use Laratesto\Pipeline\LaravelDiscoveryInterceptor;
 use Laratesto\Pipeline\LaravelLifecycleInterceptor;
 use Laratesto\Pipeline\LaravelTestInterceptor;
 use Laratesto\Runtime\LaravelApplicationFactory;
@@ -48,6 +49,7 @@ final readonly class LaravelPlugin implements PluginConfigurator
         $container->set($factory, LaravelApplicationFactory::class);
 
         $interceptors = $container->get(InterceptorCollector::class);
+        $interceptors->addInterceptor(new LaravelDiscoveryInterceptor());
         $interceptors->addInterceptor(new \Laratesto\Pipeline\LaravelFiberCompatibilityInterceptor(
             $container->get(\Psr\EventDispatcher\EventDispatcherInterface::class),
             $container->get(\Testo\Common\Messenger::class),

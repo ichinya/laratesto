@@ -54,9 +54,9 @@ return new ApplicationConfig(
 );
 ```
 
-The example uses explicit method-level `#[Test]` attributes. Do not put `#[Test]`
-on a Laravel base/trait class: its public bridge methods would be discovered too.
-If the project
+Use class-level `#[Test]` when all public `void`/`never` methods are tests, or
+method-level attributes to select individual tests. LaravelPlugin excludes its
+own helper implementations in both base-class and trait mode. If the project
 uses `*Test.php`/`test*()` discovery, retain or add
 `Testo\Convention\NamingConventionPlugin`. Do not assume naming alone discovers
 tests in a suite without that plugin.
