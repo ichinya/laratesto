@@ -6,6 +6,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-10-17
+
 ### Fixed
 
 - Exclude bridge helper implementations from class-level Testo discovery for
