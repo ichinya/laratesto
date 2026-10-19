@@ -14,6 +14,7 @@ use Illuminate\Foundation\Testing\Wormhole;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Testo\Assert;
+use Testo\Common\Attribute\AssertMethod;
 
 /**
  * Interaction helpers for tests that run inside a booted Laravel application.
@@ -577,6 +578,7 @@ trait InteractsWithLaravel
         return $this;
     }
 
+    #[AssertMethod]
     protected function assertModelExists(\Illuminate\Database\Eloquent\Model $model): static
     {
         Assert::true($model->newQueryWithoutScopes()->whereKey($model->getKey())->exists(), 'The model does not exist in the database.');
@@ -622,6 +624,7 @@ trait InteractsWithLaravel
     /**
      * Assert that the user is authenticated.
      */
+    #[AssertMethod]
     protected function assertAuthenticated(?string $guard = null): static
     {
         Assert::true($this->guard($guard)->check(), 'The user is not authenticated.');
@@ -632,6 +635,7 @@ trait InteractsWithLaravel
     /**
      * Assert that the user is not authenticated.
      */
+    #[AssertMethod]
     protected function assertGuest(?string $guard = null): static
     {
         Assert::false($this->guard($guard)->check(), 'The user is authenticated.');
@@ -646,6 +650,7 @@ trait InteractsWithLaravel
      * authenticated user's class (a subclass of it is accepted) and their
      * identifiers must be strictly equal.
      */
+    #[AssertMethod]
     protected function assertAuthenticatedAs(Authenticatable $user, ?string $guard = null): static
     {
         $expected = $this->guard($guard)->user();
@@ -664,6 +669,7 @@ trait InteractsWithLaravel
      *
      * @param array<string, mixed> $data
      */
+    #[AssertMethod]
     protected function assertDatabaseHas(string $table, array $data, ?string $connection = null): static
     {
         Assert::true($this->table($table, $connection)->where($data)->exists(), \sprintf(
@@ -680,6 +686,7 @@ trait InteractsWithLaravel
      *
      * @param array<string, mixed> $data
      */
+    #[AssertMethod]
     protected function assertDatabaseMissing(string $table, array $data, ?string $connection = null): static
     {
         Assert::false($this->table($table, $connection)->where($data)->exists(), \sprintf(
@@ -694,6 +701,7 @@ trait InteractsWithLaravel
     /**
      * Assert the count of rows in a table.
      */
+    #[AssertMethod]
     protected function assertDatabaseCount(string $table, int $count, ?string $connection = null): static
     {
         $actual = $this->table($table, $connection)->count();
@@ -712,6 +720,7 @@ trait InteractsWithLaravel
     /**
      * Assert that the session has a given value.
      */
+    #[AssertMethod]
     protected function assertSessionHas(string $key, mixed $value = null): static
     {
         $session = $this->session();
@@ -733,6 +742,7 @@ trait InteractsWithLaravel
     /**
      * Assert that the session is missing a given key.
      */
+    #[AssertMethod]
     protected function assertSessionMissing(string $key): static
     {
         Assert::false($this->session()->has($key), \sprintf('Session has unexpected key [%s].', $key));
@@ -746,6 +756,7 @@ trait InteractsWithLaravel
      * @param array<non-empty-string>|list<non-empty-string> $keys Field names.
      *        String keys are treated as field => format; integer keys as field => any.
      */
+    #[AssertMethod]
     protected function assertSessionHasErrors(array $keys = []): static
     {
         $errors = $this->session()->get('errors');
@@ -782,6 +793,7 @@ trait InteractsWithLaravel
      *
      * @param array<array-key, string|bool|int> $parameters
      */
+    #[AssertMethod]
     protected function assertExitCode(int $code, string $command, array $parameters = []): static
     {
         $this->artisan($command, $parameters)->assertExitCode($code);

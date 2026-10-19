@@ -6,6 +6,7 @@ namespace Laratesto\Testing;
 
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Testo\Assert;
+use Testo\Common\Attribute\AssertMethod;
 
 /**
  * Result of an Artisan command execution with Testo-native assertions,
@@ -44,6 +45,7 @@ final class PendingArtisanCommand
     /**
      * Assert the command exited with the given code.
      */
+    #[AssertMethod]
     public function assertExitCode(int $code): static
     {
         Assert::same($this->exitCode, $code, \sprintf(
@@ -60,6 +62,7 @@ final class PendingArtisanCommand
     /**
      * Assert the command exited successfully (code 0).
      */
+    #[AssertMethod]
     public function assertSuccessful(): static
     {
         return $this->assertExitCode(0);
@@ -68,6 +71,7 @@ final class PendingArtisanCommand
     /**
      * Assert the command did not exit successfully.
      */
+    #[AssertMethod]
     public function assertFailed(): static
     {
         Assert::notSame($this->exitCode, 0, \sprintf(
@@ -82,6 +86,7 @@ final class PendingArtisanCommand
     /**
      * Assert the command output contains the given text.
      */
+    #[AssertMethod]
     public function expectsOutputToContain(string $text): static
     {
         Assert::true(
@@ -100,6 +105,7 @@ final class PendingArtisanCommand
     /**
      * Assert the command output does not contain the given text.
      */
+    #[AssertMethod]
     public function doesntExpectOutputToContain(string $text): static
     {
         Assert::false(
@@ -118,6 +124,7 @@ final class PendingArtisanCommand
      * Assert the command output has a line matching the given text (trimmed),
      * mirroring Laravel's `expectsOutput`.
      */
+    #[AssertMethod]
     public function expectsOutput(string $text): static
     {
         $lines = \array_map('trim', \explode("\n", $this->output));

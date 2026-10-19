@@ -10,6 +10,7 @@ use Illuminate\Support\Arr;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\ResponseHeaderBag;
 use Testo\Assert;
+use Testo\Common\Attribute\AssertMethod;
 
 use function Illuminate\Support\enum_value;
 
@@ -120,30 +121,35 @@ final readonly class LaravelResponse
         return $this;
     }
 
+    #[AssertMethod]
     public function assertJsonMissing(array $data, bool $exact = false): static
     {
         $this->frameworkAssertion('assertJsonMissing', [$data, $exact]);
         return $this;
     }
 
+    #[AssertMethod]
     public function assertJsonCount(int $count, ?string $key = null): static
     {
         $this->frameworkAssertion('assertJsonCount', [$count, $key]);
         return $this;
     }
 
+    #[AssertMethod]
     public function assertSessionHasNoErrors(): static
     {
         $this->frameworkAssertion('assertSessionHasNoErrors', []);
         return $this;
     }
 
+    #[AssertMethod]
     public function assertCookie($cookieName, $value = null, $encrypted = true, $unserialize = false): static
     {
         $this->frameworkAssertion('assertCookie', [$cookieName, $value, $encrypted, $unserialize]);
         return $this;
     }
 
+    #[AssertMethod]
     public function assertServerError(): static
     {
         Assert::true($this->response->isServerError(), 'Expected an HTTP server error.');
@@ -165,11 +171,13 @@ final readonly class LaravelResponse
         return PhpUnitCompatibility::run(fn(): mixed => (new \Illuminate\Testing\TestResponse($this->response))->{$method}(...$arguments));
     }
 
+    #[AssertMethod]
     public function assertOk(): static
     {
         return $this->assertStatus(200);
     }
 
+    #[AssertMethod]
     public function assertStatus(int $status): static
     {
         Assert::same($this->status(), $status, \sprintf(
@@ -182,6 +190,7 @@ final readonly class LaravelResponse
         return $this;
     }
 
+    #[AssertMethod]
     public function assertHeader(string $name, ?string $value = null): static
     {
         $actual = $this->header($name);
@@ -210,6 +219,7 @@ final readonly class LaravelResponse
      *
      * Accepts a closure receiving {@see AssertableJson}, matching Laravel's
      * fluent `assertJson(fn (AssertableJson $json) => ...)` form.
+     * Kept without AssertMethod so failures retain their location inside the callback.
      *
      * @param array<array-key, mixed>|callable $expected
      */
@@ -246,6 +256,7 @@ final readonly class LaravelResponse
      *
      * @param array<array-key, mixed> $expected
      */
+    #[AssertMethod]
     public function assertExactJson(array $expected): static
     {
         Assert::same(
@@ -264,6 +275,7 @@ final readonly class LaravelResponse
      *
      * @param string|list<string> $text
      */
+    #[AssertMethod]
     public function assertSee(string|array $text, bool $escape = true): static
     {
         foreach (Arr::wrap($text) as $needle) {
@@ -285,6 +297,7 @@ final readonly class LaravelResponse
      *
      * @param non-empty-string|list<non-empty-string> $text
      */
+    #[AssertMethod]
     public function assertDontSee(string|array $text, bool $escape = true): static
     {
         foreach (Arr::wrap($text) as $needle) {
@@ -302,6 +315,7 @@ final readonly class LaravelResponse
     /**
      * Assert that the response is a redirect, optionally to a specific URI.
      */
+    #[AssertMethod]
     public function assertRedirect(?string $uri = null): static
     {
         Assert::true(
@@ -330,6 +344,7 @@ final readonly class LaravelResponse
     /**
      * Assert that the response does not have the given header.
      */
+    #[AssertMethod]
     public function assertHeaderMissing(string $name): static
     {
         Assert::false(
@@ -349,6 +364,7 @@ final readonly class LaravelResponse
      *
      * @param non-empty-string $path
      */
+    #[AssertMethod]
     public function assertJsonPath(string $path, mixed $expected): static
     {
         $actual = \data_get($this->json(), $path);
@@ -389,6 +405,7 @@ final readonly class LaravelResponse
      *
      * @param non-empty-string|array<array-key, mixed> $keys
      */
+    #[AssertMethod]
     public function assertSessionHasErrors(
         string|array $keys = [],
         ?string $format = null,
@@ -478,6 +495,7 @@ final readonly class LaravelResponse
      *
      * @param non-empty-string $path
      */
+    #[AssertMethod]
     public function assertJsonMissingPath(string $path): static
     {
         Assert::false(
@@ -503,6 +521,7 @@ final readonly class LaravelResponse
      *
      * @param array<array-key, mixed> $structure
      */
+    #[AssertMethod]
     public function assertJsonStructure(array $structure): static
     {
         $this->assertStructureAt($structure, $this->json(), '<root>');
@@ -512,66 +531,79 @@ final readonly class LaravelResponse
 
     // ---- Status shortcuts ----
 
+    #[AssertMethod]
     public function assertCreated(): static
     {
         return $this->assertStatus(201);
     }
 
+    #[AssertMethod]
     public function assertBadRequest(): static
     {
         return $this->assertStatus(400);
     }
 
+    #[AssertMethod]
     public function assertUnauthorized(): static
     {
         return $this->assertStatus(401);
     }
 
+    #[AssertMethod]
     public function assertForbidden(): static
     {
         return $this->assertStatus(403);
     }
 
+    #[AssertMethod]
     public function assertNotFound(): static
     {
         return $this->assertStatus(404);
     }
 
+    #[AssertMethod]
     public function assertUnprocessable(): static
     {
         return $this->assertStatus(422);
     }
 
+    #[AssertMethod]
     public function assertFound(): static
     {
         return $this->assertStatus(302);
     }
 
+    #[AssertMethod]
     public function assertMethodNotAllowed(): static
     {
         return $this->assertStatus(405);
     }
 
+    #[AssertMethod]
     public function assertConflict(): static
     {
         return $this->assertStatus(409);
     }
 
+    #[AssertMethod]
     public function assertGone(): static
     {
         return $this->assertStatus(410);
     }
 
+    #[AssertMethod]
     public function assertInternalServerError(): static
     {
         return $this->assertStatus(500);
     }
 
+    #[AssertMethod]
     public function assertTooManyRequests(): static
     {
         return $this->assertStatus(429);
     }
 
+    #[AssertMethod]
     public function assertServiceUnavailable(): static
     {
         return $this->assertStatus(503);
@@ -580,6 +612,7 @@ final readonly class LaravelResponse
     /**
      * Assert that the response body exactly matches the given content.
      */
+    #[AssertMethod]
     public function assertContent(string $content): static
     {
         Assert::same($this->body(), $content, 'The response body does not match the expected content.');
@@ -592,6 +625,7 @@ final readonly class LaravelResponse
      *
      * @param non-empty-string|array<array-key, mixed> $key
      */
+    #[AssertMethod]
     public function assertSessionHas(string|array $key, mixed $value = null): static
     {
         if (\is_array($key)) {
@@ -627,6 +661,7 @@ final readonly class LaravelResponse
      *
      * @param non-empty-string|list<non-empty-string> $key
      */
+    #[AssertMethod]
     public function assertSessionMissing(string|array $key, mixed $value = null): static
     {
         if (\is_array($key)) {
@@ -661,6 +696,7 @@ final readonly class LaravelResponse
      *
      * @param non-empty-string|array<array-key, mixed> $errors
      */
+    #[AssertMethod]
     public function assertJsonValidationErrors(string|array $errors, string $responseKey = 'errors'): static
     {
         $expected = Arr::wrap($errors);
@@ -703,6 +739,7 @@ final readonly class LaravelResponse
     /**
      * Assert that the original response view contains a bound value.
      */
+    #[AssertMethod]
     public function assertViewHas(string|array $key, mixed $value = null): static
     {
         if (\is_array($key)) {
