@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Laratesto\Testing;
 
 use Testo\Assert;
+use Testo\Common\Attribute\AssertMethod;
 
 /**
  * Argument and matching semantics needed by mechanically migrated PHPUnit calls.
@@ -58,6 +59,7 @@ final class PhpUnitCompatibility
         return $result;
     }
 
+    #[AssertMethod]
     public static function facade(string $facade, string $method, array $arguments): mixed
     {
         return self::run(static fn(): mixed => $facade::$method(...$arguments));
@@ -68,6 +70,7 @@ final class PhpUnitCompatibility
      * @param T $mailable
      * @return T
      */
+    #[AssertMethod]
     public static function mailable(\Illuminate\Mail\Mailable $mailable, string $method, array $arguments): \Illuminate\Mail\Mailable
     {
         return self::run(static fn(): object => $mailable->$method(...$arguments));
@@ -79,91 +82,109 @@ final class PhpUnitCompatibility
         return $message === '' ? '~\A\z~' : '~' . \preg_quote($message, '~') . '~';
     }
 
+    #[AssertMethod]
     public static function assertStringContainsString(string $needle, string $haystack, string $message = ''): void
     {
         Assert::string($haystack)->contains($needle, $message);
     }
 
+    #[AssertMethod]
     public static function assertStringNotContainsString(string $needle, string $haystack, string $message = ''): void
     {
         Assert::string($haystack)->notContains($needle, $message);
     }
 
+    #[AssertMethod]
     public static function assertDoesNotMatchRegularExpression(string $pattern, string $string, string $message = ''): void
     {
         Assert::same(\preg_match($pattern, $string), 0, $message);
     }
 
+    #[AssertMethod]
     public static function assertEmpty(mixed $actual, string $message = ''): void
     {
         Assert::true(self::isEmpty($actual), $message);
     }
 
+    #[AssertMethod]
     public static function assertNotEmpty(mixed $actual, string $message = ''): void
     {
         Assert::false(self::isEmpty($actual), $message);
     }
 
+    #[AssertMethod]
     public static function assertIsArray(mixed $actual, string $message = ''): void
     {
         Assert::true(\is_array($actual), $message);
     }
 
+    #[AssertMethod]
     public static function assertIsString(mixed $actual, string $message = ''): void
     {
         Assert::true(\is_string($actual), $message);
     }
 
+    #[AssertMethod]
     public static function assertIsInt(mixed $actual, string $message = ''): void
     {
         Assert::true(\is_int($actual), $message);
     }
 
+    #[AssertMethod]
     public static function assertIsBool(mixed $actual, string $message = ''): void
     {
         Assert::true(\is_bool($actual), $message);
     }
 
+    #[AssertMethod]
     public static function assertIsObject(mixed $actual, string $message = ''): void
     {
         Assert::true(\is_object($actual), $message);
     }
 
+    #[AssertMethod]
     public static function assertNotFalse(mixed $actual, string $message = ''): void
     {
         Assert::notSame($actual, false, $message);
     }
 
+    #[AssertMethod]
     public static function assertMatchesRegularExpression(string $pattern, string $string, string $message = ''): void
     {
         Assert::same(\preg_match($pattern, $string), 1, $message);
     }
 
+    #[AssertMethod]
     public static function assertStringStartsWith(string $prefix, string $string, string $message = ''): void
     {
         Assert::true(\str_starts_with($string, $prefix), $message);
     }
 
+    #[AssertMethod]
     public static function assertFileExists(string $filename, string $message = ''): void
     {
         Assert::true(\file_exists($filename), $message);
     }
 
+    #[AssertMethod]
     public static function assertFileDoesNotExist(string $filename, string $message = ''): void
     {
         Assert::false(\file_exists($filename), $message);
     }
 
+    #[AssertMethod]
     public static function assertDirectoryExists(string $directory, string $message = ''): void
     {
         Assert::true(\is_dir($directory), $message);
     }
 
+    #[AssertMethod]
     public static function assertDirectoryDoesNotExist(string $directory, string $message = ''): void
     {
         Assert::false(\is_dir($directory), $message);
     }
 
+    #[AssertMethod]
     public static function assertNotContains(mixed $needle, iterable $haystack, string $message = ''): void
     {
         Assert::iterable($haystack)->notContains($needle, $message);

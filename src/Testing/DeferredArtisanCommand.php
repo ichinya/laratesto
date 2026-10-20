@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Laratesto\Testing;
 
+use Testo\Common\Attribute\AssertMethod;
+
 /** Preserve Laravel's deferred execution and its own console assertions. */
 final class DeferredArtisanCommand
 {
@@ -45,11 +47,13 @@ final class DeferredArtisanCommand
         return $this;
     }
 
+    #[AssertMethod]
     public function run(): int
     {
         return PhpUnitCompatibility::run(fn(): int => $this->pending->run());
     }
 
+    #[AssertMethod]
     public function execute(): int
     {
         return $this->run();

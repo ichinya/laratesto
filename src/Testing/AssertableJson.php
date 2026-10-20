@@ -13,6 +13,7 @@ use Illuminate\Support\Traits\Conditionable;
 use Illuminate\Support\Traits\Macroable;
 use Illuminate\Support\Traits\Tappable;
 use Testo\Assert;
+use Testo\Common\Attribute\AssertMethod;
 
 use function Illuminate\Support\enum_value;
 
@@ -23,6 +24,7 @@ use function Illuminate\Support\enum_value;
  * interaction semantics (`where`/`has`/`missing`/`count`/scopes, `etc()`,
  * `interacted()`); every assertion uses `Testo\Assert`, so no PHPUnit is
  * involved.
+ * Callback scopes stay unmarked to preserve assertion locations in user code.
  *
  * @api
  */
@@ -80,6 +82,7 @@ class AssertableJson implements Arrayable
      *
      * @param int|non-empty-string $key
      */
+    #[AssertMethod]
     public function count(int|string $key, ?int $length = null): static
     {
         if (\is_null($length)) {
@@ -108,6 +111,7 @@ class AssertableJson implements Arrayable
     /**
      * Assert that the prop size is between a given minimum and maximum.
      */
+    #[AssertMethod]
     public function countBetween(int|string $min, int|string $max): static
     {
         $path = $this->dotPath();
@@ -199,6 +203,7 @@ class AssertableJson implements Arrayable
      *
      * @param array<string|int, mixed>|string $key
      */
+    #[AssertMethod]
     public function hasAny(array|string $key): static
     {
         $keys = \is_array($key) ? $key : \func_get_args();
@@ -220,6 +225,7 @@ class AssertableJson implements Arrayable
      *
      * @param array<string|int, mixed>|string $key
      */
+    #[AssertMethod]
     public function missingAll(array|string $key): static
     {
         $keys = \is_array($key) ? $key : \func_get_args();
@@ -234,6 +240,7 @@ class AssertableJson implements Arrayable
     /**
      * Assert that the given prop does not exist.
      */
+    #[AssertMethod]
     public function missing(string $key): static
     {
         Assert::false(
@@ -250,6 +257,7 @@ class AssertableJson implements Arrayable
      * @param string $key
      * @param mixed|Closure $expected
      */
+    #[AssertMethod]
     public function where(string $key, mixed $expected): static
     {
         $this->has($key);
@@ -287,6 +295,7 @@ class AssertableJson implements Arrayable
      * @param string $key
      * @param mixed|Closure $expected
      */
+    #[AssertMethod]
     public function whereNot(string $key, mixed $expected): static
     {
         $this->has($key);
@@ -326,6 +335,7 @@ class AssertableJson implements Arrayable
     /**
      * Asserts that the property is null.
      */
+    #[AssertMethod]
     public function whereNull(string $key): static
     {
         $this->has($key);
@@ -344,6 +354,7 @@ class AssertableJson implements Arrayable
     /**
      * Asserts that the property is not null.
      */
+    #[AssertMethod]
     public function whereNotNull(string $key): static
     {
         $this->has($key);
@@ -364,6 +375,7 @@ class AssertableJson implements Arrayable
      *
      * @param array<string, mixed> $bindings
      */
+    #[AssertMethod]
     public function whereAll(array $bindings): static
     {
         foreach ($bindings as $key => $value) {
@@ -378,6 +390,7 @@ class AssertableJson implements Arrayable
      *
      * @param string|list<string> $expected
      */
+    #[AssertMethod]
     public function whereType(string $key, string|array $expected): static
     {
         $this->has($key);
@@ -402,6 +415,7 @@ class AssertableJson implements Arrayable
      *
      * @param array<string, string|list<string>> $bindings
      */
+    #[AssertMethod]
     public function whereAllType(array $bindings): static
     {
         foreach ($bindings as $key => $value) {
@@ -417,6 +431,7 @@ class AssertableJson implements Arrayable
      * @param string $key
      * @param mixed $expected
      */
+    #[AssertMethod]
     public function whereContains(string $key, mixed $expected): static
     {
         $actual = new Collection(
@@ -550,6 +565,7 @@ class AssertableJson implements Arrayable
     /**
      * Asserts that all properties have been interacted with.
      */
+    #[AssertMethod]
     public function interacted(): void
     {
         Assert::same(
