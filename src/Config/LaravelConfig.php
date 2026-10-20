@@ -18,11 +18,19 @@ final readonly class LaravelConfig
      *        before bootstrapping, so the framework loads `.env.{$environment}` when that file exists.
      * @param array<non-empty-string, mixed> $config Configuration values to override
      *        after the framework is bootstrapped (`config()->set($key, $value)`).
+     * @param bool $captureSql Collect QueryExecuted events after application bootstrap.
+     * @param bool $captureLogs Collect MessageLogged events without replacing Laravel's logger.
+     * @param bool $includeSqlBindings Include query bindings in captured SQL messages.
+     * @param bool $includeLogContext Include application log context in captured messages.
      */
     public function __construct(
         public string $basePath,
         public string $environment = 'testing',
         public array $config = [],
+        public bool $captureSql = false,
+        public bool $captureLogs = false,
+        public bool $includeSqlBindings = false,
+        public bool $includeLogContext = false,
     ) {
         $basePath !== '' or throw new \InvalidArgumentException('The base path must not be empty.');
         \is_dir($basePath) or throw new \InvalidArgumentException(

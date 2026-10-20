@@ -10,6 +10,7 @@ use Laratesto\Pipeline\LaravelDiscoveryInterceptor;
 use Laratesto\Pipeline\LaravelLifecycleInterceptor;
 use Laratesto\Pipeline\LaravelTestInterceptor;
 use Laratesto\Runtime\LaravelApplicationFactory;
+use Laratesto\Runtime\LaravelLogCapture;
 use Laratesto\Runtime\LaravelStateCleaner;
 use Testo\Common\PluginConfigurator;
 use Testo\Pipeline\InterceptorCollector;
@@ -58,6 +59,7 @@ final readonly class LaravelPlugin implements PluginConfigurator
             factory: $factory,
             cleaner: new LaravelStateCleaner($container->get(\Testo\Common\Messenger::class)),
             messenger: $container->get(\Testo\Common\Messenger::class),
+            logCapture: new LaravelLogCapture($this->config, $container->get(\Testo\Common\Messenger::class)),
         ));
         $interceptors->addInterceptor(new LaravelLifecycleInterceptor($container->get(\Testo\Common\Messenger::class)));
     }
