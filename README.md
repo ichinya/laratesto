@@ -165,6 +165,34 @@ the [helper signatures](src/Testing/InteractsWithLaravel.php).
 
 </details>
 
+## SQL and application logs
+
+Enable optional diagnostics in the suite's `LaravelConfig`:
+
+```php
+new LaravelConfig(
+    basePath: __DIR__,
+    captureSql: true,
+    captureLogs: true,
+    includeSqlBindings: false,
+    includeLogContext: false,
+);
+```
+
+The `sql` channel records SQL, connection name and duration; `laravel` records
+application messages with their original severity. All four options default to
+`false`. Bindings and log context are included only when explicitly enabled;
+SQL literals and the application's message text are retained as written.
+
+Capture starts after application bootstrap and covers database preparation,
+setup, the test, teardown and cleanup. Messages belong to the current Testo test
+and carry an execution counter for retries/repeats; Testo controls which repeated
+executions remain in its output. Existing application logging stays active.
+
+Testo displays channels for failures, or streams them with `-v` (except in Dots
+mode). Its JSON failure output includes channel names and text; JUnit includes
+only `stdout`/`stderr`, so these channels do not appear there.
+
 ## Limitations
 
 - Laravel tests run sequentially because the framework keeps global state.

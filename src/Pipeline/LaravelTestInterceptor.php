@@ -6,6 +6,7 @@ namespace Laratesto\Pipeline;
 
 use Laratesto\Pipeline\Internal\FailureResult;
 use Laratesto\Runtime\LaravelApplicationFactory;
+use Laratesto\Runtime\LaravelLogCapture;
 use Laratesto\Runtime\LaravelStateCleaner;
 use Laratesto\Testing\LaravelApplicationAware;
 use Testo\Core\Context\TestInfo;
@@ -34,6 +35,7 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
         private LaravelApplicationFactory $factory,
         private LaravelStateCleaner $cleaner,
         private ?\Testo\Common\Messenger $messenger = null,
+        private ?LaravelLogCapture $logCapture = null,
     ) {}
 
     #[\Override]
@@ -75,6 +77,7 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
                     }
                 }
             }
+            $this->logCapture?->stop();
         }
         return $result;
     }
@@ -90,6 +93,7 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
         }
 
         try {
+            $this->logCapture?->start($application, $info);
             $this->injectApplication($info, $application);
         } catch (\Throwable $injectionFailure) {
             $instance = $info->caseInfo->instance?->getInstance();
