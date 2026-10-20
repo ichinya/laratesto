@@ -165,6 +165,44 @@ the [helper signatures](src/Testing/InteractsWithLaravel.php).
 
 </details>
 
+## HTTP tests without a base class or trait
+
+Register `LaravelPlugin` for the suite, then use the typed HTTP client:
+
+```php
+use Laratesto\Laratesto;
+use Testo\Test;
+
+#[Test]
+function usersAreAvailable(): void
+{
+    Laratesto::http()
+        ->withHeader('Accept', 'application/json')
+        ->get('/users')
+        ->assertOk();
+}
+```
+
+`Laratesto::http()` and `app(\Laratesto\Testing\HttpClient::class)` return the
+same client for the current test execution. Existing base-class and trait helpers
+share its cookies, headers, session overrides and redirect settings. Responses
+use the existing `LaravelResponse` assertions.
+
+Every retry/repeat receives a fresh client. Access is available after application
+bootstrap through Laravel teardown and ends before application cleanup. Keeping
+a client and using it in another execution raises an exception. Calls outside a
+LaravelPlugin execution, during bootstrap or after an external application swap
+also fail explicitly. Execution remains sequential, including Fiber Solo.
+
+The client makes in-process HTTP requests through Laravel's kernel. Its public
+helpers cover `get`, `getJson`, `post`, `postJson`, `put`, `patch`, `delete`,
+`deleteJson`, `call`, headers, cookies, session values and redirect following.
+Other application helpers remain available through the existing trait.
+
+Real PHPUnit can remain installed alongside Testo; the facade itself requires
+Testo's LaravelPlugin execution. See the optional
+[PHPUnit consumer check](tests/Consumer/http-client/README.md).
+
 ## SQL and application logs
 
 Enable optional diagnostics in the suite's `LaravelConfig`:
