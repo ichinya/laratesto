@@ -41,7 +41,7 @@ jobs:
         shell: bash
         run: echo "directory=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ${{ steps.composer-cache.outputs.directory }}
           key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock', 'tests/Consumer/agent-skills/composer.lock') }}
