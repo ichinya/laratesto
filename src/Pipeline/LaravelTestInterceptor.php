@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Laratesto\Pipeline;
 
 use Laratesto\Pipeline\Internal\FailureResult;
+use Laratesto\Runtime\HttpTestContext;
 use Laratesto\Runtime\LaravelApplicationFactory;
 use Laratesto\Runtime\LaravelLogCapture;
 use Laratesto\Runtime\LaravelStateCleaner;
@@ -42,6 +43,11 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
     public function runTest(TestInfo $info, callable $next): TestResult
     {
         $instance = $info->caseInfo->instance?->getInstance();
+        try {
+            $context = HttpTestContext::enter();
+        } catch (\Throwable $failure) {
+            return FailureResult::aborted($info, $failure);
+        }
         $result = null;
         try {
             try {
@@ -51,8 +57,9 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
             } catch (\Throwable $failure) {
                 $result = FailureResult::fromLifecycle($info, $failure);
             }
-            $result ??= $this->runLaravelTest($info, $next);
+            $result ??= $this->runLaravelTest($info, $next, $context);
         } finally {
+            $context->close();
             if ($instance !== null && method_exists($instance, 'closePhpUnitOutputCapture')) {
                 try {
                     $instance->closePhpUnitOutputCapture();
@@ -82,20 +89,23 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
         return $result;
     }
 
-    private function runLaravelTest(TestInfo $info, callable $next): TestResult
+    private function runLaravelTest(TestInfo $info, callable $next, HttpTestContext $context): TestResult
     {
         try {
             $application = $this->factory->boot($info->caseInfo->instance?->getInstance());
             FailureResult::trace('application acquired #'.spl_object_id($application), $this->messenger);
         } catch (\Throwable $bootFailure) {
+            $context->close();
             $this->cleanupQuietly($this->factory->acquired());
             return FailureResult::aborted($info, $bootFailure);
         }
 
         try {
+            $context->activate($application);
             $this->logCapture?->start($application, $info);
             $this->injectApplication($info, $application);
         } catch (\Throwable $injectionFailure) {
+            $context->close();
             $instance = $info->caseInfo->instance?->getInstance();
             if ($instance !== null && method_exists($instance, 'clearLaravelApplicationReferences')) {
                 try { $instance->clearLaravelApplicationReferences(); }
@@ -110,10 +120,12 @@ final readonly class LaravelTestInterceptor implements TestRunInterceptor
         } catch (\Throwable $pipelineFailure) {
             // Not a bridge failure: let the runner classify it. Cleanup errors
             // are secondary to whatever the pipeline already reported.
+            $context->close();
             $this->cleanupQuietly($application);
             throw $pipelineFailure;
         }
 
+        $context->close();
         try {
             $this->cleaner->clean($application);
         } catch (\Throwable $cleanupFailure) {
