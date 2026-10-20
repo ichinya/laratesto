@@ -6,6 +6,28 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-20
+
+### Added
+
+- A typed HTTP client through `Laratesto::http()` and `app(HttpClient::class)`
+  for tests without a base class or trait. The client shares request state with
+  existing helpers and is revoked when its test execution ends (issue #36).
+- Optional SQL and Laravel application log capture in Testo's `sql` and `laravel`
+  channels. Query bindings and log context are excluded unless explicitly enabled
+  (issue #35).
+- An HTTP client design decision and updated documentation examples for the
+  base class, trait and standalone test functions.
+
+### Fixed
+
+- Mark Laravel assertion methods so Testo reports the assertion call site instead
+  of internal bridge frames, including failures from real PHPUnit (issue #34).
+
+### Changed
+
+- Update the CI cache action to use Node.js 24.
+
 ## [0.8.3] - 2026-10-17
 
 ### Fixed

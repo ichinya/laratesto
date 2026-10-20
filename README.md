@@ -8,9 +8,8 @@ authentication, session, fake and Artisan helpers without installing PHPUnit.
 
 ## Requirements
 
-- PHP 8.3 or newer.
-- Laravel 13.
-- Testo `^0.10.56` (installed automatically with the bridge).
+See [composer.json](composer.json) for PHP, Laravel and Testo requirements.
+Composer installs a compatible Testo release automatically with the bridge.
 
 ## Quick start
 
@@ -147,8 +146,9 @@ Both `LaravelTestCase` and `InteractsWithLaravel` provide protected request,
 authentication, database, session and Artisan helpers. Responses expose
 Testo-backed assertions such as `assertOk()`, `assertJson()` and `assertRedirect()`.
 
-See the [usage guide](https://php-testo.github.io/ru/docs/bridge/laravel) and
-the [helper signatures](src/Testing/InteractsWithLaravel.php).
+See the [usage guide](https://php-testo.github.io/ru/docs/bridge/laravel),
+the [HTTP client](src/Testing/HttpClient.php) and
+the [remaining helper signatures](src/Testing/InteractsWithLaravel.php).
 
 <details>
 <summary>LaravelResponse API</summary>
@@ -167,19 +167,22 @@ the [helper signatures](src/Testing/InteractsWithLaravel.php).
 
 ## HTTP tests without a base class or trait
 
-Register `LaravelPlugin` for the suite, then use the typed HTTP client:
+Register `LaravelPlugin` for the suite, then use the typed HTTP client. This
+example uses the `/laratesto/ping` route from the
+[guide](https://php-testo.github.io/docs/bridge/laravel#extending-the-base-class):
 
 ```php
 use Laratesto\Laratesto;
 use Testo\Test;
 
 #[Test]
-function usersAreAvailable(): void
+function pingReturnsJson(): void
 {
     Laratesto::http()
         ->withHeader('Accept', 'application/json')
-        ->get('/users')
-        ->assertOk();
+        ->get('/laratesto/ping')
+        ->assertOk()
+        ->assertExactJson(['message' => 'pong']);
 }
 ```
 
@@ -202,6 +205,9 @@ Other application helpers remain available through the existing trait.
 Real PHPUnit can remain installed alongside Testo; the facade itself requires
 Testo's LaravelPlugin execution. See the optional
 [PHPUnit consumer check](tests/Consumer/http-client/README.md).
+
+The [HTTP client design decision](docs/decisions/0001-typed-http-client.md)
+compares the API options and records the execution lifecycle and support boundaries.
 
 ## SQL and application logs
 
