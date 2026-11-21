@@ -86,18 +86,22 @@ final class DatabaseInterceptorErrorBoundaryTest
     #[Test]
     public function refreshDatabaseWithUnresolvableConnectionAbortsTheTest(): void
     {
+        $factory = self::bootedFixtureFactory();
         $interceptor = new RefreshDatabaseInterceptor(
             new RefreshDatabase(connections: ['missing-connection']),
-            self::bootedFixtureFactory(),
+            $factory,
         );
 
         RefreshDatabaseState::$migrated = true;
 
-        /** @var TestResult $result */
-        $result = $interceptor->runTest(self::info(), static fn(): TestResult => new TestResult(
-            info: self::info(),
-            status: Status::Passed,
-        ));
+        try {
+            $result = $interceptor->runTest(self::info(), static fn(): TestResult => new TestResult(
+                info: self::info(),
+                status: Status::Passed,
+            ));
+        } finally {
+            $factory->flush();
+        }
 
         Assert::same($result->status, Status::Aborted);
         Assert::instanceOf($result->failure, \InvalidArgumentException::class);
@@ -111,16 +115,20 @@ final class DatabaseInterceptorErrorBoundaryTest
     #[Test]
     public function databaseTransactionsWithUnresolvableConnectionAbortsTheTest(): void
     {
+        $factory = self::bootedFixtureFactory();
         $interceptor = new DatabaseTransactionsInterceptor(
             new DatabaseTransactions(connections: ['missing-connection']),
-            self::bootedFixtureFactory(),
+            $factory,
         );
 
-        /** @var TestResult $result */
-        $result = $interceptor->runTest(self::info(), static fn(): TestResult => new TestResult(
-            info: self::info(),
-            status: Status::Passed,
-        ));
+        try {
+            $result = $interceptor->runTest(self::info(), static fn(): TestResult => new TestResult(
+                info: self::info(),
+                status: Status::Passed,
+            ));
+        } finally {
+            $factory->flush();
+        }
 
         Assert::same($result->status, Status::Aborted);
         Assert::instanceOf($result->failure, \InvalidArgumentException::class);

@@ -112,7 +112,7 @@ try {
         'repositories' => [['type' => 'package', 'package' => $package]],
         'require-dev' => [
             'ichinya/laratesto' => '0.8.99', 'llm/skills' => '1.14.0',
-            'testo/testo' => '0.10.56', 'laravel/framework' => '13.31.0',
+            'testo/testo' => '0.10.60', 'laravel/framework' => '13.40.0',
         ],
         'config' => ['platform' => ['php' => '8.3.0'], 'allow-plugins' => ['llm/skills' => true]],
     ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));

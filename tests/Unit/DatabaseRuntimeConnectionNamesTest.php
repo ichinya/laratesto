@@ -63,8 +63,11 @@ final class DatabaseRuntimeConnectionNamesTest
             $factory = new LaravelApplicationFactory(new LaravelConfig(
                 basePath: \dirname(__DIR__) . \DIRECTORY_SEPARATOR . 'Fixture' . \DIRECTORY_SEPARATOR . 'laravel',
             ));
-            $factory->boot();
-            $application = $factory->current();
+            try {
+                $application = $factory->boot();
+            } finally {
+                $factory->flush();
+            }
         }
 
         return $application;

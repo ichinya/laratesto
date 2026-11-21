@@ -15,7 +15,7 @@ mkdir($directory, 0777, true);
 $fixture = $root.'/tests/Fixture/testo-compatibility/http-client/testo.php';
 $package = [
     'name' => 'laratesto/http-client-consumer', 'minimum-stability' => 'dev', 'prefer-stable' => true,
-    'require' => ['ichinya/laratesto' => '@dev', 'laravel/framework' => '13.31.0', 'testo/testo' => '0.10.56', 'phpunit/phpunit' => '^12.0'],
+    'require' => ['ichinya/laratesto' => '@dev', 'laravel/framework' => '13.40.0', 'testo/testo' => '0.10.60', 'phpunit/phpunit' => '^12.0'],
     'repositories' => [['type' => 'path', 'url' => str_replace('\\', '/', $root), 'options' => ['symlink' => true]]],
     'autoload' => ['psr-4' => ['App\\' => str_replace('\\', '/', $root).'/tests/Fixture/laravel/app/']],
     'config' => ['allow-plugins' => false],

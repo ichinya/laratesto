@@ -107,12 +107,16 @@ final class LaravelTestInterceptorTest
     #[Test]
     public function partialKernelBootstrapStillFlushesTheAcquiredApplication(): void
     {
+        $previousErrorHandler = \get_error_handler();
+        $previousExceptionHandler = \get_exception_handler();
         $factory = new LaravelApplicationFactory(new LaravelConfig(basePath: dirname(__DIR__).'/Fixture/testo-compatibility/lifecycle/broken-app'));
         $interceptor = new LaravelTestInterceptor($factory, new LaravelStateCleaner());
         $called = false;
         $result = $interceptor->runTest(self::info(), static function () use (&$called): never { $called = true; throw new \LogicException('must not run'); });
         Assert::same(Status::Aborted, $result->status);
         Assert::same('partial kernel bootstrap', $result->failure?->getMessage());
+        Assert::same($previousErrorHandler, \get_error_handler());
+        Assert::same($previousExceptionHandler, \get_exception_handler());
         Assert::false($called);
         Assert::null($factory->acquired());
         Assert::null(\Illuminate\Support\Facades\Facade::getFacadeApplication());
@@ -159,6 +163,8 @@ final class LaravelTestInterceptorTest
     #[Test]
     public function successfulBootRunsThePipelineAndFlushesTheFactory(): void
     {
+        $previousErrorHandler = \get_error_handler();
+        $previousExceptionHandler = \get_exception_handler();
         $factory = new LaravelApplicationFactory(self::fixtureConfig('laravel'));
         $interceptor = new LaravelTestInterceptor($factory, new LaravelStateCleaner());
         $info = self::info();
@@ -180,6 +186,8 @@ final class LaravelTestInterceptorTest
         }
 
         Assert::false($stillBooted, 'The factory must drop the application after the test.');
+        Assert::same($previousErrorHandler, \get_error_handler());
+        Assert::same($previousExceptionHandler, \get_exception_handler());
     }
 
     #[Test]

@@ -6,6 +6,17 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Require Testo `^0.10.60` and update the consumer fixtures.
+- Update `testo/bridge-rector` to 0.3.6 and `ichinya/laratesto-rector` to 0.2.3.
+  Expose the PHPUnit assertion hierarchy to Rector without installing PHPUnit.
+
+### Fixed
+
+- Restore Laravel's PHP error and exception handlers when disposing of an application.
+- Report each Laravel cleanup diagnostic once in Testo's test result.
+
 ## [0.9.0] - 2026-10-20
 
 ### Added

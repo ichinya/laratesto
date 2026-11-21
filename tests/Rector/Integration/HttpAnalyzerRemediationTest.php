@@ -18,7 +18,7 @@ use Testo\Test;
 final class HttpAnalyzerRemediationTest
 {
     #[Test]
-    public function parentAssertCallsAreMarkedWhileLifecycleAndProjectParentsStaySupported(): void
+    public function parentPhpunitAssertionsConvertWhileProjectMethodsStaySupported(): void
     {
         $rootDir = \dirname(__DIR__, 3);
         $tmpDir = \sys_get_temp_dir() . '/laratesto-http-analyzer-' . \bin2hex(\random_bytes(8));
@@ -44,7 +44,7 @@ final class HttpAnalyzerRemediationTest
 
                     public function test_parent_assert(): void
                     {
-                        parent::assertTrue(true);
+                        parent::assertTrue(condition: true);
                     }
                 }
                 PHP);
@@ -138,16 +138,10 @@ final class HttpAnalyzerRemediationTest
 
             $this->runRector($rootDir, $tmpDir, [$tmpDir . '/corpus']);
 
-            $marked = (string) \file_get_contents($tmpDir . '/corpus/ParentAssertProbeTest.php');
-
-            // The parent assert call survives the upstream rewrite (it only covers
-            // $this/self/static), so it must be residual-marked, not silent.
-            Assert::string($marked)->contains(
-                'laratesto-residual(code=HTTP_UNSUPPORTED_SIGNATURE',
-                'The surviving parent::assertTrue() must be residual-marked.',
-            );
-            Assert::string($marked)->contains('parent::assertTrue() lands on the converted Laratesto base');
-            Assert::string($marked)->contains('parent::assertTrue(true);', 'The original call must be preserved for manual migration.');
+            $assertion = (string) \file_get_contents($tmpDir . '/corpus/ParentAssertProbeTest.php');
+            Assert::string($assertion)->contains('extends \\Laratesto\\Testing\\LaravelTestCase');
+            Assert::string($assertion)->contains('\\Testo\\Assert::true(true);');
+            Assert::string($assertion)->notContains('laratesto-residual');
 
             // The lifecycle counterpart converts: setUp()/tearDown() rename to
             // their Laratesto hooks and the framework parent call is dropped,

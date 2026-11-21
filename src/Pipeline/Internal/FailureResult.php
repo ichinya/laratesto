@@ -30,9 +30,11 @@ final class FailureResult
     /** Preserve an existing terminal outcome and all payload/metrics across cleanup. */
     public static function afterCleanup(TestResult $result, \Throwable $failure, string $stage, ?Messenger $messenger = null, bool $lifecycle = false): TestResult
     {
-        self::report($failure, $stage, $messenger);
-        $messages = new MessageLog([...$result->messages->all(), new Message(microtime(true), Messenger::CHANNEL_STDERR, Level::Error, self::diagnostic($failure, $stage))]);
-        $result = $result->withMessages($messages);
+        // Testo adds messages from the test's Messenger scope to the report.
+        if (!self::report($failure, $stage, $messenger)) {
+            $messages = new MessageLog([...$result->messages->all(), new Message(microtime(true), Messenger::CHANNEL_STDERR, Level::Error, self::diagnostic($failure, $stage))]);
+            $result = $result->withMessages($messages);
+        }
         if ($result->failure !== null || in_array($result->status, [Status::Failed, Status::Error, Status::Aborted, Status::Cancelled, Status::Skipped], true)) {
             return $result;
         }
@@ -42,13 +44,13 @@ final class FailureResult
         );
     }
 
-    /** Diagnostic delivery is best effort and must never interrupt cleanup. */
-    public static function report(\Throwable $failure, string $stage, ?Messenger $messenger = null): void
+    /** Return whether Testo's Messenger received the diagnostic. */
+    public static function report(\Throwable $failure, string $stage, ?Messenger $messenger = null): bool
     {
         try {
             if ($messenger !== null) {
                 $messenger->log(Messenger::CHANNEL_STDERR, self::diagnostic($failure, $stage), Level::Error);
-                return;
+                return true;
             }
         } catch (\Throwable) {
             // Fall back to the process diagnostic stream if a listener/logger fails.
@@ -56,6 +58,8 @@ final class FailureResult
         try {
             @fwrite(STDERR, self::diagnostic($failure, $stage).PHP_EOL);
         } catch (\Throwable) {}
+
+        return false;
     }
 
     private static function diagnostic(\Throwable $failure, string $stage): string

@@ -11,7 +11,7 @@ namespace PHPUnit\Framework;
  * enough of the TestCase surface for Laravel's PendingCommand and the
  * InteractsWithConsole trait, and uses Mockery as a fallback for createStub().
  */
-class TestCase
+class TestCase extends Assert
 {
     /**
      * @var array<int, array{0: string, 1: mixed}>
@@ -61,24 +61,7 @@ class TestCase
         $this->name = $name ?? '';
     }
 
-    public function fail(string $message = ''): never
-    {
-        throw new AssertionFailedError($message);
-    }
-
-    public function assertEquals(mixed $expected, mixed $actual, string $message = ''): void
-    {
-        Assert::assertEquals($expected, $actual, $message);
-        ++$this->assertionCount;
-    }
-
-    public function assertNotEquals(mixed $expected, mixed $actual, string $message = ''): void
-    {
-        Assert::assertNotEquals($expected, $actual, $message);
-        ++$this->assertionCount;
-    }
-
-    public function getCount(): int
+    public function numberOfAssertionsPerformed(): int
     {
         return $this->assertionCount;
     }

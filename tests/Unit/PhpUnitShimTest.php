@@ -16,7 +16,9 @@ final class PhpUnitShimTest
         Assert::same(0, \PHPUnit\Framework\Assert::getCount());
 
         \PHPUnit\Framework\Assert::assertTrue(true);
-        \PHPUnit\Framework\Assert::assertSame('a', 'a');
+        \PHPUnit\Framework\TestCase::assertSame(actual: 'a', expected: 'a');
+        $method = new \ReflectionMethod(\PHPUnit\Framework\TestCase::class, 'assertSame');
+        Assert::same(\PHPUnit\Framework\Assert::class, $method->getDeclaringClass()->getName());
         \PHPUnit\Framework\Assert::assertCount(2, [1, 2]);
 
         Assert::same(3, \PHPUnit\Framework\Assert::getCount());

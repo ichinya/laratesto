@@ -45,10 +45,13 @@ final class ProjectBootstrapMigrationTest
             $this->run([PHP_BINARY, $root.'/vendor/bin/testo', 'run', '--config', $temporary.'/testo.php', '--log-json='.$temporary.'/result.json', '--log-junit='.$temporary.'/result.xml'], $root, $environment, 1);
             $report = json_decode(file_get_contents($temporary.'/result.json'), true, flags: JSON_THROW_ON_ERROR);
             Assert::same(['total' => 8, 'passed' => 6, 'failed' => 2], array_diff_key($report['totals'], ['assertions' => true]));
-            Assert::same(32, $report['totals']['assertions'], 'Native assertion metric, including executed negative controls.');
+            Assert::same(31, $report['totals']['assertions'], 'Native assertion metric, including executed negative controls.');
             $junit = simplexml_load_file($temporary.'/result.xml');
             Assert::same(8, count($junit->xpath('//testcase')));
-            Assert::same(32, (int) $junit['assertions']);
+            Assert::same(31, (int) $junit['assertions']);
+            // The assertion inside the package callback is converted to a native Testo assertion.
+            $macroCases = $junit->xpath('//testcase[@name="testPackageMacroPreservesItsCallbackTypeAndAlias"]');
+            Assert::same(1, (int) $macroCases[0]['assertions']);
             Assert::same(2, count($junit->xpath('//testcase/failure')));
             Assert::same(0, count($junit->xpath('//testcase/error | //testcase/skipped')));
             $failures = array_column($report['failures'], 'test');

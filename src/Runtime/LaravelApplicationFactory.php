@@ -7,6 +7,7 @@ namespace Laratesto\Runtime;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Container\Container;
+use Illuminate\Foundation\Bootstrap\HandleExceptions;
 use Illuminate\Support\Facades\Facade;
 use Laratesto\Config\LaravelConfig;
 
@@ -23,6 +24,8 @@ use Laratesto\Config\LaravelConfig;
 final class LaravelApplicationFactory
 {
     private ?Application $application = null;
+    private ?\Closure $errorHandler = null;
+    private ?\Closure $exceptionHandler = null;
 
     public function __construct(
         private readonly LaravelConfig $config,
@@ -37,6 +40,18 @@ final class LaravelApplicationFactory
     {
         $this->flush();
 
+        $previousErrorHandler = \get_error_handler();
+        $previousExceptionHandler = \get_exception_handler();
+        try {
+            return $this->bootApplication($testCase);
+        } finally {
+            $this->errorHandler = self::ownedHandler(\get_error_handler(), $previousErrorHandler);
+            $this->exceptionHandler = self::ownedHandler(\get_exception_handler(), $previousExceptionHandler);
+        }
+    }
+
+    private function bootApplication(?object $testCase): Application
+    {
         $environment = $this->config->environment;
 
         // The environment must be known before the framework bootstrappers run,
@@ -113,12 +128,30 @@ final class LaravelApplicationFactory
         );
     }
 
-    /**
-     * Drop the reference to the booted application.
-     */
+    /** Drop the booted application and release its PHP handlers. */
     public function flush(): void
     {
+        // Pop only handlers installed by this boot that still own the top frame.
+        if ($this->errorHandler !== null && \get_error_handler() === $this->errorHandler) {
+            \restore_error_handler();
+        }
+        if ($this->exceptionHandler !== null && \get_exception_handler() === $this->exceptionHandler) {
+            \restore_exception_handler();
+        }
+        $this->errorHandler = null;
+        $this->exceptionHandler = null;
         $this->application = null;
+    }
+
+    private static function ownedHandler(?callable $handler, ?callable $previous): ?\Closure
+    {
+        if (!$handler instanceof \Closure || $handler === $previous) {
+            return null;
+        }
+
+        return (new \ReflectionFunction($handler))->getClosureThis() instanceof HandleExceptions
+            ? $handler
+            : null;
     }
 
     /** @internal Includes a newly installed application whose creation or bootstrap failed. */

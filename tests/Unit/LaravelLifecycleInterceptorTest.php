@@ -116,7 +116,9 @@ final class LaravelLifecycleInterceptorTest
         $run = TestoCompatibilityRunner::run('lifecycle');
         Assert::same(1, $run['exit']);
         Assert::same(['total' => 2, 'assertions' => 2, 'failed' => 1, 'passed' => 1], $run['json']['totals']);
-        Assert::string(json_encode($run['json']['failures']))->contains('primary body failure')->contains('secondary teardown skip');
+        $failures = json_encode($run['json']['failures'], JSON_THROW_ON_ERROR);
+        Assert::string($failures)->contains('primary body failure');
+        Assert::same(1, substr_count($failures, 'secondary teardown skip'));
         Assert::same(1, count($run['junit']->xpath('//testcase/failure')));
         Assert::same(0, count($run['junit']->xpath('//testcase/skipped')));
         Assert::string($run['junit']->asXML())->contains('secondary teardown skip');
