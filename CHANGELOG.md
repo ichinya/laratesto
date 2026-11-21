@@ -6,6 +6,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-21
+
 ### Changed
 
 - Require Testo `^0.10.60` and update the consumer fixtures.
