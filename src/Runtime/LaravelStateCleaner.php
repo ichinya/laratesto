@@ -52,8 +52,8 @@ final class LaravelStateCleaner
     /**
      * Static state resets: [class, method].
      *
-     * Every entry is guarded by `method_exists()` because the bridge supports
-     * multiple framework versions and some resets were added later than others.
+     * Only loaded classes can hold state from a test. Check that the reset
+     * method is available because some resets were added in later versions.
      */
     private const RESETS = [
         [AboutCommand::class, 'flushState'],
@@ -110,13 +110,13 @@ final class LaravelStateCleaner
         $this->attempt('container application', static fn() => \Illuminate\Container\Container::setInstance(null), $failures);
 
         foreach (self::RESETS as [$class, $method]) {
-            if (\method_exists($class, $method)) {
+            if (\class_exists($class, false) && \method_exists($class, $method)) {
                 $this->attempt($class.'::'.$method, static fn() => $class::$method(), $failures);
             }
         }
 
         foreach (self::RESETS_WITH_ARGUMENTS as [$class, $method, $arguments]) {
-            if (\method_exists($class, $method)) {
+            if (\class_exists($class, false) && \method_exists($class, $method)) {
                 $this->attempt($class.'::'.$method, static fn() => $class::$method(...$arguments), $failures);
             }
         }

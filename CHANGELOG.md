@@ -6,6 +6,13 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-11-22
+
+### Changed
+
+- Skip unloaded Laravel classes when resetting static state after a test.
+- Document parallel runs with isolated Testo processes and per-worker reports.
+
 ## [0.9.1] - 2026-11-21
 
 ### Changed

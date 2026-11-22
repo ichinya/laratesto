@@ -237,9 +237,55 @@ Testo displays channels for failures, or streams them with `-v` (except in Dots
 mode). Its JSON failure output includes channel names and text; JUnit includes
 only `stdout`/`stderr`, so these channels do not appear there.
 
+## Running tests in parallel
+
+Split the test files into non-overlapping groups and start a separate Testo
+process for each group. Assign a `--suite` or `--path` filter to each worker.
+For larger suites, use JUnit timings to balance the groups by execution time.
+
+Give each worker its own checkout, temporary directory and JUnit report. Use
+SQLite `:memory:` when it fits the tests, or provision a separate test database
+per worker. Isolate writable storage, caches and other shared services as well.
+
+This Bash example uses two preconfigured checkouts with dependencies installed
+and `Unit` and `Feature` suites defined in `testo.php`:
+
+```bash
+reports=$(mktemp -d) || exit 1
+mkdir "$reports/unit-tmp" "$reports/feature-tmp" || exit 1
+
+(
+    cd ../worker-unit || exit 1
+    TMPDIR="$reports/unit-tmp" php vendor/bin/testo run --suite=Unit \
+        --no-coverage --log-junit="$reports/unit.xml"
+) &
+unit_pid=$!
+
+(
+    cd ../worker-feature || exit 1
+    TMPDIR="$reports/feature-tmp" php vendor/bin/testo run --suite=Feature \
+        --no-coverage --log-junit="$reports/feature.xml"
+) &
+feature_pid=$!
+
+status=0
+wait "$unit_pid" || status=1
+wait "$feature_pid" || status=1
+printf 'JUnit reports: %s\n' "$reports"
+exit "$status"
+```
+
+On Windows, set `TEMP` and `TMP` to the worker-specific directory. In CI, use a
+matrix with one group per job and publish the reports separately. For a global
+coverage target, run a full coverage job or merge all shard coverage before
+checking the target.
+
+See the [parallel testing benchmark](https://github.com/ichinya/laratesto/wiki/3.-VS-PHPUnit-%E2%80%94-%D0%9F%D0%B0%D1%80%D0%B0%D0%BB%D0%BB%D0%B5%D0%BB%D1%8C%D0%BD%D1%8B%D0%B9-%D0%B7%D0%B0%D0%BF%D1%83%D1%81%D0%BA)
+for measured time, CPU and memory with one, two and four processes.
+
 ## Limitations
 
-- Laravel tests run sequentially because the framework keeps global state.
+- Laravel tests run sequentially within each process because the framework keeps global state.
   Testo Fiber `Schedule::Solo` is supported; interleaving schedules are rejected.
 - The bundled PHPUnit shim supports Laravel assertions and fakes, but is not a
   complete PHPUnit replacement. Use Testo's Mockery bridge for mocks.
